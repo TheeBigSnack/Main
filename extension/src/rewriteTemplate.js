@@ -1005,7 +1005,13 @@ const saysWords = (text, words) => new RegExp(`\\b${escapeRe(oneLine(words)).rep
 // (settingNumberProblems in runGuardrails), and set-up and Settings warn as
 // soon as the field holds such a number (settingNumberWarning). The digits of
 // a dealership's name alone ("1st Choice Auto") pass: the name is among the
-// facts the number check reads (sourceNumbers).
+// facts the number check reads (sourceNumbers), with its city and ZIP, so a
+// role or a name whose numbers those hold passes too. Not covered: the
+// dealership's city and the store the website lists the car at
+// (vehicle.location) are in the description as well, and one that reads as a
+// mileage ("100 Mile House") fails the mileage check with the plain reason,
+// which does not name it. The city must match Marketplace's location
+// suggestions, so there is no other way of writing it to offer.
 const SMALL_NUMBERS = Object.freeze(['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty']);
 const ORDINAL_WORDS = Object.freeze(['', 'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth', 'eleventh', 'twelfth', 'thirteenth', 'fourteenth', 'fifteenth', 'sixteenth', 'seventeenth', 'eighteenth', 'nineteenth', 'twentieth']);
 // The value with each number up to twenty, or "1st" to "20th", written as a
@@ -1107,15 +1113,23 @@ function settingNumberProblems(prose, check, { role, name, dealerName }) {
 }
 
 // The warning set-up and Settings show under the role, the name or the
-// dealership's name while it holds a number that keeps the form shut: any
-// digit in the role or the name; a dealership name only when it reads as a
-// price or a mileage. `text` quotes the number and a way to write the value,
-// so it follows every key; `notice` says the same without them, so it stays
-// the same while the warning stands. null for no warning. Plain text.
-function settingWarning(setting, value) {
+// dealership's name while it holds a number that keeps the form shut: a
+// digit in the role or the name, unless the dealership's name, city and ZIP
+// (dealer, as the form holds them now) hold every number in it, which the
+// number check reads as facts, and it reads as neither a price nor a mileage;
+// a dealership name only when it reads as a price or a mileage. `text` quotes
+// the number and a way to write the value, so it follows every key; `notice`
+// says the same without them, so it stays the same while the warning stands.
+// null for no warning. Plain text.
+function settingWarning(setting, value, dealer = {}) {
   const v = oneLine(value);
   const w = SETTING_WORDS[setting];
   if (!w || !/\d/.test(v)) return null;
+  if (setting !== 'dealer') {
+    const facts = sourceNumbers({ dealer: dealer || {} });
+    const amounts = [...mileageClaims(v), ...dollarAmounts(v)];
+    if (!amounts.length && [...numbersIn(v)].every((n) => facts.has(n))) return null;
+  }
   const example = exampleOf(setting, v);
   const like = example ? `, for example "${example}"` : '';
   if (setting === 'dealer') {
@@ -1130,11 +1144,11 @@ function settingWarning(setting, value) {
   return { text: say(` (${numbers.map((n) => `"${n}"`).join(', ')})`, like), notice: say('', '') };
 }
 // The warning shown under the field ('' for none).
-export const settingNumberWarning = (setting, value) => (settingWarning(setting, value) || { text: '' }).text;
+export const settingNumberWarning = (setting, value, dealer) => (settingWarning(setting, value, dealer) || { text: '' }).text;
 // What a screen reader is told when the warning comes ('' for none): the
 // warning without the number and the example, which change as the person
 // types, so a live region written with it is spoken once, not on every key.
-export const settingNumberNotice = (setting, value) => (settingWarning(setting, value) || { notice: '' }).notice;
+export const settingNumberNotice = (setting, value, dealer) => (settingWarning(setting, value, dealer) || { notice: '' }).notice;
 
 // The problems a person may still post with: the length and the tone. Every
 // other problem (a number, price, mileage or claim the website doesn't make,

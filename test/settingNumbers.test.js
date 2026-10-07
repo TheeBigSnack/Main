@@ -351,3 +351,52 @@ test('a role that is only a number does not hide the description\'s own number',
   const both = ctxFor({ salesperson: { name: 'Sam 2', title: '2' } });
   assert.deepEqual(ruleProblems(runGuardrails(buildTemplateDescription(both), both)).map((p) => p.text.slice(0, 14)), ['Your role "2" ', 'Your name "Sam']);
 });
+
+// ---------- a number the dealership's own facts hold ----------
+// The number check reads the dealership's name, city and ZIP as facts, so a
+// role or a name whose numbers they all hold passes for every car: set-up
+// and Settings say nothing then. In Settings the warning follows the
+// dealership fields as they are typed too.
+test('no warning about the role or the name when the dealership\'s name, city or ZIP holds every number in it', () => {
+  const chance = { name: '2nd Chance Auto', city: 'Springfield' };
+  assert.deepEqual(checked(ctxFor({ dealer: chance, salesperson: { name: 'Sam', title: '2nd shift sales' } })).g.problems, [], 'every car passes');
+  assert.equal(settingNumberWarning('role', '2nd shift sales', chance), '');
+  assert.equal(settingNumberNotice('role', '2nd shift sales', chance), '');
+  assert.equal(settingNumberWarning('name', 'Sam 2', { name: 'Route 2 Motors' }), '');
+  assert.equal(settingNumberWarning('role', 'Team 3', { name: 'Example Motors', zip: '3' }), '', 'a ZIP is a fact too');
+  // a number they don't all hold, or a role that reads as a mileage, is still warned about
+  assert.equal(settingNumberWarning('role', '2nd shift sales', DEALER), ROLE_WARNING);
+  assert.notEqual(settingNumberWarning('role', '2nd shift, team 3', chance), '');
+  assert.notEqual(settingNumberWarning('role', '30,000 miles club', { name: '30,000 Miles Auto' }), '');
+  // set-up's You step reads the dealership as set-up holds it
+  wiz.active = true;
+  wiz.step = 'you';
+  wiz.settings = withDefaults({ salesperson: { name: 'Sam', title: '2nd shift sales' }, dealer: { ...chance, state: 'OH', zip: '43215' } });
+  const html = wizardHtml();
+  assert.equal(region(html, 'wizTitleWarn'), '');
+  assert.equal(liveRegion(html, 'wizTitleSay'), '');
+  const elements = new Map();
+  globalThis.document = { getElementById: (id) => { if (!elements.has(id)) elements.set(id, countingElement(id)); return elements.get(id); } };
+  handleWizardInput({ id: 'wizTitle', value: '2nd shift sales' });
+  assert.equal(text(elements.get('wizTitleWarn')), '');
+  wiz.active = false;
+});
+
+test('Settings: the warning under the role follows the dealership name as it is typed', async () => {
+  const k = siteKeys(POPUP_ORIGIN);
+  const p = await loadPopup({ local: { [k.settings]: { ...MY_STORE, salesperson: { name: 'Sam', title: '2nd shift sales' }, dealer: { name: '2nd Chance Auto', city: 'Springfield', state: 'OH', zip: '43215' } } } });
+  await p.tab('settings');
+  assert.equal(region(p.panel(), 'salespersonTitleWarn'), '', 'the dealership name holds the number');
+  // the form as the browser gives it: each box by its name
+  const boxes = { salespersonName: 'Sam', salespersonTitle: '2nd shift sales', dealerName: '2nd Chance Auto', dealerCity: 'Springfield', dealerZip: '43215' };
+  const form = { elements: { namedItem: (n) => (n in boxes ? { name: n, value: boxes[n] } : null) } };
+  const type = (name, value) => { boxes[name] = value; p.el('panel').listeners.input({ target: { name, value, form } }); };
+  type('dealerName', 'Example Motors');
+  assert.equal(unesc(p.el('salespersonTitleWarn').innerHTML.replace(/<[^>]+>/g, '')), ROLE_WARNING, 'a new dealership name: the role is warned about');
+  assert.equal(p.el('salespersonTitleSay').textContent, settingNumberNotice('role', '2nd shift sales'));
+  type('dealerName', '2nd Chance Auto');
+  assert.equal(p.el('salespersonTitleWarn').innerHTML, '');
+  assert.equal(p.el('salespersonTitleSay').textContent, '');
+  type('salespersonTitle', '2nd shift, team 3');
+  assert.match(p.el('salespersonTitleWarn').innerHTML, /A number in your role/);
+});

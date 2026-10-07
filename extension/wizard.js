@@ -72,11 +72,13 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 // comes or goes, so it is spoken once, not on every key. Settings says the
 // same (popup.js).
 const WARNED_FIELDS = Object.freeze({ wizName: 'name', wizTitle: 'role', wizDealer: 'dealer' });
+// the dealership as set-up holds it: a role or a name whose numbers its name, city and ZIP all hold passes
+const dealerNow = () => (wiz.settings && wiz.settings.dealer) || {};
 function warningHtml(id, value) {
-  const text = settingNumberWarning(WARNED_FIELDS[id], value);
+  const text = settingNumberWarning(WARNED_FIELDS[id], value, dealerNow());
   return text ? `<div class="banner warn">${esc(text)}</div>` : '';
 }
-const noticeOf = (id, value) => settingNumberNotice(WARNED_FIELDS[id], value);
+const noticeOf = (id, value) => settingNumberNotice(WARNED_FIELDS[id], value, dealerNow());
 const warningRegion = (id, value) => `<div id="${id}Warn">${warningHtml(id, value)}</div><div id="${id}Say" class="sr" aria-live="polite">${esc(noticeOf(id, value))}</div>`;
 const money = (n) => (typeof n === 'number' && Number.isFinite(n) ? '$' + Math.round(n).toLocaleString('en-US') : '—');
 const key = (origin) => siteKeys(origin).wizard; // the wizard's own persisted state

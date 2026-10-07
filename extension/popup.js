@@ -860,13 +860,36 @@ const field = (label, name, value, attrs = 'type="text"') =>
 // of its own beside it (<name>Say), written only when the warning comes or
 // goes, so it is spoken once, not on every key. Set-up's You and address
 // steps say the same (wizard.js).
+// A role or a name whose numbers the dealership's name, city and ZIP all hold
+// passes (the number check reads them as facts), so their warnings follow
+// those fields too: `dealer` is the dealership as the form holds it now.
 const WARNED_FIELDS = Object.freeze({ salespersonName: 'name', salespersonTitle: 'role', dealerName: 'dealer' });
-function settingWarningHtml(name, value) {
-  const text = settingNumberWarning(WARNED_FIELDS[name], value);
+const DEALER_FIELDS = Object.freeze({ dealerName: 'name', dealerCity: 'city', dealerZip: 'zip' });
+function settingWarningHtml(name, value, dealer) {
+  const text = settingNumberWarning(WARNED_FIELDS[name], value, dealer);
   return text ? `<div class="banner warn">${esc(text)}</div>` : '';
 }
-const settingNotice = (name, value) => settingNumberNotice(WARNED_FIELDS[name], value);
-const settingWarning = (name, value) => `<div id="${name}Warn">${settingWarningHtml(name, value)}</div><div id="${name}Say" class="sr" aria-live="polite">${esc(settingNotice(name, value))}</div>`;
+const settingNotice = (name, value, dealer) => settingNumberNotice(WARNED_FIELDS[name], value, dealer);
+const settingWarning = (name, value, dealer) => `<div id="${name}Warn">${settingWarningHtml(name, value, dealer)}</div><div id="${name}Say" class="sr" aria-live="polite">${esc(settingNotice(name, value, dealer))}</div>`;
+// Typing in one of these fields: each warning brought up to date from what the
+// form holds now (the saved Settings for a box it can't read). The warning
+// under a field follows every key; its live region is written only when what
+// it says changes, that is when the warning comes or goes, since a screen
+// reader speaks every write.
+function refreshSettingWarnings(target) {
+  const saved = withDefaults(state.settings || {}, knownSite());
+  const savedValues = { salespersonName: saved.salesperson.name, salespersonTitle: saved.salesperson.title, dealerName: saved.dealer.name, dealerCity: saved.dealer.city, dealerZip: saved.dealer.zip };
+  const box = (name) => (target.form && target.form.elements && typeof target.form.elements.namedItem === 'function' ? target.form.elements.namedItem(name) : null);
+  const now = (name) => (name === target.name ? target.value : (box(name) || { value: savedValues[name] }).value);
+  const dealer = Object.fromEntries(Object.entries(DEALER_FIELDS).map(([name, key]) => [key, now(name)]));
+  for (const name of Object.keys(WARNED_FIELDS)) {
+    const shown = $(`${name}Warn`);
+    if (shown) shown.innerHTML = settingWarningHtml(name, now(name), dealer);
+    const say = $(`${name}Say`);
+    const notice = settingNotice(name, now(name), dealer);
+    if (say && say.textContent !== notice) say.textContent = notice;
+  }
+}
 const choices = (list, current) =>
   `<option value="" ${current === '' ? 'selected' : ''}>Leave blank</option>` + list.map((o) => `<option value="${esc(o)}" ${o === current ? 'selected' : ''}>${esc(o)}</option>`).join('');
 
@@ -983,9 +1006,9 @@ function viewSettings() {
     ${versionHtml()}
     <fieldset><legend>You</legend>
       ${field('Your name', 'salespersonName', s.salesperson.name, 'type="text" placeholder="Your first name" aria-describedby="salespersonNameWarn"')}
-      ${settingWarning('salespersonName', s.salesperson.name)}
+      ${settingWarning('salespersonName', s.salesperson.name, s.dealer)}
       ${field('Your role', 'salespersonTitle', s.salesperson.title, 'type="text" aria-describedby="salespersonTitleWarn"')}
-      ${settingWarning('salespersonTitle', s.salesperson.title)}
+      ${settingWarning('salespersonTitle', s.salesperson.title, s.dealer)}
       <p class="hint">Every description ends with "I'm [name], [role] at [dealership]". Posing as a private seller isn't allowed.</p>
       ${field('Your closing line (optional)', 'closingLine', s.salesperson.closingLine, `type="text" maxlength="300" aria-describedby="closingLineHint" placeholder="e.g. Ask for me by name when you come in."`)}
       <p class="hint" id="closingLineHint">Added after that sign-off on every description, in place of "Message me to set up a test drive or ask a question." About you, not the car: no prices or numbers (a phone number is fine), up to ${CLOSING_LINE_MAX_WORDS} words. Follows you to any computer you sign in to Chrome on.</p>
@@ -1000,7 +1023,7 @@ function viewSettings() {
     </fieldset>
     <fieldset><legend>Dealership, named on every listing</legend>
       ${field('Dealership name', 'dealerName', s.dealer.name, `type="text"${state.snapshot ? '' : ' placeholder="Filled in from the website at the first scan"'} aria-describedby="dealerNameWarn"`)}
-      ${settingWarning('dealerName', s.dealer.name)}
+      ${settingWarning('dealerName', s.dealer.name, s.dealer)}
       ${field('City', 'dealerCity', s.dealer.city)}
       ${field('State', 'dealerState', s.dealer.state, 'type="text" placeholder="e.g. OH" maxlength="2"')}
       ${field('ZIP', 'dealerZip', s.dealer.zip, 'type="text" placeholder="e.g. 43215" inputmode="numeric"')}
@@ -1775,14 +1798,8 @@ async function init() {
   // the Ready tab's search box: filters as you type, Escape clears it; in
   // Settings, the warning under the name, role or dealership name follows the typing
   $('panel').addEventListener('input', (ev) => {
-    if (Object.hasOwn(WARNED_FIELDS, ev.target.name)) {
-      const { name, value } = ev.target;
-      const shown = $(`${name}Warn`);
-      if (shown) shown.innerHTML = settingWarningHtml(name, value);
-      // the live region only when the warning comes or goes: a screen reader speaks every write
-      const say = $(`${name}Say`);
-      const notice = settingNotice(name, value);
-      if (say && say.textContent !== notice) say.textContent = notice;
+    if (Object.hasOwn(WARNED_FIELDS, ev.target.name) || Object.hasOwn(DEALER_FIELDS, ev.target.name)) {
+      refreshSettingWarnings(ev.target);
       return;
     }
     if (ev.target.id !== 'readySearch') return;
