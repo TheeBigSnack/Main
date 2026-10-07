@@ -142,6 +142,9 @@ const texts = [
   // "and", "&" and "plus" with spaces around them cross a line break, and "front" or "rear" after them may end its line; after a comma a line break ends the item
   sixty('2019 Ram 1500 Big Horn with new tires &\nbrakes. New battery and front\nbrakes &\nrear\nshocks. New wipers +\nstruts.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn. New tires, front\nbrakes. New battery, brake\npads. New wipers, struts\ninspected.') + '\nVIN TESTVIN0000000001.',
+  // an item without its own "new" is quoted from the nearest "new" before it, and a very long list is read once
+  sixty('2019 Ram 1500 Big Horn with new tires and new brakes, plus a battery; new tires, struts, new brakes and rotors; fresh brakes, the new battery and wipers.') + '\nVIN TESTVIN0000000001.',
+  sixty(`2019 Ram 1500 Big Horn with ${'new tires, struts, Brake Assist, new brake pads & '.repeat(60)}wipers.`) + '\nVIN TESTVIN0000000001.',
 ];
 const contexts = [
   { vehicle, dealer, priceNote: '', price: 28995 },

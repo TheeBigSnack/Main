@@ -789,7 +789,10 @@ function newPartsSaid(text: unknown, re: RegExp, more: RegExp): Array<{ said: st
 // newness word or anything else, it is. After a comma alone, one of the
 // car's own features as the website writes it ("Brake Assist") is that
 // feature, and the list goes on past it; a claim inside one of them ("New
-// Tires/Brakes") is the website's own words.
+// Tires/Brakes") is the website's own words. An item without its own "new"
+// is quoted from the nearest "new" before it in the list, and each place a
+// list stands at is read once (a later list that reaches it would claim the
+// same parts again), so a very long list is read in a moment.
 const LIST_JOIN = /^(?:\s+(?:and|&|plus)\s+|[^\S\n]*,[^\S\n]*(?:(?:and|plus)[^\S\n]+|[&+/][^\S\n]*)?|[^\S\n]*[&+/][^\S\n]*)/i;
 const ONLY_A_COMMA = /^[^\S\n]*,[^\S\n]*$/;
 const AND_JOIN = /^\s+(?:and|&|plus)\s+$/i;
@@ -812,6 +815,10 @@ function newPartsListed(text: unknown, re: RegExp, features: unknown): Array<{ s
   const t = String(text ?? '');
   let spans: Array<[number, number]> | null = null;
   const featuresIn = (): Array<[number, number]> => (spans = spans || featureSpans(t, features));
+  let starts: Map<number, [number, number]> | null = null;
+  const featureAt = (at: number): [number, number] | undefined => (starts = starts || new Map(featuresIn().map((f): [number, [number, number]] => [f[0], f]))).get(at);
+  // every place a list has stood at: what a list claims from there on depends on nothing else
+  const stood = new Set<number>();
   const out: Array<{ said: string; part: string }> = [];
   for (const m of t.matchAll(new RegExp(re.source, 'gi'))) {
     const from = m.index as number;
@@ -823,9 +830,14 @@ function newPartsListed(text: unknown, re: RegExp, features: unknown): Array<{ s
       const tail = BRAKE.test(m[1]) && LIST_TAIL.exec(t.slice(end));
       if (tail) end += tail[0].length;
     }
-    for (let join = LIST_JOIN.exec(t.slice(end)); join; join = LIST_JOIN.exec(t.slice(end))) {
+    // where the nearest "new" before the next item starts: the claim's, or an item's that says "new" itself
+    let lead = from;
+    while (!stood.has(end)) {
+      stood.add(end);
+      const join = LIST_JOIN.exec(t.slice(end));
+      if (!join) break;
       const at = end + join[0].length;
-      const feature = ONLY_A_COMMA.test(join[0]) && featuresIn().find(([a]) => a === at);
+      const feature = ONLY_A_COMMA.test(join[0]) && featureAt(at);
       if (feature) {
         end = feature[1];
         continue;
@@ -834,7 +846,8 @@ function newPartsListed(text: unknown, re: RegExp, features: unknown): Array<{ s
       if (!item) break;
       const itemEnd = at + item[0].length;
       if (LIST_STATE.test(t.slice(itemEnd))) break;
-      out.push({ said: t.slice(item[1] ? at + item[0].search(ITEM_NEW) : from, itemEnd), part: partKey(item[2]) });
+      if (item[1]) lead = at + item[0].search(ITEM_NEW);
+      out.push({ said: t.slice(lead, itemEnd), part: partKey(item[2]) });
       end = itemEnd;
     }
   }

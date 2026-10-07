@@ -1059,7 +1059,11 @@ function newPartsSaid(text, re, more) {
 // Tires/Brakes", "New Brake Pads & Rotors") is the website's own words, so
 // the template's highlights line passes its own check. An item that says
 // "new" itself is quoted from its "new" ("new brakes"); any other from the
-// start of the list.
+// nearest "new" before it in the list, the claim's or an item's ("new
+// brakes, plus a battery"). Each place a list stands at is read once: a
+// later claim whose list reaches a place an earlier list stood at stops
+// there, since from there on it would claim the same parts again, so a
+// very long list is read in a moment.
 const LIST_JOIN = /^(?:\s+(?:and|&|plus)\s+|[^\S\n]*,[^\S\n]*(?:(?:and|plus)[^\S\n]+|[&+/][^\S\n]*)?|[^\S\n]*[&+/][^\S\n]*)/i;
 const ONLY_A_COMMA = /^[^\S\n]*,[^\S\n]*$/;
 const AND_JOIN = /^\s+(?:and|&|plus)\s+$/i;
@@ -1084,6 +1088,10 @@ function newPartsListed(text, re, features) {
   const t = String(text ?? '');
   let spans = null;
   const featuresIn = () => (spans = spans || featureSpans(t, features));
+  let starts = null;
+  const featureAt = (at) => (starts = starts || new Map(featuresIn().map((f) => [f[0], f]))).get(at);
+  // every place a list has stood at: what a list claims from there on depends on nothing else
+  const stood = new Set();
   const out = [];
   for (const m of t.matchAll(new RegExp(re.source, 'gi'))) {
     let end = m.index + m[0].length;
@@ -1094,9 +1102,14 @@ function newPartsListed(text, re, features) {
       const tail = BRAKE.test(m[1]) && LIST_TAIL.exec(t.slice(end));
       if (tail) end += tail[0].length;
     }
-    for (let join = LIST_JOIN.exec(t.slice(end)); join; join = LIST_JOIN.exec(t.slice(end))) {
+    // where the nearest "new" before the next item starts: the claim's, or an item's that says "new" itself
+    let lead = m.index;
+    while (!stood.has(end)) {
+      stood.add(end);
+      const join = LIST_JOIN.exec(t.slice(end));
+      if (!join) break;
       const at = end + join[0].length;
-      const feature = ONLY_A_COMMA.test(join[0]) && featuresIn().find(([a]) => a === at);
+      const feature = ONLY_A_COMMA.test(join[0]) && featureAt(at);
       if (feature) {
         end = feature[1];
         continue;
@@ -1105,7 +1118,8 @@ function newPartsListed(text, re, features) {
       if (!item) break;
       const itemEnd = at + item[0].length;
       if (LIST_STATE.test(t.slice(itemEnd))) break;
-      out.push({ said: t.slice(item[1] ? at + item[0].search(ITEM_NEW) : m.index, itemEnd), part: partKey(item[2]) });
+      if (item[1]) lead = at + item[0].search(ITEM_NEW);
+      out.push({ said: t.slice(lead, itemEnd), part: partKey(item[2]) });
       end = itemEnd;
     }
   }

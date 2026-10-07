@@ -183,3 +183,36 @@ test('a part is named in two words only when it is one part ("brake pads", "brak
   assert.deepEqual(claimed('New tires, brake rotors and struts.', c), ['New tires, brake rotors', 'New tires, brake rotors and struts']);
   assert.deepEqual(claimed('New tires, struts brakes and rotors.', c), ['New tires, struts']);
 });
+
+test('an item without its own "new" is quoted from the nearest "new" before it in the list, the claim or an item that says "new" itself', () => {
+  const c = ctxOf(car({ descriptionRaw: 'Just put on new tires.' }));
+  for (const [sentence, claims] of [
+    ['New tires and new brakes, plus a battery.', ['new brakes', 'new brakes, plus a battery']],
+    ['New tires, struts, new brakes and rotors.', ['New tires, struts', 'new brakes', 'new brakes and rotors']],
+    ['New tires, brand new struts and wipers.', ['brand new struts', 'brand new struts and wipers']],
+    ['New tires, the new battery and wipers.', ['new battery', 'new battery and wipers']],
+    ['Fresh brakes, new battery, wipers.', ['Fresh brakes', 'new battery', 'new battery, wipers']],
+  ]) {
+    assert.deepEqual(claimed(sentence, c), claims, sentence);
+  }
+});
+
+test('a very long list after "new" is read in a moment, with the same problems as before', () => {
+  const FEATURED = [...FEATURES, 'Brake Assist', 'New Tires/Brakes'];
+  const unsaid = (text) => `Says "${text}", but the website says nothing about new or replaced parts for this car`;
+  const rest = (words) => [{ code: 'too-long', text: `${words} words; the limit is 120` }, { code: 'no-vin', text: 'Doesn\'t include the VIN' }];
+  const unsigned = [{ code: 'no-dealer', text: 'Doesn\'t name Example Motors' }, { code: 'no-role', text: 'Doesn\'t give your role ("sales consultant"); the sign-off says it' }];
+  for (const [text, c, expected] of [
+    ['new tires, '.repeat(4000), ctxOf(car({ descriptionRaw: '' })), [...rest(8000), { code: 'unsupported-claim', text: unsaid('new tires') }, ...unsigned]],
+    ['new tires, struts, '.repeat(2000), ctxOf(car({ descriptionRaw: '' })), [...rest(6000), { code: 'unsupported-claim', text: unsaid('new tires') }, { code: 'unsupported-claim', text: unsaid('new tires, struts') }, ...unsigned]],
+    ['New tires, Brake Assist, brakes, '.repeat(1500), ctxOf(car({ descriptionRaw: '', features: FEATURED })), [...rest(7500), { code: 'unsupported-claim', text: unsaid('New tires, Brake Assist, brakes') }, ...unsigned]],
+  ]) {
+    for (const check of [runGuardrails, hostedGuardrails]) {
+      const started = Date.now();
+      const { problems } = check(text, c);
+      const took = Date.now() - started;
+      assert.deepEqual(JSON.parse(JSON.stringify(problems)), expected, text.slice(0, 40));
+      assert.ok(took < 2000, `${text.slice(0, 40)}: ${took} ms`);
+    }
+  }
+});
