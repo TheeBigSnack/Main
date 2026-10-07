@@ -1725,3 +1725,42 @@ test('Rule 4: a price typed or labelled as the selling price ("internetPrice", "
   assert.equal(assessVehicle(blank, withDefaults({})).decision, DECISION.NOT_READY);
   assert.deepEqual([on({ VehicleInternetPrice: null }).price, on({ VehicleInternetPrice: undefined }).price], [car.base, car.base]);
 });
+
+// Rule 4, repair cycle 3: a field named just "price" inside a package, a
+// warranty, an incentive or an accessory was read as the car's plain
+// "Price" at any depth: when its value could not be read ("Included",
+// "Free", "See dealer") the car got no price and the reason quoted it as the
+// list's "Price", and when it read ($1,295) a car with only a retail price
+// beside it was priced at the warranty's figure. A plain "price" is now the
+// car's only at the record's top level or inside a price container
+// ("pricing", "prices"); inside anything else it is labelled by what holds
+// it, and never taken.
+test('Rule 4: a "price" inside a package, a warranty, an incentive or an accessory is never the car\'s price, readable or not', () => {
+  const nested = [
+    { packages: [{ name: 'Tech Package', price: 'Included' }] },
+    { warranty: { price: 'Included' } },
+    { incentives: [{ title: 'Bonus Cash', price: 'See dealer' }] },
+    { accessories: [{ title: 'Mats', price: 'Free' }] },
+    { warranty: { price: 1295 } },
+    { packages: [{ name: 'Tech Package', price: 1295 }] },
+  ];
+  for (const extra of nested) {
+    assert.deepEqual(choosePrices(labeledPrices({ VehicleRetailPrice: 24000, price: 24500, ...extra })), { price: 24500, priceLabel: 'price', priceBeforeFees: 24000 }, `beside a plain price: ${JSON.stringify(extra)}`);
+    assert.deepEqual(choosePrices(labeledPrices({ VehicleRetailPrice: 24000, ...extra })), { price: 24000, priceLabel: 'Retail Price', priceBeforeFees: null }, `beside a retail price only: ${JSON.stringify(extra)}`);
+  }
+  // the reviewer's DealerOn card: no internet price or label of its own, and a package priced "Included"
+  const [c] = platformCars(1, { from: 820 });
+  const car = { ...c, certified: false };
+  const { VehicleInternetPrice, VehiclePriceLabel, ...card } = dealerOnCard(car).VehicleCard;
+  assert.ok(VehicleInternetPrice && VehiclePriceLabel);
+  for (const extra of [{ VehiclePackages: [{ Name: 'Tech Package', Price: 'Included' }] }, { Warranty: { Price: 'Included' } }]) {
+    const v = normalizeInventoryRecord({ ...card, ...extra }, { origin: DEALERON_ORIGIN });
+    assert.deepEqual([v.price, v.priceLabel], [car.base, 'Retail Price'], `DealerOn with ${JSON.stringify(extra)}`);
+    assert.equal(assessVehicle(v, withDefaults({})).decision, DECISION.READY);
+  }
+  // a plain price at the top level or in a price container still counts, read or not
+  const why = (text) => `the list's "price" reads "${text}", which Lot Current does not read as an amount`;
+  assert.deepEqual(choosePrices(labeledPrices({ VehicleRetailPrice: 24000, price: 'Call for Price' })).priceLabel, why('Call for Price'));
+  assert.deepEqual(choosePrices(labeledPrices({ VehicleRetailPrice: 24000, pricing: { price: 'Call for Price' } })).priceLabel, why('Call for Price'));
+  assert.deepEqual(choosePrices(labeledPrices({ VehicleRetailPrice: 24000, prices: { price: 24500 } })), { price: 24500, priceLabel: 'price', priceBeforeFees: 24000 });
+});

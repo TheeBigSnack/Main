@@ -338,7 +338,7 @@ export function labeledPrices(record) {
   // holds some text and its name says it is a plain
   // "Price" or, from a label, a "<Something> Price" (priceKind 'named'
   // without the dealership's name; choosePrices reads it with the name)
-  const unreadable = (entry, raw, { labelled = false, listed = false, present = false } = {}) => {
+  const unreadable = (entry, raw, { labelled = false, listed = false, present = false, typed: held = false } = {}) => {
     const written = typeof raw === 'string' || typeof raw === 'number';
     if (entry.final) {
       out.push(entry);
@@ -347,7 +347,7 @@ export function labeledPrices(record) {
     const kind = priceKind(entry);
     const named = PRICE_NAME.test(labelWords(entry.label));
     if (kind === 'selling') {
-      const typed = PRICE_NAME.test(spaced(String(entry.key).split('.').pop()));
+      const typed = held || PRICE_NAME.test(spaced(String(entry.key).split('.').pop()));
       const inList = listed && !LIST_NOTE.test(labelWords(entry.label)) && !SIGNED.test(entry.text);
       if ((named || typed || inList) && (written || (labelled && (present || listed) && raw === undefined))) out.push(entry);
       return;
@@ -375,20 +375,34 @@ export function labeledPrices(record) {
       out.push({ value, label: name, key: `${key}.${kind}`, final });
       return;
     }
+    const listed = /pric/.test(keyName(key));
+    // a named entry's own value, judged by its name here, is not read again
+    // below under its field's name ("price")
+    let ownField = null;
     if (depth > 0 && (final || name)) {
       const before = out.length;
-      unreadable({ value: null, text: textOf(raw).slice(0, 60), label: name, key: `${key}.${kind}`, final }, raw, { labelled: true, listed: /pric/.test(keyName(key)), present });
+      unreadable({ value: null, text: textOf(raw).slice(0, 60), label: name, key: `${key}.${kind}`, final }, raw, { labelled: true, listed, present });
       if (out.length > before || final) return;
+      ownField = VALUE_FIELDS.find((f) => x[f] !== undefined && x[f] !== null) || null;
     }
+    // Below the record's top level and outside a price container
+    // ("pricing", "prices", "dprice"), a field named just "price" is the
+    // figure of what holds it (a package, a warranty, an incentive, an
+    // accessory): labelled by that, as a named entry is, so it is never the
+    // car's plain "Price", read or not.
+    const holder = depth > 0 && !listed ? name || spaced(key) : '';
     for (const [k, v] of Object.entries(x)) {
       if (/image|photo|picture|feature|option|media|attribute/i.test(k)) continue;
+      if (k === ownField && typeof v !== 'object') continue;
       const named = /price/i.test(k) || GUIDE_LABEL.test(labelWords(spaced(k)));
       const n = named ? amount(v) : null;
-      const label = spaced(k).replace(/^Vehicle\s+/i, '');
+      const held = Boolean(holder) && keyName(k) === 'price';
+      const fieldLabel = held ? holder : spaced(k).replace(/^Vehicle\s+/i, '');
+      const fieldKey = held ? `${key}.${kind}` : k;
       const isFinal = keyName(k) === 'finalprice';
-      if (n !== null) out.push({ value: n, label, key: k, final: isFinal });
+      if (n !== null) out.push({ value: n, label: fieldLabel, key: fieldKey, final: isFinal });
       else if (v && typeof v === 'object') visit(v, k, depth + 1, isFinal);
-      else if (named && /price$/.test(keyName(k)) && !FLAG.test(keyName(k)) && v !== undefined && typeof v !== 'boolean') unreadable({ value: null, text: textOf(v).slice(0, 60), label, key: k, final: isFinal }, v);
+      else if (named && /price$/.test(keyName(k)) && !FLAG.test(keyName(k)) && v !== undefined && typeof v !== 'boolean') unreadable({ value: null, text: textOf(v).slice(0, 60), label: fieldLabel, key: fieldKey, final: isFinal }, v, { typed: held });
     }
   };
   visit(record, '', 0);
