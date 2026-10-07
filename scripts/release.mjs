@@ -238,7 +238,7 @@ export function nextSteps({ version, listing, accountUrl = '' }) {
     lines.push('   Before the first submission, every box in store/listing.md, "Before submitting".');
   }
   if (accountUrl) {
-    lines.push(`4. Testers get ${pilotZip}, which offers no sign-in, until ${ACCOUNT_GATE}, and for as long as PILOT.md keeps the pilot signed out; after that, the same file as the store.`);
+    lines.push(`4. Testers get ${pilotZip}, which offers no sign-in. They move to the same file as the store only with ${ACCOUNT_GATE}, and once PILOT.md no longer keeps the pilot signed out.`);
     lines.push('   README, "Update", says how to replace the files and reload.');
   } else {
     lines.push('4. Testers on the zip get the same file; README, "Update", says how to replace the files and reload.');
