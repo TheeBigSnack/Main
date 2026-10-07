@@ -495,11 +495,16 @@ export function normalizeInventoryRecord(card, { origin, page = null } = {}) {
   const condition = conditionOf(card);
   // A demo or loaner word in the condition counts like the platform's own
   // flag, and a certified flag never renames it: a certified service loaner
-  // stays a loaner for the pre-owned gate (classify.js), which sends it to
-  // Needs a look or keeps it off Marketplace.
+  // stays a loaner for the pre-owned gate (classify.js). Its certified mark
+  // is kept beside it as the second condition field (readableType), so the
+  // gate sees a car the website calls both certified and a loaner, and sends
+  // it to Needs a look instead of Ready, or instead of skipping it as sold as
+  // new without a word about the mark. A plain certified car gets no second
+  // sign from its mark: its type already says Certified Used.
   const demoWord = /\b(?:demo|demonstrator)\b/i.test(condition);
   const loanerWord = /\b(?:loaner|courtesy)\b/i.test(condition);
   const inventoryType = certified && !/\bnew\b/i.test(condition) && !demoWord && !loanerWord ? 'Certified Used' : condition || null;
+  const readableType = certified && (demoWord || loanerWord) ? 'Certified' : null;
   const title = textOf(pick(card, N.title));
   const location = textOf(pick(card, N.location, { nested: true })) || null;
   const prices = choosePrices(labeledPrices(card), { dealer: location || '' });
@@ -524,7 +529,7 @@ export function normalizeInventoryRecord(card, { origin, page = null } = {}) {
     // the pre-owned gate: the record's condition, the car's address, its title
     inventoryType,
     siteTitle: title || null,
-    readableType: null,
+    readableType,
     url,
     urlConditionWord: conditionWordFromPath(url),
     isDemo: truthy(pick(card, N.demo)) || demoWord,

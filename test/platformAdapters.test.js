@@ -818,3 +818,56 @@ test('a footer credit alone never makes a page DealerOn or Dealer.com', async ()
   assert.equal(await runInPage(withOwnFile({ scripts: ['https://elsewhere.test/resources/vhcliaa/x.js'] }), dealerOn.probeInPage), null, 'a look-alike path on another website does not count');
   assert.equal(await runInPage(fakePlatformPage({ origin: DEALERON_ORIGIN, scripts: [DEALERON_ORIGIN + '/dealeron-js.aspx'] }), dealerOn.probeInPage), null, 'nor a file path without the credit');
 });
+
+// ---------- PR #9 on the reviewed code (2026-10-07) ----------
+
+// R-3: a card typed Loaner, Demo or Courtesy and marked certified. Its
+// type and its certified mark disagree, so a person looks at it: Needs a
+// look, whatever the title and the address say, never Ready and never read
+// as Certified Used (before the fix it could pass as Certified Used, and
+// with no other sign the certified mark was dropped and the car skipped as
+// sold-as-new without a word about the mark).
+test('R-3: a certified card typed Loaner, Demo or Courtesy goes to Needs a look on DealerOn and Dealer.com, never Ready and never Certified Used', async () => {
+  const [c] = platformCars(1, { from: 540 });
+  const car = { ...c, certified: true };
+  const bare = `/${car.year}-${car.make}-${car.model}-${car.vin}`; // an address with no condition word
+  const shapes = [
+    ['DealerOn', DEALERON_ORIGIN, (word, plain) => ({ ...dealerOnCard(car).VehicleCard, VehicleCondition: word, ...(plain ? { VehicleName: `${car.year} ${car.make} ${car.model} ${car.trim}`, VehicleDetailUrl: bare } : {}) })],
+    ['Dealer.com', DEALERCOM_ORIGIN, (word, plain) => ({ ...dealerComRecord(car), inventoryType: word, ...(plain ? { link: bare } : {}) })],
+  ];
+  for (const [platform, origin, record] of shapes) {
+    for (const word of ['Loaner', 'Service Loaner', 'Demo', 'Demonstrator', 'Courtesy', 'Courtesy Vehicle', 'Certified Loaner']) {
+      for (const plain of [false, true]) {
+        const v = normalizeInventoryRecord(record(word, plain), { origin });
+        const where = `${platform}, ${word}${plain ? ', no other condition word' : ''}`;
+        assert.doesNotMatch(String(v.inventoryType), /certified used/i, `${where}: never read as Certified Used`);
+        assert.equal(v.isDemo || v.isLoaner, true, `${where}: flagged like the platform's own flag`);
+        const verdict = checkPreOwned(v);
+        assert.equal(verdict.verdict, 'review', `${where}: ${verdict.reason}`);
+        assert.match(verdict.reason, /^Listed as pre-owned but also flagged as a (?:demo|loaner)\./, where);
+        assert.equal(assessVehicle(v, withDefaults({})).decision, DECISION.REVIEW, `${where}: Needs a look`);
+      }
+    }
+  }
+  // not certified: the loaner word alone, with nothing that says pre-owned, is sold as new, as before
+  const loaner = normalizeInventoryRecord({ ...dealerComRecord({ ...c, certified: false }), inventoryType: 'Loaner', link: bare }, { origin: DEALERCOM_ORIGIN });
+  assert.equal(assessVehicle(loaner, withDefaults({})).decision, DECISION.SKIP);
+  // a plain certified used car gains no second sign from its certified mark
+  const cpo = normalizeInventoryRecord({ ...dealerComRecord(car), link: bare }, { origin: DEALERCOM_ORIGIN });
+  assert.equal(cpo.inventoryType, 'Certified Used');
+  assert.equal(cpo.readableType, null);
+  // through a scan: the car is listed under Needs a look on both platforms
+  const settings = withDefaults({});
+  for (const [platform, adapter, siteOf, service, mutate] of [
+    ['DealerOn', dealerOn, dealerOnSite, onService, (body) => { for (const d of body.DisplayCards) if (d.VehicleCard.VehicleVin === car.vin) d.VehicleCard.VehicleCondition = 'Service Loaner'; }],
+    ['Dealer.com', dealerCom, dealerComSite, comService, (body) => { for (const r of body.inventory) if (r.vin === car.vin) r.inventoryType = 'Demo'; }],
+  ]) {
+    const site = siteOf({ cars: [car, ...platformCars(2, { from: 541 })] });
+    for (const answer of site.values()) if (answer.json) mutate(answer.json);
+    const siteInfo = { origin: service.origin, host: new URL(service.origin).hostname, name: 'Sample Motors', title: '', adapter: adapter.PLATFORM.id };
+    const run = await scanWithSearch({ adapter, search: platformSearch(site), site: siteInfo, settings, options: adapter.scanOptions(service) });
+    assert.equal(run.ok, true, platform);
+    assert.equal(run.snapshot.vehicles[car.vin].decision, DECISION.REVIEW, `${platform}: the certified loaner or demo waits on Needs a look`);
+    assert.doesNotMatch(String(run.vehicles.find((v) => v.vin === car.vin).inventoryType), /certified used/i, platform);
+  }
+});
