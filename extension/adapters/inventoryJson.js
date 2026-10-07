@@ -615,6 +615,15 @@ const DEMO_LETTERS = /demo/i;
 const LOANER_LETTERS = /loaner|courtesy/i;
 const lettersOf = (text) => String(text).replace(/[^a-z]/gi, '');
 
+// A new condition as a field writes it: "New", "Brand New", "New Vehicle",
+// "NEW - VEHICLE" (NEW_CONDITION), or a code run together with no case or
+// underscore to split it by ("NEWVEHICLE", "newcar", "BRANDNEW":
+// NEW_RUN, read as "NEW VEHICLE"). Not a grade or a badge that holds the
+// word ("Like New", "New Arrival", "Brand New Tires").
+const VEHICLE_NOUN = 'vehicles?|cars?|trucks?|suvs?|vans?|units?|inventory|stock|condition';
+const NEW_CONDITION = new RegExp(String.raw`^(?:brand[\s-]*)?new(?:[\s:\-\u2013\u2014]+(?:${VEHICLE_NOUN})){0,2}$`, 'i');
+const NEW_RUN = new RegExp(String.raw`^(brand)?(new)(${VEHICLE_NOUN})?$`, 'i');
+
 // A condition word the gate can read, from one condition field's text; a
 // field that says nothing about new or used ("Car", "SUV") is not a
 // condition ('').
@@ -623,8 +632,14 @@ function conditionText(raw) {
   if (/^\s*n\s*$/i.test(raw)) return 'New';
   const words = conditionWords(raw);
   if (/\b(?:new|used|pre-?\s?owned|certified|cpo|demo(?:nstrator)?|loaner|courtesy)\b/i.test(words)) return words;
+  const run = NEW_RUN.exec(words);
+  if (run) return run.slice(1).filter(Boolean).join(' ');
   return DEMO_LETTERS.test(lettersOf(raw)) || LOANER_LETTERS.test(lettersOf(raw)) ? raw : '';
 }
+
+// Whether a condition word reads as a new condition (NEW_CONDITION), with
+// a schema.org address's words read as words ("NewCondition").
+const isNewCondition = (words) => NEW_CONDITION.test(String(words || '').replace(/^\s*https?:\/\/schema\.org\//i, '').trim());
 
 // The first condition field present, as a condition word.
 const conditionOf = (card) => conditionText(textOf(pick(card, N.condition)));
@@ -774,10 +789,13 @@ export function normalizeInventoryRecord(card, { origin, page = null } = {}) {
   const loanerWord = fields.some((t) => LOANER_LETTERS.test(lettersOf(t)));
   // A "new" word counts in any condition field too (rule 3), and so does a
   // used one beside it: the first of each, as a condition word. A new word
-  // anywhere stops the certified rename; when the first field present says
-  // nothing, a new word from another field is the inventory type.
+  // counts when its field reads as a new condition ("New", "New Vehicle",
+  // "NEWVEHICLE"), never a grade or a badge ("Like New", "New Arrival"). A
+  // new word anywhere stops the certified rename; when the first field
+  // present says nothing, a new word from another field is the inventory
+  // type.
   const said = fields.map(conditionText).filter(Boolean);
-  const newWord = said.find((w) => conditionSays(w) === 'new') || '';
+  const newWord = said.find((w) => conditionSays(w) === 'new' && isNewCondition(w)) || '';
   const usedWord = said.find((w) => conditionSays(w) === 'pre-owned') || '';
   const inventoryType = (certified && !newWord && !demoWord && !loanerWord ? 'Certified Used' : condition || newWord) || null;
   const marked = certified || fields.some((t) => /\b(?:certified|cpo)\b/i.test(conditionWords(t)));

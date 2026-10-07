@@ -1449,3 +1449,57 @@ test('R-8: a footnote written "(1)", "[2]", "*1", inside an HTML tag or as an HT
   assert.equal(labelWords('Sample &amp; Sons Price [3]'), 'Sample & Sons Price');
   assert.equal(labelWords('Model Year 2024 Price'), 'Model Year 2024 Price');
 });
+
+// Rule 3, repair cycle 2 round 2: reading a "new" word in every condition
+// field (the round before) also read a grade or a badge that holds the word
+// ("Like New", "New Arrival") as a new sign, so a plain used car went to
+// Needs a look with a confusing reason; and a new code written in one word
+// ("NEWVEHICLE") was not read at all, while one-word loaner and demo codes
+// were, so such a record stayed Ready. A field's new word now counts when
+// the field reads as a new condition ("New", "Brand New", "New Vehicle",
+// "NEW_VEHICLE", "NEWVEHICLE"), and a code run together is read from its
+// letters.
+test('Rule 3: a grade or badge with "new" in it ("Like New", "New Arrival") is no new sign; a new code written in one word ("NEWVEHICLE") is one', () => {
+  const [c] = platformCars(1, { from: 760 });
+  const com = (patch, certified = false) => normalizeInventoryRecord({ ...dealerComRecord({ ...c, certified }), ...patch }, { origin: DEALERCOM_ORIGIN });
+  const on = (patch, certified = false) => normalizeInventoryRecord({ ...dealerOnCard({ ...c, certified }).VehicleCard, ...patch }, { origin: DEALERON_ORIGIN });
+  // the reviewer's records: a used car with a grade or a badge is Ready, as before the round
+  for (const patch of [{ condition: 'Like New' }, { type: 'New Arrival' }, { condition: 'Like-New Condition' }, { condition: 'Like New', type: 'New Arrival' }, { condition: 'Brand New Tires' }]) {
+    const v = com(patch);
+    assert.deepEqual([v.inventoryType, v.readableType], ['used', null], JSON.stringify(patch));
+    assert.equal(assessVehicle(v, withDefaults({})).decision, DECISION.READY, `${JSON.stringify(patch)}: Ready`);
+  }
+  const badge = on({ VehicleType: 'New Arrival' });
+  assert.deepEqual([badge.inventoryType, badge.readableType], ['Used', null]);
+  assert.equal(assessVehicle(badge, withDefaults({})).decision, DECISION.READY, 'DealerOn, VehicleType "New Arrival": Ready');
+  const graded = com({ condition: 'Like New' }, true);
+  assert.deepEqual([graded.inventoryType, graded.readableType], ['Certified Used', null], 'a certified car graded Like New is Certified Used');
+  assert.equal(assessVehicle(graded, withDefaults({})).decision, DECISION.READY);
+  // a new code in one word, with underscores or in camel case: Needs a look naming both words, never Certified Used
+  const codes = [[{ stockType: 'NEWVEHICLE' }, 'NEW VEHICLE'], [{ stockType: 'NEW_VEHICLE' }, 'NEW VEHICLE'], [{ stockType: 'NewCar' }, 'New Car'], [{ newUsed: 'NEWCAR' }, 'NEW CAR'], [{ newUsed: 'BRANDNEW' }, 'BRAND NEW'], [{ attributes: [{ name: 'stockType', value: 'newvehicle' }] }, 'new vehicle']];
+  for (const [patch, word] of codes) {
+    for (const certified of [false, true]) {
+      const v = com(patch, certified);
+      const what = `${JSON.stringify(patch)}${certified ? ', certified' : ''}`;
+      assert.doesNotMatch(String(v.inventoryType), /certified used/i, `${what}: never renamed Certified Used`);
+      assert.deepEqual([v.inventoryType, v.readableType], ['used', word], what);
+      assert.equal(checkPreOwned(v).reason, `The website disagrees with itself: it lists the car as "used" and as "${word}". Check its condition before posting.`, what);
+      assert.equal(assessVehicle(v, withDefaults({})).decision, DECISION.REVIEW, `${what}: Needs a look`);
+    }
+  }
+  const onCode = on({ VehicleType: 'NEWVEHICLE' }, true);
+  assert.deepEqual([onCode.inventoryType, onCode.readableType], ['Certified Pre-Owned', 'NEW VEHICLE']);
+  assert.equal(assessVehicle(onCode, withDefaults({})).decision, DECISION.REVIEW);
+  // a new code that is the record's only condition is its inventory type: a new car, skipped
+  const { inventoryType, ...noType } = dealerComRecord({ ...c, certified: false });
+  assert.equal(inventoryType, 'used');
+  const fresh = normalizeInventoryRecord({ ...noType, stockType: 'NEWVEHICLE', link: `/new/${c.make}/${c.year}-${c.make}-${c.model}.htm` }, { origin: DEALERCOM_ORIGIN });
+  assert.equal(fresh.inventoryType, 'NEW VEHICLE');
+  assert.equal(assessVehicle(fresh, withDefaults({})).decision, DECISION.SKIP);
+  // a new condition written out still counts, as the round before made it
+  for (const word of ['New', 'Brand New', 'New Vehicle', 'NEW - VEHICLE']) {
+    const v = com({ type: word });
+    assert.deepEqual([v.inventoryType, v.readableType], ['used', word], word);
+    assert.equal(assessVehicle(v, withDefaults({})).decision, DECISION.REVIEW, `${word}: Needs a look`);
+  }
+});
