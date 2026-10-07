@@ -195,6 +195,29 @@ try {
   await panel.check('input[name="wizBasis"][value="beforeFees"]'); // the suggested wording follows the basis
   assert.equal(await panel.getAttribute('#wizPriceNote', 'placeholder'), 'Price is before the $490 doc fee; tax and tags extra.');
   assert.match(await panel.textContent('#wizPriceHint'), /Suggested: "Price is before the \$490 doc fee; tax and tags extra\."$/);
+  // a note that says "not the dealer" may hold only price and fee wording: the step warns under the field as it is typed, and Next still keeps the note
+  const noteReason = (out) => `Your price note says "not the dealer", so it may only say where the fees go and what the price includes; take out ${out}, or take out "not the dealer". Change the note in Settings.`;
+  assert.equal(await panel.getAttribute('#wizPriceNote', 'aria-describedby'), 'wizPriceNoteWarn wizPriceHint');
+  assert.equal(await panel.getAttribute('#wizPriceNoteWarn', 'aria-live'), null, 'the warning under the field changes on every key, so it is not spoken on each');
+  assert.equal(await panel.getAttribute('#wizPriceNoteSay', 'aria-live'), 'polite');
+  assert.equal((await panel.textContent('#wizPriceNoteWarn')).trim(), '');
+  await panel.evaluate(() => {
+    window.__noteSayWrites = 0;
+    new MutationObserver((list) => { window.__noteSayWrites += list.length; }).observe(document.querySelector('#wizPriceNoteSay'), { childList: true, characterData: true, subtree: true });
+  });
+  await panel.locator('#wizPriceNote').pressSequentially('Tax, title and fees go to the state, not the dealer. Text Sam.');
+  await panel.waitForFunction(() => /"Sam"/.test(document.querySelector('#wizPriceNoteWarn').textContent));
+  assert.equal((await panel.textContent('#wizPriceNoteWarn')).trim(), noteReason('"Text" and "Sam"'));
+  assert.equal((await panel.textContent('#wizPriceNoteSay')).trim(), 'Your price note says "not the dealer", so it may only say where the fees go and what the price includes. Take out the other words, or take out "not the dealer".');
+  assert.equal(await panel.evaluate(() => window.__noteSayWrites), 1, 'the live region was written once, when the warning came');
+  await panel.click('#wizBack'); // only a warning: the note is kept, and the warning is back with it
+  await panel.waitForSelector('#wizZip');
+  await panel.click('#wizNext');
+  await panel.waitForSelector('#wizPriceNote');
+  assert.equal(await panel.inputValue('#wizPriceNote'), 'Tax, title and fees go to the state, not the dealer. Text Sam.');
+  assert.equal((await panel.textContent('#wizPriceNoteWarn')).trim(), noteReason('"Text" and "Sam"'));
+  await panel.fill('#wizPriceNote', 'Tax, title and fees go to the state, not the dealer.');
+  await panel.waitForFunction(() => document.querySelector('#wizPriceNoteWarn').textContent.trim() === '' && document.querySelector('#wizPriceNoteSay').textContent.trim() === '');
   await panel.fill('#wizPriceNote', 'Tax and tags extra.');
   await panel.click('#wizBack'); // the choice and the typed note survive Back and Next
   await panel.waitForSelector('#wizZip');
