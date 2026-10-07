@@ -1669,3 +1669,59 @@ test('Rule 3: a new word written any way in another condition field ("New (In St
     assert.equal(assessVehicle(v, withDefaults({})).decision, DECISION.READY, `stockType "${word}": Ready`);
   }
 });
+
+// Rule 4, repair cycle 3 (the lead's direction): an entry the platform types
+// as its selling price ("internetPrice") or labels as one ("Internet Deal",
+// "Sale", "Now", "Our Deal") was dropped when its value could not be read,
+// unless its label said "price" or "special", so the car went out Ready at
+// the retail price without the fee; the same entry, readable, was the
+// price. Now such an entry that can't be read ("$118,490*", "Call", nothing
+// at all) gives the car no price, its label quoted, never the retail or
+// base price past it. Not a sale event or a note, and not an amount added
+// or taken off ("-$500").
+test('Rule 4: a price typed or labelled as the selling price ("internetPrice", "Internet Deal", "Sale", "Now") that can\'t be read leaves the car with no price, quoted, never the retail price', () => {
+  const why = (label, text) => `the list's "${label}" reads "${text}", which Lot Current does not read as an amount`;
+  const empty = (label) => `the list's "${label}" has no amount`;
+  const none = (priceLabel) => ({ price: null, priceLabel, priceBeforeFees: null });
+  // the reviewer's Dealer.com record: its selling entry, not marked final, typed internetPrice
+  const [c] = platformCars(1, { from: 810 });
+  const car = { ...c, certified: false };
+  const record = dealerComRecord(car);
+  const own = `$${(car.base + car.fee).toLocaleString('en-US')}`;
+  const withEntry = (entry) => normalizeInventoryRecord({ ...record, pricing: { ...record.pricing, dprice: [record.pricing.dprice[0], record.pricing.dprice[1], { isFinalPrice: false, ...entry }] } }, { origin: DEALERCOM_ORIGIN });
+  for (const label of ['Internet Deal', 'Sale', 'Now', 'Sample Chevrolet']) {
+    for (const value of [`${own}*`, 'Call', 'Call for Price']) {
+      const v = withEntry({ typeClass: 'internetPrice', label, value });
+      assert.deepEqual([v.price, v.priceLabel, v.priceBeforeFees], [null, why(label, value), null], `typeClass internetPrice, "${label}" reading "${value}"`);
+      assert.equal(assessVehicle(v, withDefaults({})).decision, DECISION.NOT_READY, `"${label}" reading "${value}": Not ready, never Ready at the retail price`);
+    }
+    for (const value of ['', null]) {
+      const v = withEntry({ typeClass: 'internetPrice', label, value });
+      assert.deepEqual([v.price, v.priceLabel], [null, empty(label)], `typeClass internetPrice, "${label}" with ${JSON.stringify(value)}`);
+    }
+    const reads = withEntry({ typeClass: 'internetPrice', label, value: own });
+    assert.deepEqual([reads.price, reads.priceLabel, reads.priceBeforeFees], [car.base + car.fee, label, car.base], `"${label}" that reads is the price, as before`);
+    assert.equal(assessVehicle(reads, withDefaults({})).decision, DECISION.READY);
+  }
+  // a sale or final typeClass reads the same, whatever its label
+  assert.deepEqual(withEntry({ typeClass: 'salePrice', label: 'Sale Event', value: 'Call' }).price, null, 'typeClass salePrice');
+  assert.deepEqual(withEntry({ typeClass: 'finalPrice', label: 'Today', value: 'Call' }).price, null, 'typeClass finalPrice');
+  // in a list of prices with no typeClass: a label the reader calls selling
+  const P = (dprice) => choosePrices(labeledPrices({ pricing: { dprice } }), { dealer: 'Sample Chevrolet' });
+  for (const label of ['Internet Deal', 'Sale', 'Our Deal', 'Your Deal', 'Now']) {
+    assert.deepEqual(P([{ label: 'Price', value: '$24,000' }, { label, value: 'Call for Price' }]), none(why(label, 'Call for Price')), `"${label}" reading "Call for Price"`);
+    assert.deepEqual(P([{ label: 'Price', value: '$24,000' }, { label, value: '' }]), none(empty(label)), `"${label}" with nothing in it`);
+    assert.deepEqual(P([{ label: 'Price', value: '$24,000' }, { label }]), none(empty(label)), `"${label}" with no value at all`);
+    assert.deepEqual(P([{ label: 'Price', value: '$24,000' }, { label, value: '$23,000' }]), { price: 23000, priceLabel: label, priceBeforeFees: null }, `"${label}" that reads`);
+  }
+  // not a sale event or a note, not an amount added or taken off, not a payment
+  assert.deepEqual(P([{ label: 'Price', value: '$24,000' }, { label: 'Sale Event', value: 'See dealer' }, { label: 'Sale ends Sunday', value: '' }, { label: 'Dealer Notes', value: 'Call us' }, { label: 'Dealer Adjustment', value: '-$500' }, { label: 'Your Payment', value: 'Call' }]), { price: 24000, priceLabel: 'Price', priceBeforeFees: null });
+  // DealerOn: an internet price written as nothing, with no label of its own, is no price either;
+  // a field holding null is a field the record does not fill, as one left out
+  const card = dealerOnCard(car).VehicleCard;
+  const on = (patch) => normalizeInventoryRecord({ ...card, VehiclePriceLabel: undefined, ...patch }, { origin: DEALERON_ORIGIN });
+  const blank = on({ VehicleInternetPrice: '' });
+  assert.deepEqual([blank.price, blank.priceLabel], [null, empty('Internet Price')], 'DealerOn internet price ""');
+  assert.equal(assessVehicle(blank, withDefaults({})).decision, DECISION.NOT_READY);
+  assert.deepEqual([on({ VehicleInternetPrice: null }).price, on({ VehicleInternetPrice: undefined }).price], [car.base, car.base]);
+});
