@@ -740,7 +740,8 @@ const N = {
   url: ['link', 'detailurl', 'detailsurl', 'vdpurl', 'detailpageurl', 'url', 'href'],
   images: ['images', 'photos', 'imageurls', 'photourls', 'pictures', 'photo', 'image', 'imageurl', 'photourl'],
   photoCount: ['photocount', 'imagecount', 'numberofphotos', 'numberofimages', 'photoscount'],
-  condition: ['inventorytype', 'condition', 'conditiontype', 'newused', 'stocktype', 'type'],
+  condition: ['inventorytype', 'condition', 'conditiontype', 'newused', 'stocktype', 'type', 'neworused', 'inventorycondition', 'saleclass'],
+  isNew: ['isnew'],
   certified: ['certified', 'iscertified', 'cpo', 'iscpo'],
   title: ['title', 'name', 'displayname', 'heading'],
   status: ['status', 'statuscode'],
@@ -774,22 +775,18 @@ const DEMO_LETTERS = /demo/i;
 const LOANER_LETTERS = /loaner|courtesy/i;
 const lettersOf = (text) => String(text).replace(/[^a-z]/gi, '');
 
-// A grade or a badge that holds the word "new" without calling the car new
-// ("Like New", "Like-New Condition", "New Arrival", "New Arrivals", "Brand
-// New Tires", "New Tyres"). In the record's other condition fields every
-// other "new" word counts, however it is written ("New", "New (In Stock)",
-// "New/In Stock", "NEW!", "New Inbound", "In Stock - New", "New Model"), so
-// a way of writing new nobody listed errs toward Needs a look, never Ready;
-// a field that holds a badge and another new word ("New Arrival - New")
-// still counts. Words such as "Newer" or "News" are not "new". The record's
-// own condition stops the certified rename whenever it reads as new at all,
-// badges too (normalizeInventoryRecord).
-const NEW_BADGE = /\blike[\s-]*new\b|\bnew[\s-]+arrivals?\b|\bnew[\s-]+(?:tires?|tyres?)\b/gi;
-const withoutBadges = (words) => String(words || '').replace(NEW_BADGE, ' ');
+// The word "new" in a condition field counts whatever else the field says
+// (rule 3): "New", "New (In Stock)", "New/In Stock", "NEW!", "In Stock -
+// New", "New Model", "Like New", "New Arrival", and beside a used or
+// certified word too ("Certified New", "New/Used", "Used - Like New"), so a
+// way of writing new nobody listed errs toward Needs a look, never Ready.
+// Words such as "Newer", "Newest" or "News" are not "new".
+const NEW_WORD = /\bnew\b/i;
 // A new code run together with no case or underscore to split it by
-// ("NEWVEHICLE", "newcar", "BRANDNEW"), read as "NEW VEHICLE".
-const VEHICLE_NOUN = 'vehicles?|cars?|trucks?|suvs?|vans?|units?|inventory|stock|condition';
-const NEW_RUN = new RegExp(String.raw`^(brand)?(new)(${VEHICLE_NOUN})?$`, 'i');
+// ("NEWVEHICLE", "newcar", "BRANDNEW", "NEWMODEL", "NEWINSTOCK"), read as
+// "NEW VEHICLE", "NEW MODEL": a code that opens with "new", except "NEWER",
+// "NEWEST", "NEWS" or "NEWLY".
+const NEW_RUN = /^(brand)?(new)(?!(?:er|est|s|ly)$)([a-z]+)?$/i;
 
 // A condition word the gate can read, from one condition field's text; a
 // field that says nothing about new or used ("Car", "SUV") is not a
@@ -809,13 +806,25 @@ const conditionOf = (card) => conditionText(textOf(pick(card, N.condition)));
 
 // What a condition word says, in the pre-owned gate's order (classify.js
 // readCondition): 'demo' for a demo or loaner word, then 'pre-owned', then
-// 'new', else ''. So "Used - Like New" is used, not new.
+// 'new', else ''. So the gate reads "Used - Like New" as used: the new word
+// in it is read on its own (newPart).
+const USED_WORDS = /\b(?:used|pre-?\s?owned|certified|cpo)\b/gi;
 function conditionSays(words) {
   const text = String(words || '');
   if (/\b(?:demo(?:nstrator)?|loaner|courtesy)\b/i.test(text) || DEMO_LETTERS.test(lettersOf(text)) || LOANER_LETTERS.test(lettersOf(text))) return 'demo';
-  if (/\b(?:used|pre-?\s?owned|certified|cpo)\b/i.test(text)) return 'pre-owned';
-  if (/\bnew\b/i.test(text)) return 'new';
+  if (new RegExp(USED_WORDS.source, 'i').test(text)) return 'pre-owned';
+  if (NEW_WORD.test(text)) return 'new';
   return '';
+}
+
+// The new word of a field that also says used or certified, as the gate
+// reads new: "Certified New" -> "New", "New/Used" -> "New", "New or Used" ->
+// "New", "Used - Like New" -> "Like New". A field that says only new is
+// kept as it is.
+function newPart(words) {
+  if (conditionSays(words) !== 'pre-owned') return words;
+  const rest = words.replace(USED_WORDS, ' ').replace(/\s+/g, ' ').replace(/^(?:[^a-z0-9]+|\b(?:or|and)\b)+|(?:[^a-z0-9]+|\b(?:or|and)\b)+$/gi, '').trim();
+  return conditionSays(rest) === 'new' ? rest : 'New';
 }
 
 /**
@@ -947,32 +956,32 @@ export function normalizeInventoryRecord(card, { origin, page = null } = {}) {
   // Every condition field counts for these words, not only the first one
   // present (conditionFields): "used" in one beside "Loaner" in another is a
   // loaner, and "Certified" in another is the certified mark.
-  const fields = [condition, ...conditionFields(card).map((f) => f.text)];
+  // A flag that says the car is new (isNew) is a new word as well.
+  const fields = [condition, ...conditionFields(card).map((f) => f.text), ...(truthy(pick(card, N.isNew)) ? ['New'] : [])];
   const demoWord = fields.some((t) => DEMO_LETTERS.test(lettersOf(t)));
   const loanerWord = fields.some((t) => LOANER_LETTERS.test(lettersOf(t)));
-  // A "new" word counts in any condition field too (rule 3), and so does a
-  // used one beside it: the first of each, as a condition word. In the
-  // record's own condition (the first field present) any new word counts,
-  // as the gate reads it ("New In Stock", "New Model", "Like New"): such a
-  // record is never renamed Certified Used. In another field any new word
-  // counts too, however it is written ("New", "New (In Stock)", "In Stock -
-  // New", "NEW!", "New Model", "NEWVEHICLE"), except a grade or a badge
-  // that holds the word ("Like New", "New Arrival": NEW_BADGE), and it stops
-  // the rename too. When the first field present says nothing, a new word
-  // from another field is the inventory type.
+  // A "new" word counts in any condition field too (rule 3), the record's
+  // own condition (the first field present) and every other, whatever else
+  // the field says (NEW_WORD: "New In Stock", "New Model", "Like New", "New
+  // Arrival", "Certified New", "New/Used", "NEWVEHICLE"), and so does a
+  // used one beside it: the first of each, as a condition word. A record
+  // with a new word anywhere is never renamed Certified Used. When the
+  // first field present says nothing, a new word from another field is the
+  // inventory type.
   const said = fields.map(conditionText).filter(Boolean);
-  const newWord = said.find((w) => conditionSays(withoutBadges(w)) === 'new') || '';
+  const newWord = said.find((w) => NEW_WORD.test(w)) || '';
   const usedWord = said.find((w) => conditionSays(w) === 'pre-owned') || '';
-  const ownSaysNew = conditionSays(condition) === 'new';
-  const inventoryType = (certified && !ownSaysNew && !newWord && !demoWord && !loanerWord ? 'Certified Used' : condition || newWord) || null;
+  const inventoryType = (certified && !newWord && !demoWord && !loanerWord ? 'Certified Used' : condition || newWord) || null;
   const marked = certified || fields.some((t) => /\b(?:certified|cpo)\b/i.test(conditionWords(t)));
-  // A record whose fields disagree, used in one and new in another, keeps
-  // the word that disagrees with its inventory type as its second condition
-  // field, so the gate sends the car to Needs a look naming both words
-  // (classify.js checkPreOwned) instead of letting it reach Ready or
-  // skipping it as new without a word.
+  // A record whose fields disagree, used in one and new in another, or
+  // both in one ("Certified New"), keeps the word that disagrees with its
+  // inventory type as its second condition field, so the gate sends the car
+  // to Needs a look naming both words (classify.js checkPreOwned) instead
+  // of letting it reach Ready or skipping it as new without a word. A new
+  // word beside a used one in the same field is named on its own (newPart:
+  // "Certified New" is "New"), since the gate reads used first.
   const typeSays = conditionSays(inventoryType);
-  const disagrees = typeSays === 'new' ? usedWord : typeSays === 'pre-owned' ? newWord : '';
+  const disagrees = typeSays === 'new' ? usedWord : typeSays === 'pre-owned' && newWord ? newPart(newWord) : '';
   const readableType = marked && (demoWord || loanerWord) ? 'Certified' : disagrees || null;
   const title = textOf(pick(card, N.title));
   const location = textOf(pick(card, N.location, { nested: true })) || null;
