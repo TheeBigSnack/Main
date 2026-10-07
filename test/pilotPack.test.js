@@ -232,3 +232,24 @@ test('CI packs the pilot zip too, before store-check, so every push checks it', 
   assert.ok(at('npm run pack -- --pilot') > at('npm run pack'), 'then the pilot zip');
   assert.ok(at('npm run store-check') > at('npm run pack -- --pilot'), 'then checks both');
 });
+
+// Who gets which zip, where a tester or the owner reads it: testers on a
+// pilot without accounts get the pilot zip, the store gets the normal one.
+test('the install steps, the pilot runbook and the store steps say which zip goes where', () => {
+  const pilotZip = '`lot-current-extension-<version>-pilot.zip`';
+  const readme = read('README.md');
+  const install = readme.slice(readme.indexOf('## Install'), readme.indexOf('## Use'));
+  assert.ok(install.includes(pilotZip) && /no sign-in/.test(install), 'README\'s install names the pilot zip and that it has no sign-in');
+  assert.match(install, /pilot zip and the normal zip are the same extension/, 'and that one replaces the other in the same folder');
+  const help = read('docs/help.md');
+  const helpInstall = help.slice(help.indexOf('### Install'), help.indexOf('## Set up'));
+  assert.ok(helpInstall.includes(pilotZip) && /no sign-in/.test(helpInstall), 'the help\'s install names the pilot zip');
+  assert.match(help, /"Accounts are not set up yet", as it does in the pilot zip, this step is not shown/);
+  const pilot = read('PILOT.md');
+  const before = pilot.slice(pilot.indexOf('### Before every pilot'), pilot.indexOf('## During the pilot'));
+  assert.ok(before.includes(`gets the pilot zip, ${pilotZip} (\`npm run pack -- --pilot\``), 'PILOT.md hands pilot salespeople the pilot zip');
+  assert.match(before, /With the pilot zip there is nothing to skip/);
+  assert.match(read('store/submission.md'), /upload `dist\/lot-current-extension-<version>\.zip`, never the `-pilot\.zip` beside it/);
+  assert.match(read('store/listing.md'), /the zip in `dist\/` without `-pilot` in its name is what the dashboard takes/);
+  assert.match(read('docs/data-inventory.md'), /every build made from it offers sign-in, except the pilot zip \(`npm run pack -- --pilot`\), whose copy of that file is empty/);
+});
