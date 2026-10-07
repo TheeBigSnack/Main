@@ -930,12 +930,8 @@ function withoutOwnSentenceNote(text, note) {
 
 // The parts a text says are new or replaced, each with the words that say
 // so: "new tires", "new Michelin tires", "a new set of tires", "replaced
-// brakes", and each part joined straight on to one with "and" ("new tires
-// and brakes"). In the website's own words a list with commas counts too
-// ("new tires, brakes and rotors"); in the text it does not, since the
-// highlights line lists the website's features with commas ("New Tires,
-// Brake Assist").
-const AND_PARTS = new RegExp(`^\\s+(?:and|&|plus)\\s+(?:(?:front|rear)\\s+)?(${PARTS})\\b`, 'i');
+// brakes", and in the website's own words each part listed after one with a
+// comma, "and", "&" or "plus" ("new tires, brakes and rotors").
 const LISTED_PARTS = new RegExp(`^(?:\\s*,\\s*(?:and\\s+|&\\s+)?|\\s+(?:and|&|plus)\\s+)(?:(?:front|rear)\\s+)?(${PARTS})\\b`, 'i');
 const partKey = (part) => oneLine(part).toLowerCase().replace(/(?:ies|ys|s|y)$/, '');
 function newPartsSaid(text, re, more) {
@@ -947,6 +943,76 @@ function newPartsSaid(text, re, more) {
     for (let next = more.exec(t.slice(end)); next; next = more.exec(t.slice(end))) {
       end += next[0].length;
       out.push({ said: t.slice(m.index, end), part: partKey(next[1]) });
+    }
+  }
+  return out;
+}
+
+// In the text checked (a draft, an edit, the template), the list after a
+// "new <part>" claim is followed across commas, "and", "&", "/", "+" and
+// "plus" (LIST_JOIN): each next item that is a part on its own (LIST_ITEM:
+// maybe after "the", "a", "an" or "both", "new" or "brand new", and "front",
+// "rear", "front and rear" or "front/rear"; maybe named in two part words,
+// "brake pads") is claimed too, and the list stops at the first item that is
+// anything else (a spec or brand word before a part, "HEMI engine",
+// "automatic transmission", "Bosch wipers", is not a part on its own). A
+// listed part followed by words about its state ("inspected", "checked",
+// "serviced", "look(s)", "good", "in good shape", "original", maybe after
+// "is", "are", "were", "have been" and the like: LIST_STATE) is not claimed,
+// and the list stops there; followed by a newness word ("were replaced",
+// "are brand new", "installed", "put on", "done", "just", "recently") or by
+// anything else, it is. After a comma alone, an item that is one of the car's
+// own features as the website writes it ("Brake Assist", "Battery Saver",
+// "Wipers - Rain Sensing"; without regard to case or spacing) is that
+// feature, not a claim, and the list goes on past it: the highlights line
+// lists the website's features with commas ("New Tires, Brake Assist"). A
+// claim inside one of the car's features as the website writes it ("New
+// Tires/Brakes", "New Brake Pads & Rotors") is the website's own words, so
+// the template's highlights line passes its own check. An item that says
+// "new" itself is quoted from its "new" ("new brakes"); any other from the
+// start of the list.
+const LIST_JOIN = /^(?:\s*,\s*(?:(?:and|plus)\s+|[&+/]\s*)?|\s*[&+/]\s*|\s+(?:and|plus)\s+)/i;
+const ONLY_A_COMMA = /^\s*,\s*$/;
+const LIST_ITEM = new RegExp(`^(?:(?:the|a|an|both)\\s+)?((?:brand[\\s-]+)?new\\s+)?(?:(?:front\\s*(?:and|&|\\/)\\s*rear|rear\\s*(?:and|&|\\/)\\s*front|front|rear)\\s+)?(${PARTS})\\b(?:\\s+(?:${PARTS})\\b)?`, 'i');
+const LIST_TAIL = new RegExp(`^\\s+(?:${PARTS})\\b`, 'i');
+const LIST_STATE = /^\s+(?:(?:is|are|was|were|has|have|had|been|got|all|both|also)\s+){0,3}(?:inspected|checked|serviced|looks?|good|in\s+good\s+shape|original)\b/i;
+const ITEM_NEW = /(?:brand[\s-]+)?new\b/i;
+// where a feature written in the text ends: a mark that ends or joins an item, the end of the line, "and" or "plus"
+const FEATURE_ENDS = "(?=[^\\S\\n]*(?:[,.;:!?&+/)\\]}\"'\u2019\u201d\u2026\\n]|$)|\\s+(?:and|plus)\\b)";
+// Where the car's own features stand in the text, as the website writes them: [start, end] pairs.
+function featureSpans(t, features) {
+  const own = [...new Set((Array.isArray(features) ? features : []).filter((f) => typeof f === 'string').map((f) => oneLine(f).toLowerCase()).filter(Boolean))];
+  if (!own.length) return [];
+  const alt = own.sort((a, b) => b.length - a.length).map((f) => escapeRe(f).replace(/ /g, '\\s+')).join('|');
+  return [...t.matchAll(new RegExp(`(?<![\\p{L}\\p{N}])(?:${alt})${FEATURE_ENDS}`, 'giu'))].map((m) => [m.index, m.index + m[0].length]);
+}
+function newPartsListed(text, re, features) {
+  const t = String(text ?? '');
+  let spans = null;
+  const featuresIn = () => (spans = spans || featureSpans(t, features));
+  const out = [];
+  for (const m of t.matchAll(new RegExp(re.source, 'gi'))) {
+    let end = m.index + m[0].length;
+    const whole = featuresIn().find(([a, b]) => a <= m.index && b >= end);
+    if (whole) end = whole[1];
+    else {
+      out.push({ said: m[0], part: partKey(m[1]) });
+      const tail = LIST_TAIL.exec(t.slice(end));
+      if (tail) end += tail[0].length;
+    }
+    for (let join = LIST_JOIN.exec(t.slice(end)); join; join = LIST_JOIN.exec(t.slice(end))) {
+      const at = end + join[0].length;
+      const feature = ONLY_A_COMMA.test(join[0]) && featuresIn().find(([a]) => a === at);
+      if (feature) {
+        end = feature[1];
+        continue;
+      }
+      const item = LIST_ITEM.exec(t.slice(at));
+      if (!item) break;
+      const itemEnd = at + item[0].length;
+      if (LIST_STATE.test(t.slice(itemEnd))) break;
+      out.push({ said: t.slice(item[1] ? at + item[0].search(ITEM_NEW) : m.index, itemEnd), part: partKey(item[2]) });
+      end = itemEnd;
     }
   }
   return out;
@@ -995,7 +1061,7 @@ function claimProblems(text, ctx) {
       const said = new Set();
       // a part passes only when the website's own words say that part is new: naming it ("ABS Brakes") is not enough
       const named = new Set(newPartsSaid(source, kind.re, LISTED_PARTS).map((p) => p.part));
-      for (const p of newPartsSaid(text, kind.re, AND_PARTS)) {
+      for (const p of newPartsListed(text, kind.re, ctx.vehicle && ctx.vehicle.features)) {
         if (named.has(p.part) || said.has(p.part)) continue;
         said.add(p.part);
         problems.push({ code: 'unsupported-claim', text: `Says "${p.said}", but the website says nothing about ${kind.what} for this car` });

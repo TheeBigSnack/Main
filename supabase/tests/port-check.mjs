@@ -129,6 +129,10 @@ const texts = [
   sixty('2019 Ram 1500 Big Horn. Buy from me, not the dealers; text me, not the dealerships.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn. Tax, title and fees go to the state, not the dealer. Text Sam at 555-123-4567.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn. Example Motors prices plus tax. Tax and fees go to the county, not the dealers. Springfield sales tax applies.') + '\nVIN TESTVIN0000000001.',
+  // a list after "new": commas, "and", "&", "/", "+", "plus", words before a part, a part said to be checked, the car's own features
+  sixty('2019 Ram 1500 Big Horn with new tires, struts and brakes that were replaced last month, new tires/rotors + pads, and fresh tires, the battery, front and rear shocks.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn with new tires, HEMI engine, brakes; new tires, brakes inspected; new tires, Brake Assist, Battery Saver, struts; new tires and brake assist; new brake pads and rotors; a new set of tires plus new front/rear brakes are brand new.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. Highlights: New Tires/Brakes, New Brake Pads & Rotors, Brake Assist, Wipers - Rain Sensing, Rear Wiper/Washer and wipers, new tires, brakes for winter.') + '\nVIN TESTVIN0000000001.',
 ];
 const contexts = [
   { vehicle, dealer, priceNote: '', price: 28995 },
@@ -174,6 +178,7 @@ const contexts = [
   { vehicle, dealer, priceNote: 'Price includes the $490 doc fee and 6.25 % tax. Tax and tags go to the state, not the dealerships. Call \uff15\uff15\uff15-0100 or email sales@carmail.com \u{1F4DE}', price: 28995 },
   { vehicle, dealer, priceNote: "Ask for Sam, not the dealer's front desk. T\u0435xt us; prices valid through 2026, $5551234567.", price: 28995 },
   { vehicle, dealer, priceNote: 'Text Sam, not the dealers.', price: 28995 },
+  { vehicle: { ...vehicle, features: [...vehicle.features, 'New Tires/Brakes', 'New Brake Pads & Rotors', 'Brake Assist', 'Battery Saver', 'Wipers - Rain Sensing', 'Rear Wiper/Washer'], descriptionRaw: 'Recent service: new tires, brakes and rotors, plus new shocks.' }, dealer, priceNote: '', price: 28995 },
   {},
 ];
 
