@@ -18,11 +18,20 @@
 //   - README.md's title does not carry the new major.minor (test/docs.test.js).
 // Then it writes the version into extension/manifest.json, package.json and
 // both places in package-lock.json (a text edit, so formatting and key order
-// stay), runs the unit tests and `npm run pack`, and prints the next steps.
-// If the tests or the pack fail, it puts the three files back as they were.
+// stay), runs the unit tests, `npm run pack` and `npm run pack -- --pilot`,
+// and prints the next steps. If the tests or either pack fail, it puts the
+// three files back as they were.
+//
+// The pilot zip (the same files with the account settings left empty, so no
+// sign-in) is what testers get while sign-in cannot work and while the pilot
+// runs signed out. The release packs it itself rather than printing the
+// command: that way it comes from the same files in the same run as the
+// store zip, a release never ends without it, and a pilot pack that refuses
+// (extension/src/accountConfig.js changed shape) stops the release the way a
+// failed pack does, instead of leaving only a zip with sign-in to hand out.
 //
 // It never commits, tags, pushes or uploads: a person does, from the steps it
-// prints. It runs the three commands in COMMANDS and nothing else.
+// prints. It runs the four commands in COMMANDS and nothing else.
 
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
@@ -36,6 +45,7 @@ export const COMMANDS = Object.freeze({
   status: Object.freeze(['git', 'status', '--porcelain']),
   test: Object.freeze(['npm', 'test']),
   pack: Object.freeze(['npm', 'run', 'pack']),
+  pilotPack: Object.freeze(['npm', 'run', 'pack', '--', '--pilot']),
 });
 
 export const VERSION_FILES = Object.freeze(['extension/manifest.json', 'package.json', 'package-lock.json']);
@@ -171,8 +181,9 @@ export function submitSteps(listing) {
   return (end < 0 ? rest : rest.slice(0, end)).filter((l) => /^- \[[ x]\] /.test(l)).map((l) => l.replace(/^- \[[ x]\] /, ''));
 }
 
-// The same name scripts/pack.mjs writes.
+// The same names scripts/pack.mjs writes: the store zip and the pilot zip.
 export const zipPath = (version) => `dist/lot-current-extension-${version}.zip`;
+export const pilotZipPath = (version) => `dist/lot-current-extension-${version}-pilot.zip`;
 
 // The account project a build talks to: the url in extension/src/accountConfig.js,
 // or '' while that config is empty.
@@ -195,26 +206,29 @@ export function changedLines(before, after) {
 // What a person does after the script: printed, never run.
 export function nextSteps({ version, listing, accountUrl = '' }) {
   const zip = zipPath(version);
+  const pilotZip = pilotZipPath(version);
   const boxes = submitSteps(listing || '');
   const lines = [
     `Lot Current ${version} is packed: ${zip}`,
+    `The pilot zip, the same files with the account settings left empty (no sign-in): ${pilotZip}`,
     'Nothing was committed, tagged, pushed or uploaded. Next, by hand (docs/release.md):',
     '',
     // a build that names the account project offers sign-in, which works only once that project is set up
     ...(accountUrl ? [
       `This build names the account project ${accountUrl} (extension/src/accountConfig.js), so the wizard and Settings offer sign-in.`,
-      `Hand it to no tester and upload it nowhere before ${ACCOUNT_GATE}: until then that sign-in cannot work.`,
+      `Hand it to no tester and upload it nowhere before ${ACCOUNT_GATE}: until then that sign-in cannot work. Testers get the pilot zip meanwhile (step 4).`,
       '',
     ] : []),
-    '1. The end-to-end flows and the sandbox drive, with Playwright\'s Chromium (README, "For development"):',
+    '1. The end-to-end flows and the sandbox drive, with Playwright\'s Chromium (README, "For development"), and set-up on the pilot zip:',
     '     npm run test:e2e',
     '     npm run test:demo',
+    `     npm run test:e2e:wizard -- --zip ${pilotZip}`,
     '2. Commit and tag the release:',
     `     git add ${[...RELEASE_NOTES, ...VERSION_FILES].join(' ')}`,
     `     git commit -m "Release ${version}"`,
     `     git tag -a v${version} -m "Lot Current ${version}"`,
     '     git push --follow-tags',
-    `3. Upload ${zip} in the Chrome Web Store Developer Dashboard: Lot Current, Package, Upload new package, then Submit for review.`,
+    `3. Upload ${zip} (the normal zip, never the -pilot one) in the Chrome Web Store Developer Dashboard: Lot Current, Package, Upload new package, then Submit for review.`,
     '   Visibility stays Unlisted for the pilot and the design partners; Public only after the review passes and the owner says so.',
   ];
   if (boxes.length) {
@@ -223,7 +237,12 @@ export function nextSteps({ version, listing, accountUrl = '' }) {
   } else {
     lines.push('   Before the first submission, every box in store/listing.md, "Before submitting".');
   }
-  lines.push('4. Testers on the zip get the same file; README, "Update", says how to replace the files and reload.');
+  if (accountUrl) {
+    lines.push(`4. Testers get ${pilotZip}, which offers no sign-in, until ${ACCOUNT_GATE}, and for as long as PILOT.md keeps the pilot signed out; after that, the same file as the store.`);
+    lines.push('   README, "Update", says how to replace the files and reload.');
+  } else {
+    lines.push('4. Testers on the zip get the same file; README, "Update", says how to replace the files and reload.');
+  }
   return lines;
 }
 
@@ -319,7 +338,7 @@ export function release(argv, io) {
     for (const f of VERSION_FILES) {
       for (const d of changedLines(texts[f], next[f])) io.log(`  ${f}:${d.line}  ${d.from}  ->  ${d.to}`);
     }
-    io.log(`Then it would run ${COMMANDS.test.join(' ')} and ${COMMANDS.pack.join(' ')}, and print:\n`);
+    io.log(`Then it would run ${COMMANDS.test.join(' ')}, ${COMMANDS.pack.join(' ')} and ${COMMANDS.pilotPack.join(' ')}, and print:\n`);
     io.log(nextSteps({ version, listing: listingText(io), accountUrl: accountUrlOf(io) }).join('\n'));
     return 0;
   }
@@ -334,6 +353,8 @@ export function release(argv, io) {
   if (io.run(COMMANDS.test).code !== 0) return restore('the unit tests failed at the new version');
   if (io.run(COMMANDS.pack).code !== 0) return restore('npm run pack failed');
   if (!io.exists(zipPath(version))) return restore(`npm run pack did not write ${zipPath(version)}`);
+  if (io.run(COMMANDS.pilotPack).code !== 0) return restore('npm run pack -- --pilot failed (its message above says why)');
+  if (!io.exists(pilotZipPath(version))) return restore(`npm run pack -- --pilot did not write ${pilotZipPath(version)}`);
   io.log('');
   io.log(nextSteps({ version, listing: listingText(io), accountUrl: accountUrlOf(io) }).join('\n'));
   return 0;
