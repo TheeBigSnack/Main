@@ -686,6 +686,17 @@ function originOf(href) {
   }
 }
 
+// Why a missing car's own page could not settle whether it is gone, in the
+// words the standard-data reader uses for the same (schemaOrg.js
+// pageProblem), since the rescan puts it in the car's to-do item ("Missing
+// from this scan, and its page gave HTTP 500, so it was not marked gone").
+function carPageProblem(answer, origin, thrown = null) {
+  if (thrown) return `its page could not be read (${String((thrown && thrown.message) || thrown).slice(0, 120)})`;
+  if (!answer || typeof answer !== 'object') return 'its page gave no answer';
+  if (answer.finalUrl && originOf(answer.finalUrl) !== origin) return `its page sent Lot Current to another website (${originOf(answer.finalUrl) || 'an address that is not a website'})`;
+  return `its page gave HTTP ${answer.status}`;
+}
+
 // Why an answer can't be used, or null when it can.
 function problemWith(answer, origin) {
   if (!answer || typeof answer !== 'object') return 'no answer';
@@ -834,7 +845,7 @@ export async function scanInventory(search, options, platform) {
       answer = await call(url.href);
     } catch (e) {
       failedInARow += 1;
-      unchecked[vin] = 'the request failed: ' + String((e && e.message) || e);
+      unchecked[vin] = carPageProblem(null, origin, e);
       continue;
     }
     if (answer && REFUSED[answer.status]) {
@@ -849,7 +860,7 @@ export async function scanInventory(search, options, platform) {
       continue; // anything else readable is not a clear "gone"
     }
     failedInARow += 1;
-    unchecked[vin] = problemWith(answer, origin) || 'no answer';
+    unchecked[vin] = carPageProblem(answer, origin);
   }
   if (Object.keys(unchecked).length) confirm.unchecked = unchecked;
 

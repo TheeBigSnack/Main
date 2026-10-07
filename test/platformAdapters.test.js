@@ -760,7 +760,7 @@ test('a refusal still withholds every sold result; a request that fails outright
   const base = platformSearch(dealerOnSite({ cars, gone: [a, b, c, d] }));
   const thrown = await dealerOn.scan(async (r) => { if (r.url === urls[b.vin]) throw new TypeError('Failed to fetch'); return base(r); }, options);
   assert.equal(thrown.confirm.error, null);
-  assert.deepEqual(thrown.confirm.unchecked, { [b.vin]: 'the request failed: Failed to fetch' });
+  assert.deepEqual(thrown.confirm.unchecked, { [b.vin]: 'its page could not be read (Failed to fetch)' });
   assert.deepEqual(thrown.confirm.notFound, [a.vin, c.vin, d.vin], 'the other cars are still checked and marked gone');
 
   const failing = dealerOnSite({ cars, gone: [d] });
@@ -907,4 +907,42 @@ test('R-8: a lone guide or offer label is quoted, never read as the price; a cas
   const on = normalizeInventoryRecord({ ...noPrices, VehicleInstantCashOfferPrice: 19500 }, { origin: DEALERON_ORIGIN });
   assert.equal(on.price, null, 'a cash offer is never the price');
   assert.equal(on.priceLabel, 'the list labels its price "Instant Cash Offer Price", which Lot Current does not read as the selling price');
+});
+
+// The CHANGELOG's "one car that can't be checked holds back only itself"
+// holds on DealerOn and Dealer.com too, through the scan runner and the
+// rescan diff of the reviewed code: a car whose own page fails is listed
+// under Needs a look with its reason, the other cars' verdicts still count,
+// and the cars a failing run of pages kept from being checked are checked
+// first next time (scanRunner.confirmOrder), so three broken pages never
+// hold back a sold car for more than one scan.
+test('DealerOn and Dealer.com: a car whose page fails holds back only itself, scan after scan', async () => {
+  const settings = withDefaults({});
+  for (const [platform, adapter, siteOf, path, service, goneStatus] of [
+    ['DealerOn', dealerOn, dealerOnSite, dealerOnPath, onService, 404],
+    ['Dealer.com', dealerCom, dealerComSite, dealerComPath, comService, 410],
+  ]) {
+    const cars = platformCars(8, { from: 600 });
+    const [a, b, c, sold] = platformCars(4, { from: 620 });
+    const siteInfo = { origin: service.origin, host: new URL(service.origin).hostname, name: 'Sample Motors', title: '', adapter: adapter.PLATFORM.id };
+    const options = { ...adapter.scanOptions(service), pageGapMs: 0 };
+    const posted = Object.fromEntries([a, b, c, sold].map((x) => [x.vin, { price: x.base + x.fee, postedAt: '2026-10-01T15:00:00.000Z', name: `${x.year} ${x.make} ${x.model}` }]));
+    const first = await scanWithSearch({ adapter, search: platformSearch(siteOf({ cars: [...cars, a, b, c, sold] })), site: siteInfo, settings, posted, options });
+    assert.equal(first.ok, true, platform);
+    // a, b and c leave the list and their pages answer 500; the sold car's page answers 404 or 410
+    const failing = siteOf({ cars, gone: [sold], goneStatus });
+    for (const x of [a, b, c]) failing.set(service.origin + path(x), answerWith(500, 'Server error'));
+    const second = await scanWithSearch({ adapter, search: platformSearch(failing), site: siteInfo, settings, prevSnapshot: first.snapshot, posted, options });
+    assert.equal(second.ok, true, platform);
+    assert.ok(!second.diff.warnings.some((w) => /Couldn't double-check/.test(w)), `${platform}: the check as a whole did not fail: ${second.diff.warnings.join(' | ')}`);
+    const look = Object.fromEntries(second.diff.needsALook.map((i) => [i.vin, i.text]));
+    for (const x of [a, b, c]) assert.match(look[x.vin] || '', /^Missing from this scan, and its page gave HTTP 500, so it was not marked gone\. Check the car on the website; if it sold, take your listing down/, `${platform}: each failing page is that car's own item, with the reason`);
+    assert.match(look[sold.vin] || '', /not confirmed gone/, `${platform}: three failing pages in a row stop this scan's check before the sold car`);
+    assert.deepEqual(second.diff.takeDown, []);
+    assert.deepEqual(Object.keys(second.snapshot.unchecked || {}).sort(), [a.vin, b.vin, c.vin].sort());
+    // the next scan checks the sold car first, so the broken pages hold it back no longer
+    const third = await scanWithSearch({ adapter, search: platformSearch(failing), site: siteInfo, settings, prevSnapshot: second.snapshot, posted, options });
+    assert.deepEqual(third.diff.takeDown.map((t) => [t.vin, t.why]), [[sold.vin, 'gone']], `${platform}: the sold car goes on To do`);
+    assert.deepEqual(third.diff.needsALook.map((i) => i.vin).sort(), [a.vin, b.vin, c.vin].sort());
+  }
 });

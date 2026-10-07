@@ -776,7 +776,7 @@ The privacy texts say a salesperson sees only their own post timings. That is tr
 - A role with a digit ("2nd shift sales") makes the template fail its own number check, so that salesperson's forms stay shut until the role changes.
 - The VIN check's Chevrolet City Express prefix (3N63M in `src/vin.js`) was written from memory and not checked against a decoder. A wrong prefix only fails to accept a real City Express, and never flags a correct record.
 - A save refused in a second window, because another window's post is newer, is not reported, and anything done there (typing, picks, a rewrite, a colour guess or VIN check) is lost. The help and the data inventory now say so; the side panel still does not.
-- On Dealer Inspire, DealerOn and Dealer.com websites, a failed check of one missing car still holds back every missing car that scan.
+- On Dealer Inspire websites, a failed check of one missing car still holds back every missing car that scan (DealerOn and Dealer.com hold back only the failing car since PR #9, section 21).
 - On standard-data websites, a changed disclaimer is learned only once 30% of the lot is re-read, and a line wrongly learned never expires.
 - If the included salespeople in `marketing/pricing.json` change, existing subscribers get the new number.
 - An install that already saved a guessed city keeps it.
