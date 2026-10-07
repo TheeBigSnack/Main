@@ -76,8 +76,9 @@ const WRAP = `(?:\\n${SEP}(?:(?://|/?\\*|#|--|>|;|<!--)${SEP})?)?`;
 // "applotsync", "finallotsync", "ITSLOTSYNC"), nor after a word that ends in
 // another listed stem ("zea" of zealot, "came" of Camelot). Written that way
 // it cannot be told apart from "slot", "plot", "blot", "clot", "allot" or
-// "pilot" ("timeslotsync" is a time slot). With a capital L, a separator or
-// nothing in front, it is still caught ("carsLotSync", "web lotsync").
+// "pilot" ("timeslotsync" is a time slot). As the next word of a camelCase
+// name, or after a separator, it is still caught ("carsLotSync",
+// "web lotsync", "APP-LOTSYNC").
 // The case is spelled out in the classes, so the expressions carry no i
 // flag, which would make that capital L match any l.
 const LOT_WORDS = ['pilot', 'ballot', 'allot', 'slot', 'plot', 'blot', 'clot', 'zealot', 'harlot', 'shallot', 'ocelot', 'camelot', 'matelot', 'cachalot', 'polyglot'];
@@ -588,7 +589,7 @@ test('the scan catches the old name in every spelling, in any file that is not e
   }
   // What the comment on LOT says is left out, so the comment cannot drift from the rule: the old
   // name glued straight after a word that ends in a listed stem reads like "slot", "plot", "allot"
-  // or "pilot" and is not reported; with a capital L or a separator in front it is.
+  // or "pilot" and is not reported; as the next word of a camelCase name, or after a separator, it is.
   for (const text of ['carslotsync', 'weblotsync.com', 'applotsync', 'finallotsync', 'ITSLOTSYNC']) {
     assert.deepEqual(hitsIn('docs/help.md', text), [], `${text}: the comment on LOT says this is not reported`);
   }
