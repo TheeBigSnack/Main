@@ -403,8 +403,11 @@ export function diffScans(prev, curr, { posted = {}, confirm = null, basis = 'we
     const mine = yours(vin);
     // a posted car on the basis its listing was posted at (postedBasis; an
     // entry with none reads it off the last scan, then this one, each only
-    // when taken once the listing had its price: scanCar)
-    const nowPrice = mine ? listingWebsitePrice(posted[vin], now, basis, [scanCar(posted[vin], prev, vin), scanCar(posted[vin], curr, vin)]) : basisPrice(now, basis);
+    // when taken once the listing had its price: scanCar). Its price item
+    // names that basis, so Updated records it on an entry that has none
+    // (markPriceUpdated).
+    const own = mine ? postedBasis(posted[vin], basis, [scanCar(posted[vin], prev, vin), scanCar(posted[vin], curr, vin)]) : null;
+    const nowPrice = mine ? basisPrice(now, own) : basisPrice(now, basis);
 
     // A posted car the website marks sold or sale-pending, or no longer
     // calls pre-owned, is raised on every scan while it is still marked
@@ -435,7 +438,7 @@ export function diffScans(prev, curr, { posted = {}, confirm = null, basis = 'we
       if (was && !nowPrice) {
         out.needsALook.push({ vin, name: now.name, stock: now.stock, url: now.url, yours: mine, text: `Website no longer shows a price (${now.priceLabel || 'call for price'})` });
       } else if (was && nowPrice && was !== nowPrice) {
-        out.priceUpdates.push({ vin, name: now.name, stock: now.stock, url: now.url, yours: mine, from: was, to: nowPrice, change: nowPrice - was });
+        out.priceUpdates.push({ vin, name: now.name, stock: now.stock, url: now.url, yours: mine, from: was, to: nowPrice, change: nowPrice - was, ...(mine ? { basis: own } : {}) });
       }
     }
 
@@ -565,9 +568,17 @@ export function markPosted(posted, entry, basis = 'website', now = new Date().to
 }
 
 // The listing's new price, on the basis it carries (the to-do item's `to`).
-export function markPriceUpdated(posted, vin, price, now = new Date().toISOString()) {
+// `basis`: the basis that price was worked out on (My listings: listingLine;
+// To do: the item's, diffScans; the side panel's read of the car), recorded
+// on a listing that carries none (posted with an older version), so the
+// listing's price stays on it whatever Price to post says later: a switch
+// of the setting before the next scan is then no part of the next price
+// change (rule 4). A listing that carries a basis keeps it.
+export function markPriceUpdated(posted, vin, price, now = new Date().toISOString(), basis = null) {
   if (!posted[vin]) return posted;
-  return { ...posted, [vin]: { ...posted[vin], price, updatedAt: now } };
+  const entry = posted[vin];
+  const keep = !PRICE_BASES.includes(entry && entry.basis) && PRICE_BASES.includes(basis) ? { basis } : {};
+  return { ...posted, [vin]: { ...entry, price, updatedAt: now, ...keep } };
 }
 
 // Needs a look, dismissed for a posted car (the To do item's Dismiss): the

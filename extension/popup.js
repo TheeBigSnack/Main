@@ -534,7 +534,7 @@ function viewTodo(l) {
           sub: (waits ? '<span class="pill">Price compared at the next scan</span> ' : '') + (p.yours ? 'Your listing' : colleagueEntry(p.vin) ? `Posted by ${byWhom(colleagueEntry(p.vin))}` : 'Not marked as posted') + (p.stock ? ' · Stock ' + esc(p.stock) : ''),
           right: waits ? `Listed ${money(entry.price)}` : `${money(p.from)} → <b>${money(p.to)}</b> <span class="${p.change < 0 ? 'down' : 'up'}">${signedMoney(p.change)}</span>`,
           action: p.yours && !waits
-            ? `<span class="actions"><button type="button" class="small go" data-action="upkeep" data-kind="price" data-vin="${esc(p.vin)}" data-price="${p.to}" title="Opens your listing with the new price ready to fill in; you click Update">Open &amp; update price</button><button type="button" class="small" data-action="priceUpdated" data-vin="${esc(p.vin)}" data-price="${p.to}">Updated</button></span>`
+            ? `<span class="actions"><button type="button" class="small go" data-action="upkeep" data-kind="price" data-vin="${esc(p.vin)}" data-price="${p.to}" title="Opens your listing with the new price ready to fill in; you click Update">Open &amp; update price</button><button type="button" class="small" data-action="priceUpdated" data-vin="${esc(p.vin)}" data-price="${p.to}"${p.basis ? ` data-basis="${esc(p.basis)}"` : ''}>Updated</button></span>`
             : '',
           muted: !p.yours,
         });
@@ -768,7 +768,8 @@ function viewMine(l) {
         const { now, basis: own, compared, site, status } = listingLine(p, state.snapshot, p.vin, state.settings?.basis);
         const other = own !== postedBasis(null, state.settings?.basis) ? ` · posted at ${own === 'beforeFees' ? 'the lower second price' : "the website's main price"}; your price setting now applies to new posts` : '';
         const pill = `<span class="pill${status.tone ? ' ' + status.tone : ''}">${esc(status.text)}</span>`;
-        const extra = status.priceChanged ? `<button type="button" class="small go" data-action="priceUpdated" data-vin="${esc(p.vin)}" data-price="${site}">Updated</button>` : '';
+        // Updated records the price with the basis it is on, kept on a listing that carries none (src/rescan.js markPriceUpdated)
+        const extra = status.priceChanged ? `<button type="button" class="small go" data-action="priceUpdated" data-vin="${esc(p.vin)}" data-price="${site}" data-basis="${esc(own)}">Updated</button>` : '';
         const entry = { name: p.name, url: now?.url };
         const link = openListing(p.listingUrl);
         const refused = notShared(p);
@@ -1418,7 +1419,8 @@ async function onPanelClick(ev) {
       break;
     }
     case 'priceUpdated':
-      if (!(await update('posted', (p) => markPriceUpdated(p || {}, vin, Number(btn.dataset.price))))) break;
+      // the price, and the basis it was worked out on for a listing that carries none (the item's, or My listings' line)
+      if (!(await update('posted', (p) => markPriceUpdated(p || {}, vin, Number(btn.dataset.price), undefined, btn.dataset.basis)))) break;
       if (!(await notePilot((p) => resolveFlag(p, vin, 'price', { how: 'manual' })))) break;
       if (!(await update('diff', (d) => withoutVin(d, vin, ['priceUpdates'])))) break;
       syncInBackground();

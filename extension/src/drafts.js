@@ -80,12 +80,14 @@ export function draftScanCar(draft, snap, vin, now = new Date().toISOString()) {
 // price is taken on the basis the draft was filled under, the one its
 // listing is recorded on (markDraftPosted), so a change of the setting alone
 // is never a price to update; `basis` (the setting) stands in for a draft
-// saved before drafts kept a basis.
+// saved before drafts kept a basis. The item names the basis, as diffScans
+// names it on a price item for your listing.
 export function draftPriceUpdate(draft, entry, basis = 'website') {
   const from = draftPrice(draft);
-  const to = basisPrice(entry, draftBasis(draft, basis));
+  const own = draftBasis(draft, basis);
+  const to = basisPrice(entry, own);
   if (from === null || !entry || typeof to !== 'number' || !(to > 0) || from === to) return null;
-  return { vin: entry.vin, name: entry.name, stock: entry.stock, url: entry.url, yours: true, from, to, change: to - from };
+  return { vin: entry.vin, name: entry.name, stock: entry.stock, url: entry.url, yours: true, from, to, change: to - from, basis: own };
 }
 
 // The saved to-do list (the diff) with this price update in it, in place of

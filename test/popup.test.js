@@ -871,8 +871,8 @@ test('My listings does not ask a listing posted after the last scan to take that
   assert.match(q.panel(), /<span class="pill good">Matches the website<\/span>/);
 });
 
-// The website's records, with the Ram's main price at `main`.
-const ramAt = (main) => Object.entries(fixtures).filter(([name]) => name !== '_about').map(([name]) => (name === 'usedNormal' ? raw(name, { extra_fields: { lightning: { pricing: { low: { value: main } } } } }) : raw(name)));
+// The website's records, with the Ram's main price at `main` (and its lower second price at `lower`, when given).
+const ramAt = (main, lower) => Object.entries(fixtures).filter(([name]) => name !== '_about').map(([name]) => (name === 'usedNormal' ? raw(name, { extra_fields: { lightning: { pricing: { low: { value: main }, ...(lower ? { high: { value: lower } } : {}) } } } }) : raw(name)));
 
 // A listing whose price was updated on another computer after this
 // computer's last scan, brought here by sync (a sync settles no to-do list:
@@ -923,6 +923,57 @@ test('To do and My listings offer no Updated at the last scan\'s price for a lis
   assert.match(r.panel(), /\$26,663 → <b>\$26,163<\/b>/);
   await r.tab('mine');
   assert.match(r.panel(), new RegExp(`data-action="priceUpdated" data-vin="${ram.vin}" data-price="26163"`));
+});
+
+// The data-* of the button the panel draws for `action` on `vin`, as a click hands them over.
+function drawnButton(html, action, vin) {
+  const tag = (html.match(new RegExp(`<button[^>]*data-action="${action}"[^>]*data-vin="${vin}"[^>]*>`)) || [])[0];
+  assert.ok(tag, `the panel has a ${action} button for ${vin}`);
+  return Object.fromEntries([...tag.matchAll(/data-([a-z]+)="([^"]*)"/g)].map(([, key, value]) => [key, value]));
+}
+
+// Updated on a listing that carries no price basis (posted with an older
+// version) records the basis its new price was worked out on, on My listings
+// and on To do alike (src/rescan.js markPriceUpdated). Then a switch of Price
+// to post before the next scan is no part of the next price change. Without
+// it, that scan, the first since the update, read the basis afresh, found
+// neither of its prices to be the listing's after the website's $500 cut, and
+// took the new setting's: a $990 drop the website never made (rule 4).
+test('Updated on My listings or To do records the basis its price was worked out on for a listing with none, so a later switch of Price to post is no part of the next change', async () => {
+  const ram = vehicle('usedNormal'); // $27,163 on the website, or $26,673 before the fee
+  const settings = { ...MY_STORE, basis: 'website' };
+  const cut = ramAt(26663, 26173); // the website's $500 cut, on both prices
+  const moves = (popup) => (popup.local[k.diff].priceUpdates || []).filter((u) => u.vin === ram.vin).map((u) => [u.from, u.to]);
+
+  // My listings: posted before the last scan, at a price on neither of its prices
+  const last = await lastScanOf(ram, settings, '2026-10-03T09:00:00.000Z', 27163, 26673);
+  const posted = { [ram.vin]: { name: ram.name, price: 26900, postedAt: '2026-10-02T09:00:00.000Z' } };
+  const p = await loadPopup({ local: { [k.settings]: settings, [k.snapshot]: last, [k.posted]: structuredClone(posted) } });
+  await p.tab('mine');
+  const mine = drawnButton(p.panel(), 'priceUpdated', ram.vin);
+  await p.click('priceUpdated', mine);
+  await saveBasis(p, 'beforeFees');
+  const q = await loadPopup({ local: p.local, records: cut });
+  await q.scan();
+  assert.equal(q.status(), '', 'the scan went through');
+  assert.deepEqual(moves(q), [[27163, 26663]], 'My listings: the next change is the website\'s own $500 cut');
+  assert.deepEqual([mine.price, mine.basis], ['27163', 'website']);
+  assert.equal(q.local[k.posted][ram.vin].basis, 'website', 'recorded with its price');
+
+  // To do: a first scan that reads no basis for the listing, its price being on neither of the scan's prices
+  const r = await loadPopup({ local: { [k.settings]: settings, [k.posted]: { [ram.vin]: { name: ram.name, price: 27663, postedAt: '2026-10-02T09:00:00.000Z' } } } });
+  await r.scan();
+  assert.equal(r.status(), '', 'the scan went through');
+  assert.equal(r.local[k.posted][ram.vin].basis, undefined, 'no basis read for the listing');
+  const todo = drawnButton(r.panel(), 'priceUpdated', ram.vin);
+  await r.click('priceUpdated', todo);
+  await saveBasis(r, 'beforeFees');
+  const t = await loadPopup({ local: r.local, records: cut });
+  await t.scan();
+  assert.equal(t.status(), '', 'the scan went through');
+  assert.deepEqual(moves(t), [[27163, 26663]], 'To do: the next change is the website\'s own $500 cut');
+  assert.deepEqual([todo.price, todo.basis], ['27163', 'website']);
+  assert.equal(t.local[k.posted][ram.vin].basis, 'website');
 });
 
 // Settings says before the save that a change is for new posts, with how

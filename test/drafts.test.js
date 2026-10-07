@@ -47,8 +47,9 @@ test('a draft published after the website dropped the price is recorded at the d
   for (const prev of [day1, day3]) {
     const d = diffScans(prev, dropped(1500), { posted });
     assert.deepEqual(d.priceUpdates.map((p) => [p.vin, p.from, p.to, p.yours]), [[VIN, 27163, 25663, true]]);
-    const { vin, from, to, change, yours } = d.priceUpdates[0];
-    assert.deepEqual({ vin, from, to, change, yours }, { vin: now.vin, from: now.from, to: now.to, change: now.change, yours: now.yours });
+    const { vin, from, to, change, yours, basis } = d.priceUpdates[0];
+    assert.deepEqual({ vin, from, to, change, yours, basis }, { vin: now.vin, from: now.from, to: now.to, change: now.change, yours: now.yours, basis: now.basis });
+    assert.equal(basis, 'website', 'with the basis the price was worked out on, which Updated records on a listing that has none');
   }
   // once the person updates the listing, nothing more
   assert.deepEqual(diffScans(day3, dropped(1500), { posted: markPriceUpdated(posted, VIN, 25663) }).priceUpdates, []);
