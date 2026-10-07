@@ -1010,30 +1010,62 @@ const SMALL_NUMBERS = Object.freeze(['zero', 'one', 'two', 'three', 'four', 'fiv
 const ORDINAL_WORDS = Object.freeze(['', 'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth', 'eleventh', 'twelfth', 'thirteenth', 'fourteenth', 'fifteenth', 'sixteenth', 'seventeenth', 'eighteenth', 'nineteenth', 'twentieth']);
 // The value with each number up to twenty, or "1st" to "20th", written as a
 // word: "2nd shift sales" is "Second shift sales", "Team 3 Sales" is "Team
-// Three Sales" (a capital at the start, or where the word after it has one).
-// '' when a number is left that no word stands in for ("24/7", "Route19").
+// Three Sales". The word takes a capital at the start of the value, or where
+// the word after it has one, or, with no word after it, where the word
+// before it has one ("Sales Associate 2" is "Sales Associate Two"). Only a
+// number that stands as a word of its own is written: after the start, a
+// space or an opening bracket or quote, and before the end, a space, a
+// closing bracket or quote, a comma, a semicolon, "!" or "?", or a stop or a
+// colon that ends the value or comes before a space. '' when a number is left
+// that no word stands in for ("24/7", "Route19", "#1", "$0", "0%", "2.0").
+const NUMBER_ALONE = /(?<=^|[\s(\[{"'\u2018\u201c])(\d{1,2})(st|nd|rd|th)?(?=$|[\s)\]}"'\u2019\u201d,;!?]|[.:](?:\s|$))/gi;
+const startsUpper = (c) => Boolean(c) && c !== c.toLowerCase();
 export function numbersAsWords(value) {
   const v = oneLine(value);
-  const out = v.replace(/\b(\d{1,2})(st|nd|rd|th)?\b/gi, (said, n, nth, at) => {
+  const out = v.replace(NUMBER_ALONE, (said, n, nth, at) => {
     const word = (nth ? ORDINAL_WORDS : SMALL_NUMBERS)[Number(n)];
     if (!word) return said;
-    const next = /^\s+(\S)/.exec(v.slice(at + said.length));
-    return at === 0 || (next && next[1] !== next[1].toLowerCase()) ? capitalize(word) : word;
+    const before = v.slice(0, at);
+    if (!/[\p{L}\p{N}]/u.test(before)) return capitalize(word);
+    const next = /^[^\p{L}\p{N}]*(\p{L})/u.exec(v.slice(at + said.length));
+    const prev = /(\p{L})\p{L}*[^\p{L}\p{N}]*$/u.exec(before);
+    return startsUpper(next ? next[1] : prev && prev[1]) ? capitalize(word) : word;
   });
   return /\d/.test(out) ? '' : out;
 }
-// The value without its words that hold a number ("Sam 2" is "Sam").
-const withoutNumberWords = (value) => oneLine(value).split(' ').filter((w) => !/\d/.test(w)).join(' ');
+// The value without its digits, and an ordinal ending after them, and without
+// what is left with no letter ("Sam 2" and "Sam2" are "Sam", "J2 Smith" is
+// "J Smith", "Sam (2)" is "Sam").
+const withoutDigits = (value) => oneLine(oneLine(value).replace(/\d+(?:(?:st|nd|rd|th)(?!\p{L}))?/giu, '')).split(' ').filter((w) => /\p{L}/u.test(w)).join(' ');
 const SETTING_WORDS = Object.freeze({
   role: Object.freeze({ your: 'Your role', field: 'Your role', example: numbersAsWords, otherwise: 'write the number as a word or leave it out' }),
-  name: Object.freeze({ your: 'Your name', field: 'Your name', example: withoutNumberWords, otherwise: 'leave the number out' }),
+  name: Object.freeze({ your: 'Your name', field: 'Your name', example: withoutDigits, otherwise: 'leave the number out' }),
   dealer: Object.freeze({ your: "Your dealership's name", field: 'Dealership name', example: numbersAsWords, otherwise: 'write the number as a word' }),
 });
+// The way to write the value that the reason and the warning offer ('' for
+// none): offered only when the sign-off written with it gives the checks no
+// problem the sign-off with the plain role gives none of ("1 owner car
+// specialist" written "One owner car specialist" says one owner, which only
+// the Carfax flag may say). The example holds no digit, so checking it never
+// comes back here.
+const EXAMPLE_SLOT = Object.freeze({ role: 'title', name: 'person', dealer: 'dealerName' });
+function signOffCodes(slot) {
+  const s = { person: '', title: DEFAULT_SALESPERSON_TITLE, dealerName: '', ...slot };
+  const g = runGuardrails(signOffLine(s.person, s.title, s.dealerName), { salesperson: { name: s.person, title: s.title }, dealer: { name: s.dealerName } });
+  return new Set(g.problems.map((p) => p.code));
+}
+function exampleOf(setting, value) {
+  const v = oneLine(value);
+  const example = SETTING_WORDS[setting].example(v);
+  if (!example || example === v) return '';
+  const plain = signOffCodes({});
+  return [...signOffCodes({ [EXAMPLE_SLOT[setting]]: example })].every((code) => plain.has(code)) ? example : '';
+}
 // The reason a description fails because of a number in one of these settings.
 function settingNumberText(setting, value) {
   const w = SETTING_WORDS[setting];
-  const example = w.example(value);
-  const how = example && example !== value ? `, for example to "${example}"` : `: ${w.otherwise}`;
+  const example = exampleOf(setting, value);
+  const how = example ? `, for example to "${example}"` : `: ${w.otherwise}`;
   const why = setting === 'dealer'
     ? 'reads as a price or a mileage, and every price and mileage in a description must match the listing'
     : "has a number in it, and every number in a description must match the website's data for the car";
@@ -1075,8 +1107,8 @@ function settingWarning(setting, value) {
   const v = oneLine(value);
   const w = SETTING_WORDS[setting];
   if (!w || !/\d/.test(v)) return null;
-  const example = w.example(v);
-  const like = example && example !== v ? `, for example "${example}"` : '';
+  const example = exampleOf(setting, v);
+  const like = example ? `, for example "${example}"` : '';
   if (setting === 'dealer') {
     const said = [...mileageClaims(v), ...dollarAmounts(v)];
     if (!said.length) return null;

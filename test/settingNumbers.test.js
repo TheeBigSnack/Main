@@ -72,7 +72,9 @@ test('a name with a number gets the same reason; a dealership name with a number
     text: 'Your name "Sam 2" has a number in it, and every number in a description must match the website\'s data for the car; change it in Settings (Your name), for example to "Sam"',
   }]);
   const glued = checked(ctxFor({ salesperson: { name: 'Sam2', title: 'sales consultant' } })).g;
-  assert.deepEqual(ruleProblems(glued).map((p) => p.text), ['Your name "Sam2" has a number in it, and every number in a description must match the website\'s data for the car; change it in Settings (Your name): leave the number out']);
+  assert.deepEqual(ruleProblems(glued).map((p) => p.text), ['Your name "Sam2" has a number in it, and every number in a description must match the website\'s data for the car; change it in Settings (Your name), for example to "Sam"']);
+  const digits = checked(ctxFor({ salesperson: { name: '22', title: 'sales consultant' } })).g;
+  assert.deepEqual(ruleProblems(digits).map((p) => p.text), ['Your name "22" has a number in it, and every number in a description must match the website\'s data for the car; change it in Settings (Your name): leave the number out'], 'no letter left: no example');
   // both: each setting is named
   const both = checked(ctxFor({ salesperson: { name: 'Sam 2', title: '3rd shift sales' } })).g;
   assert.deepEqual(ruleProblems(both).map((p) => p.text.slice(0, 30)), ['Your role "3rd shift sales" ha', 'Your name "Sam 2" has a number']);
@@ -285,4 +287,47 @@ test('typing a role in Settings: the warning under it follows every key, and the
   type('');
   assert.equal(writes(), 2);
   assert.equal(text(liveEl), '');
+});
+
+// ---------- the example offered ----------
+// The example is offered only when it is a plain way to write the value:
+// a number with "#", "$", "%", a decimal point or another number at it gets
+// none ("#one salesman", "Sales two.zero" are no help), a number word takes a
+// capital where the words around it have one, and an example that would fail
+// a check of its own ("One owner car specialist" says one owner) is not
+// offered. A name loses only its digits, never a whole word.
+test('numbers as words: a number with a sign, a decimal point or another number at it gets no word', () => {
+  for (const value of ['#1 salesman', 'Sales 2.0', '0% APR specialist', '$0 down specialist', 'Team 2-3', 'shift 3:30']) {
+    assert.equal(numbersAsWords(value), '', value);
+  }
+  assert.equal(numbersAsWords('Sales Associate 2'), 'Sales Associate Two', 'the last word takes the capital of the word before it');
+  assert.equal(numbersAsWords('Internet Sales (Store 2)'), 'Internet Sales (Store Two)');
+  assert.equal(numbersAsWords('sales associate 2'), 'sales associate two');
+  assert.equal(numbersAsWords('Sales 2nd shift'), 'Sales second shift', 'the word after it decides when there is one');
+  assert.equal(numbersAsWords('Shift 2.'), 'Shift Two.', 'a stop that ends the value is not a decimal point');
+});
+
+test('an example that would fail a check of its own is not offered, and a name loses only its digits', () => {
+  const owner = '1 owner car specialist';
+  assert.equal(numbersAsWords(owner), 'One owner car specialist');
+  assert.equal(settingNumberWarning('role', owner), 'A number in your role ("1") keeps the Marketplace form shut for nearly every car: every number in a description must match the website\'s data for the car. Write the number as a word or leave it out.');
+  const g = checked(ctxFor({ salesperson: { name: 'Sam', title: owner } })).g;
+  assert.equal(g.problems.find((p) => p.code === 'setting-number').text, 'Your role "1 owner car specialist" has a number in it, and every number in a description must match the website\'s data for the car; change it in Settings (Your role): write the number as a word or leave it out');
+  for (const value of ['#1 salesman', 'Sales 2.0', '0% APR specialist', '$0 down specialist']) {
+    assert.ok(!/for example/.test(settingNumberWarning('role', value)), value);
+  }
+  assert.match(settingNumberWarning('role', 'Sales Associate 2'), /, for example "Sales Associate Two"\.$/);
+
+  assert.equal(settingNumberWarning('name', 'J2 Smith'), 'A number in your name ("J2") keeps the Marketplace form shut for nearly every car: every number in a description must match the website\'s data for the car. Leave it out, for example "J Smith".');
+  assert.match(settingNumberWarning('name', 'Sam2'), /, for example "Sam"\.$/);
+  assert.match(settingNumberWarning('name', 'Sam 2nd'), /, for example "Sam"\.$/);
+  assert.match(settingNumberWarning('name', 'Sam (2)'), /, for example "Sam"\.$/);
+  const glued = checked(ctxFor({ salesperson: { name: 'J2 Smith', title: 'sales consultant' } })).g;
+  assert.deepEqual(ruleProblems(glued).map((p) => p.text), ['Your name "J2 Smith" has a number in it, and every number in a description must match the website\'s data for the car; change it in Settings (Your name), for example to "J Smith"']);
+  // every example offered passes the checks in the template
+  for (const [setting, value] of [['role', 'Sales Associate 2'], ['role', 'Internet Sales (Store 2)'], ['name', 'J2 Smith'], ['name', 'Sam2']]) {
+    const example = /for example "([^"]+)"/.exec(settingNumberWarning(setting, value))[1];
+    const c = ctxFor({ salesperson: setting === 'role' ? { name: 'Sam', title: example } : { name: example, title: 'sales consultant' } });
+    assert.deepEqual(checked(c).g.problems, [], example);
+  }
 });

@@ -115,6 +115,10 @@ const texts = [
   sixty('2019 Ram 1500 Big Horn with 41,230 miles and a 3.92 axle.').replace('I am Alex, sales consultant', 'I am Alex 2, 3rd shift sales') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn with 41,230 miles.').replace(/Example Motors/g, '8 Mile Auto') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn with 41,230 miles, in row 2.').replace('sales consultant', 'Team 2 sales, 24/7') + '\nVIN TESTVIN0000000001.',
+  // the example the reason offers: none that fails a check of its own, none for "#1", a name that loses only its digits
+  sixty('2019 Ram 1500 Big Horn with 41,230 miles.').replace('I am Alex, sales consultant', 'I am J2 Smith, 1 owner car specialist') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn with 41,230 miles.').replace('sales consultant', 'Sales Associate 2') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn with 41,230 miles.').replace('sales consultant', '#1 salesman') + '\nVIN TESTVIN0000000001.',
 ];
 const contexts = [
   { vehicle, dealer, priceNote: '', price: 28995 },
@@ -148,6 +152,9 @@ const contexts = [
   { vehicle, dealer: { name: '8 Mile Auto', city: 'Springfield' }, salesperson: { name: 'Alex', title: 'sales consultant' }, priceNote: '', price: 28995 },
   { vehicle, dealer: { name: 'Route 19 Motors', city: 'Springfield' }, salesperson: { name: 'Alex', title: 'Team 2 sales, 24/7' }, priceNote: '', price: 28995 },
   { vehicle, dealer, salesperson: { name: 'Alex', title: '2' }, priceNote: '', price: 28995 },
+  { vehicle, dealer, salesperson: { name: 'J2 Smith', title: '1 owner car specialist' }, priceNote: '', price: 28995 },
+  { vehicle, dealer, salesperson: { name: 'Alex', title: 'Sales Associate 2' }, priceNote: '', price: 28995 },
+  { vehicle, dealer, salesperson: { name: 'Alex', title: '#1 salesman' }, priceNote: '', price: 28995 },
   {},
 ];
 
@@ -167,7 +174,7 @@ assert.deepEqual(JSON.parse(JSON.stringify(BANNED_UNLESS)), JSON.parse(JSON.stri
 assert.deepEqual(JSON.parse(JSON.stringify(PRICE_NOTE_UNLESS)), JSON.parse(JSON.stringify(JS_NOTE_UNLESS)));
 assert.deepEqual(CLAIM_KINDS.map((k) => [k.what, String(k.re), Boolean(k.part), String(k.hedge), String(k.sourceRe)]), JS_CLAIMS.map((k) => [k.what, String(k.re), Boolean(k.part), String(k.hedge), String(k.sourceRe)]));
 assert.deepEqual([...settingsNamed].sort(), ["Your dealership's name", 'Your name', 'Your role']);
-for (const value of ['2nd shift sales', 'sales, 2nd shift', 'Team 3 Sales', '8 Mile Auto', '12th Street Motors', 'sales, 24/7', 'Route19', 'sales consultant', '', '0th', '21st']) assert.equal(tsWords(value), jsWords(value), value);
+for (const value of ['2nd shift sales', 'sales, 2nd shift', 'Team 3 Sales', '8 Mile Auto', '12th Street Motors', 'sales, 24/7', 'Route19', 'sales consultant', '', '0th', '21st', '#1 salesman', 'Sales 2.0', '0% APR specialist', '$0 down specialist', 'Sales Associate 2', 'Internet Sales (Store 2)', 'Sales 2nd shift', 'Shift 2.', '(2nd shift)', '“3rd” shift']) assert.equal(tsWords(value), jsWords(value), value);
 for (const text of texts) assert.deepEqual(tsSpelled(text), jsSpelled(text));
 for (const ctx of contexts) assert.deepEqual([...tsOwn(ctx.vehicle)], [...jsOwn(ctx.vehicle)]);
 assert.deepEqual({ ...WORD_LIMITS }, { ...JS_LIMITS });
