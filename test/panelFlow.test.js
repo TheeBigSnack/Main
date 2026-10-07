@@ -33,6 +33,7 @@ import { vehicle } from './helpers.js';
 import { noteTakenDown, relistNotice } from '../extension/src/takenDown.js';
 import { POSTING_RULES } from '../extension/src/postingRules.js';
 import { beginPost, endPost, notePostStep } from '../extension/src/pilot.js';
+import { notSavedReport } from '../extension/src/notSaved.js';
 
 const src = readFileSync(new URL('../extension/sidepanel.js', import.meta.url), 'utf8')
   .replace(/\/\*[\s\S]*?\*\//g, '')
@@ -3172,6 +3173,8 @@ test('a second window\'s side panel opens no second form for a car whose post is
 // as it goes); fillSaves: the fill saves the post at publish with its form's
 // tab, as runFill does; pilot: the panels note their posts in one shared
 // pilot record with src/pilot.js's own beginPost, endPost and notePostStep.
+// A refused save is said with sidepanel.js's own notSavedHere (and
+// src/notSaved.js); each panel's els stands for the boxes on its screen.
 function twoPanels({ panelsOpen = [1, 2], fillSaves = false, pilot = false } = {}) {
   const ORIGIN = 'https://www.example-motors.test';
   const FORM_STEPS = new Function(`return ${/const FORM_STEPS = (\[[^\]]*\]);/.exec(src)[1]}`)();
@@ -3193,14 +3196,16 @@ function twoPanels({ panelsOpen = [1, 2], fillSaves = false, pilot = false } = {
   const panel = (windowId) => {
     const calls = [];
     const reads = [];
+    const els = {};
     const state = {
       origin: ORIGIN, posted: {}, vin: null, step: 'idle', map: FORM_MAP, snapshotVehicles: { AAA: { name: NAMES.AAA }, BBB: { name: NAMES.BBB } },
       settings: { rulesReadAt: '2026-09-30T12:00:00.000Z', salesperson: { name: 'Pat' }, dealer: DEALER, defaults: {} },
     };
-    const names = ['startFlow', 'clearFlow', 'saveFlow', 'dropSavedFlow', 'liveElsewhere', 'postElsewhere', 'elsewhereText', 'giveWay', 'openForm', 'resumeFlow'].filter((n) => new RegExp(`(async )?function ${n}\\(`).test(src));
+    const names = ['startFlow', 'clearFlow', 'saveFlow', 'dropSavedFlow', 'liveElsewhere', 'postElsewhere', 'elsewhereText', 'giveWay', 'openForm', 'resumeFlow', 'notSavedHere', 'onClick'].filter((n) => new RegExp(`(async )?function ${n}\\(`).test(src));
     let fns = null;
     fns = compileMany(names, {
       state, panelWindowId: windowId, flowRun: 0, watcher: null, LIVE_STEPS, FORM_STEPS, FLOW_FIELDS, FORM_MAP, updateKey, withLock, // one lock for both panels, as Chrome's Web Locks are
+      notSavedReport, $: (id) => els[id] || null, inputTimer: null, promptOpen: false,
       siteKeys: (o) => ({ flow: 'postFlow:' + o }),
       GLOBAL_KEYS: { postRequest: 'postRequest', lastPostOrigin: 'lastPostOrigin', devOverrides: 'devOverrides' },
       chrome: {
@@ -3225,7 +3230,9 @@ function twoPanels({ panelsOpen = [1, 2], fillSaves = false, pilot = false } = {
       buildListingData: () => ({ fields: {} }), pickedPhotos: () => [], applyOverrides: (m) => m, waitForTabLoad: async () => {}, sleep: async () => {},
       runFill: async () => { state.step = 'publish'; if (fillSaves) await fns.saveFlow(); }, runProbe: never('runProbe'),
     }, /^const flowStorage = /m.test(src) ? ['flowStorage'] : []);
-    return { state, calls, fns, reads };
+    // a click on one of the panel's buttons, as onClick runs it
+    const click = (id) => fns.onClick({ target: { closest: () => ({ id, dataset: {} }) } });
+    return { state, calls, fns, reads, els, click };
   };
   const until = async (ok) => { for (let i = 0; i < 200 && !ok(); i++) await later(); assert.ok(ok(), 'the panels got there'); };
   const A = panel(1);
@@ -3390,11 +3397,11 @@ test('a save or a clear never replaces or removes the post another window\'s sid
 
 // A side panel opened in a second window shows the post window 1's panel
 // has at review (resumeFlow), and window 1's panel then opens the car's form.
-// Nothing that out-of-date copy saves (text typed into the description, a
-// photo ticked, Use the template, Write it again) replaces the post with the
-// form's tab, so a panel reopened in window 1 brings the form back, and the
-// second window's Open the Marketplace form opens no second form, with window
-// 1's side panel open or closed. Run with sidepanel.js's own resumeFlow,
+// The second window's Open the Marketplace form opens no second form, with
+// window 1's side panel open or closed, and nothing that out-of-date copy
+// saves (text typed into the description, a photo ticked, Use the template,
+// Write it again) replaces the post with the form's tab, so a panel reopened
+// in window 1 brings the form back. Run with sidepanel.js's own resumeFlow,
 // saveFlow, openForm and the window checks.
 test('an out-of-date copy of a post in a second window\'s side panel never replaces it, and opens no second form', async () => {
   const open = [1, 2];
@@ -3412,9 +3419,6 @@ test('an out-of-date copy of a post in a second window\'s side panel never repla
   assert.deepEqual(t.forms, ['window 1: form for AAA']);
   const formPost = JSON.parse(JSON.stringify(t.store[key]));
   assert.deepEqual([formPost.step, formPost.windowId, formPost.fbTabId], ['publish', 1, 100], 'saved with its form\'s tab');
-  B.state.description = 'typed in window 2';
-  const other = await B.fns.saveFlow();
-  const savedAfter = JSON.parse(JSON.stringify(t.store[key]));
   // Open the Marketplace form in window 2, with window 1's side panel open, then closed (its form's tab still open there)
   const said = [];
   for (const panels of [[1, 2], [2]]) {
@@ -3423,11 +3427,134 @@ test('an out-of-date copy of a post in a second window\'s side panel never repla
     await B.fns.openForm();
     said.push(B.calls.join(' | '));
   }
+  // text typed into the copy, window 1's side panel open again (a save refused this way is said: its own test is next)
+  open.splice(0, open.length, 1, 2);
+  B.state.description = 'typed in window 2';
+  const other = await B.fns.saveFlow();
+  const savedAfter = JSON.parse(JSON.stringify(t.store[key]));
   assert.deepEqual(t.forms, ['window 1: form for AAA'], 'no second form');
   for (const text of said) assert.match(text, /^status\(error\): 2020 Make Model A's Marketplace form is already open from the side panel in another Chrome window, so no second form opens here/);
   assert.deepEqual(savedAfter, formPost, 'the copy\'s save leaves the post with the form\'s tab as it was');
   assert.deepEqual(other, { where: 'form', vin: 'AAA', name: '2020 Make Model A' }, 'the save says whose post it is');
   assert.deepEqual(t.store[key], formPost, 'a panel reopened in window 1 brings the form back');
+});
+
+// The same copy in window 2, saved once while it was the post as it stands
+// (a photo ticked there), then window 1's panel opens the form, and text is
+// typed into window 2's copy (more of it while the save runs). That save is
+// refused, as above, and window 2's panel now says so: what happened and
+// what to do, the description as its box shows it kept to copy, and the
+// photo pick named as not saved (window 1's post never had it). Window 2's
+// panel leaves its copy and opens nothing; the post stays window 1's, its
+// attempt in the pilot numbers still open there; Back to the list in window
+// 2 leaves it too. Run with sidepanel.js's own saveFlow, notSavedHere,
+// clearFlow, resumeFlow, openForm and the window checks, and src/notSaved.js.
+test('a save refused in a second window\'s side panel is said there, with the text typed there kept to copy', async () => {
+  const t = twoPanels({ panelsOpen: [1, 2], fillSaves: true, pilot: true });
+  const { A, B } = t;
+  const key = 'postFlow:' + t.ORIGIN;
+  const a = A.fns.startFlow({ origin: t.ORIGIN, vin: 'AAA', dealerTabId: null, windowId: 1, queue: false });
+  await t.until(() => A.reads.length === 1);
+  await t.answer(A);
+  await a;
+  await B.fns.resumeFlow(t.ORIGIN, JSON.parse(JSON.stringify(t.store[key])));
+  assert.deepEqual([B.state.vin, B.state.step, B.state.windowId], ['AAA', 'review', 1], 'window 2 shows window 1\'s post');
+  B.state.photoPick = ['https://img.example.test/2.jpg'];
+  assert.equal(await B.fns.saveFlow(), null, 'a pick made while the copy is the post as it stands is saved');
+  await A.fns.openForm();
+  const formPost = JSON.parse(JSON.stringify(t.store[key]));
+  assert.deepEqual([formPost.step, formPost.windowId, formPost.photoPick ?? null], ['publish', 1, null], 'window 1\'s form, saved over the copy\'s pick');
+  B.state.description = 'typed in window 2';
+  B.els.description = { value: 'typed in window 2, and more after the save began' };
+  B.calls.length = 0;
+  const other = await B.fns.saveFlow();
+  assert.deepEqual(other, { where: 'form', vin: 'AAA', name: '2020 Make Model A' });
+  assert.deepEqual(t.store[key], formPost, 'nothing is written over window 1\'s post');
+  assert.deepEqual([B.state.vin, B.state.step], [null, 'notSaved'], `window 2's panel leaves its copy and says why (${B.calls.join(' | ')})`);
+  const r = B.state.notSaved;
+  assert.equal(r.text, "2020 Make Model A's Marketplace form is open from the side panel in another Chrome window, and the post changed there after this side panel showed it, so what was done here was not saved. Finish the post there; opening the side panel in that window brings it back.");
+  assert.deepEqual(r.kept, [{ key: 'description', label: 'Description', value: 'typed in window 2, and more after the save began' }], 'the text as the box shows it is kept');
+  assert.deepEqual(r.notSaved, ['the photos picked']);
+  assert.deepEqual(t.forms, ['window 1: form for AAA'], 'no second form');
+  const attempts = (t.record.pilot.posts || []).map((x) => ({ vin: x.vin, outcome: x.outcome || 'open', formOpened: Boolean(x.formOpenedAt) }));
+  assert.deepEqual(attempts, [{ vin: 'AAA', outcome: 'open', formOpened: true }], 'the attempt stays open: window 1 carries it on');
+  // Back to the list in window 2: the post stays window 1's
+  await B.click('back');
+  assert.deepEqual([B.state.step, B.state.notSaved], ['idle', null]);
+  assert.deepEqual(t.store[key], formPost);
+});
+
+// A copy at Publish in a second window shows the listing link its own
+// watcher offered (the box filled from the listing page it read,
+// offeredLink), which nobody typed. A refused save there keeps what was
+// typed into Listing link (state.listingTyped, set on every keystroke),
+// never the link the panel offered; the description is read from its box,
+// where typing lands before its save. sidepanel.js's own notSavedHere, with
+// src/notSaved.js.
+test('a refused save in a second window keeps the listing link typed there, not the one its side panel offered', async () => {
+  const run = async (listingTyped) => {
+    const post = { vin: 'AAA', windowId: 1, step: 'publish', fbTabId: 100, vehicle: { vin: 'AAA', name: '2020 Make Model A' }, description: 'The template.', descriptionSource: 'template', photoPick: null, highlights: null, colorGuess: null, vinCheck: null, saveId: 'save-1' };
+    const state = { ...JSON.parse(JSON.stringify(post)), origin: 'https://www.example-motors.test', detected: { status: 'listing', url: 'https://www.facebook.com/marketplace/item/111/', verified: true }, listingTyped, broughtBack: JSON.parse(JSON.stringify(post)) };
+    const boxes = { description: { value: 'The template.' }, listingUrl: { value: listingTyped ?? 'https://www.facebook.com/marketplace/item/111/' } };
+    const notSavedHere = compile('notSavedHere', {
+      state, notSavedReport, inputTimer: null, flowRun: 1, $: (id) => boxes[id] || null,
+      clearFlow: async ({ keepSaved }) => { assert.equal(keepSaved, true); Object.assign(state, { vin: null, step: 'idle', notSaved: null }); return 1; },
+      setStatus: () => {}, render: () => {},
+    });
+    await notSavedHere({ where: 'form', vin: 'AAA', name: '2020 Make Model A' }, { ...post, saveId: 'save-2', description: 'typed in window 1' });
+    assert.equal(state.step, 'notSaved');
+    return state.notSaved.kept;
+  };
+  assert.deepEqual(await run(null), [], 'the offered link, and the description as it was brought back, are not kept as typed here');
+  assert.deepEqual(await run(' https://www.facebook.com/marketplace/item/222/ '), [{ key: 'listingTyped', label: 'Listing link', value: 'https://www.facebook.com/marketplace/item/222/' }], 'a link typed here is kept');
+});
+
+// The same refused save in window 2, of a copy window 1's side panel has
+// at review (text typed there since), and then window 1's side panel closes,
+// with no Marketplace form open there. The post is window 1's still: a side
+// panel reopened in window 1 brings it back, with the text typed there.
+// Window 2's panel holds no post once it said the save was refused, so
+// nothing it does from there removes that post: not Back to the list, nor
+// anything else that clears it (set-up starting there, say). Run with
+// sidepanel.js's own onClick, clearFlow, saveFlow, notSavedHere and the
+// window checks.
+test('Back to the list after a refused save in a second window leaves the other window\'s post, with that window\'s side panel closed', async () => {
+  const open = [1, 2];
+  const t = twoPanels({ panelsOpen: open });
+  const { A, B } = t;
+  const key = 'postFlow:' + t.ORIGIN;
+  const a = A.fns.startFlow({ origin: t.ORIGIN, vin: 'AAA', dealerTabId: null, windowId: 1, queue: false });
+  await t.until(() => A.reads.length === 1);
+  await t.answer(A);
+  await a;
+  await B.fns.resumeFlow(t.ORIGIN, JSON.parse(JSON.stringify(t.store[key])));
+  A.state.description = 'typed in window 1';
+  assert.equal(await A.fns.saveFlow(), null);
+  const theirs = JSON.parse(JSON.stringify(t.store[key]));
+  assert.equal(theirs.description, 'typed in window 1');
+  B.state.description = 'typed in window 2';
+  B.els.description = { value: 'typed in window 2' };
+  assert.deepEqual(await B.fns.saveFlow(), { where: 'review', vin: 'AAA', name: '2020 Make Model A' });
+  assert.equal(B.state.step, 'notSaved');
+  // window 1's side panel closes, its post at review with no form open
+  open.splice(0, open.length, 2);
+  await B.click('back');
+  assert.deepEqual([B.state.step, B.state.notSaved], ['idle', null], 'Back goes to the list');
+  assert.deepEqual(t.store[key], theirs, 'window 1\'s post is still there for its side panel to bring back');
+  // what else clears window 2's panel from that screen (set-up starting there) leaves it too
+  B.state.description = 'typed in window 2 again';
+  B.els.description = { value: 'typed in window 2 again' };
+  open.splice(0, open.length, 1, 2);
+  await B.fns.resumeFlow(t.ORIGIN, JSON.parse(JSON.stringify(t.store[key])));
+  A.state.description = 'typed in window 1, more';
+  assert.equal(await A.fns.saveFlow(), null);
+  const later = JSON.parse(JSON.stringify(t.store[key]));
+  B.els.description = { value: 'typed in window 2, more' };
+  await B.fns.saveFlow();
+  assert.equal(B.state.step, 'notSaved');
+  open.splice(0, open.length, 2);
+  await B.fns.clearFlow();
+  assert.deepEqual(t.store[key], later, 'a clear from that screen leaves window 1\'s post');
 });
 
 // Continue in the side panel (a post request for the car under way) in a

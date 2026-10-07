@@ -11,6 +11,9 @@ section h3 { margin: 0 0 6px; }
 .car .posting { margin-top: 6px; }
 
 textarea#description { width: 100%; min-height: 220px; resize: vertical; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px; line-height: 1.4; }
+/* a refused save's kept text (viewNotSaved): read-only, to copy */
+textarea.kept { width: 100%; min-height: 180px; resize: vertical; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px; line-height: 1.4; }
+textarea.kept.short { min-height: 0; height: auto; }
 .checks { font-size: 12px; margin: 6px 0; }
 .checks.ok { color: var(--good); }
 .checks.bad { color: var(--bad); }
