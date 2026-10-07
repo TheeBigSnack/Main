@@ -952,10 +952,15 @@ function newPartsSaid(text, re, more) {
 // "new <part>" claim is followed across commas, "and", "&", "/", "+" and
 // "plus" (LIST_JOIN): each next item that is a part on its own (LIST_ITEM:
 // maybe after "the", "a", "an" or "both", "new" or "brand new", and "front",
-// "rear", "front and rear" or "front/rear"; maybe named in two part words,
-// "brake pads") is claimed too, and the list stops at the first item that is
-// anything else (a spec or brand word before a part, "HEMI engine",
-// "automatic transmission", "Bosch wipers", is not a part on its own). A
+// "rear", "front and rear" or "front/rear"; "brake pads" and "brake rotors"
+// are one part each, LIST_TAIL) is claimed too, and the list stops at the
+// first item that is anything else (a spec or brand word before a part,
+// "HEMI engine", "automatic transmission", "Bosch wipers", is not a part on
+// its own; nor are two parts with nothing between them, "tires brakes"). The
+// list never goes on past a line break, apart from the join "and", "&" or
+// "plus" with spaces around it, which crossed one before the list was read
+// ("New tires\nand brakes"), so the next line that starts with a part ("New
+// tires\nBrakes, rotors and pads were inspected.") is not on it. A
 // listed part followed by words about its state ("inspected", "checked",
 // "serviced", "look(s)", "good", "in good shape", "original", maybe after
 // "is", "are", "were", "have been" and the like: LIST_STATE) is not claimed,
@@ -971,11 +976,13 @@ function newPartsSaid(text, re, more) {
 // the template's highlights line passes its own check. An item that says
 // "new" itself is quoted from its "new" ("new brakes"); any other from the
 // start of the list.
-const LIST_JOIN = /^(?:\s*,\s*(?:(?:and|plus)\s+|[&+/]\s*)?|\s*[&+/]\s*|\s+(?:and|plus)\s+)/i;
-const ONLY_A_COMMA = /^\s*,\s*$/;
-const LIST_ITEM = new RegExp(`^(?:(?:the|a|an|both)\\s+)?((?:brand[\\s-]+)?new\\s+)?(?:(?:front\\s*(?:and|&|\\/)\\s*rear|rear\\s*(?:and|&|\\/)\\s*front|front|rear)\\s+)?(${PARTS})\\b(?:\\s+(?:${PARTS})\\b)?`, 'i');
-const LIST_TAIL = new RegExp(`^\\s+(?:${PARTS})\\b`, 'i');
-const LIST_STATE = /^\s+(?:(?:is|are|was|were|has|have|had|been|got|all|both|also)\s+){0,3}(?:inspected|checked|serviced|looks?|good|in\s+good\s+shape|original)\b/i;
+const LIST_JOIN = /^(?:[^\S\n]*,[^\S\n]*(?:(?:and|plus)[^\S\n]+|[&+/][^\S\n]*)?|[^\S\n]*[&+/][^\S\n]*|\s+(?:and|&|plus)\s+)/i;
+const ONLY_A_COMMA = /^[^\S\n]*,[^\S\n]*$/;
+const SP = '[^\\S\\n]'; // a space that is not a line break
+const LIST_ITEM = new RegExp(`^(?:(?:the|a|an|both)${SP}+)?((?:brand(?:${SP}|-)+)?new${SP}+)?(?:(?:front${SP}*(?:and|&|\\/)${SP}*rear|rear${SP}*(?:and|&|\\/)${SP}*front|front|rear)${SP}+)?(${PARTS})\\b(?:(?<=brakes?)${SP}+(?:pads|rotors?)\\b)?`, 'i');
+const BRAKE = /^brakes?$/i;
+const LIST_TAIL = new RegExp(`^${SP}+(?:pads|rotors?)\\b`, 'i');
+const LIST_STATE = new RegExp(`^${SP}+(?:(?:is|are|was|were|has|have|had|been|got|all|both|also)${SP}+){0,3}(?:inspected|checked|serviced|looks?|good|in${SP}+good${SP}+shape|original)\\b`, 'i');
 const ITEM_NEW = /(?:brand[\s-]+)?new\b/i;
 // where a feature written in the text ends: a mark that ends or joins an item, the end of the line, "and" or "plus"
 const FEATURE_ENDS = "(?=[^\\S\\n]*(?:[,.;:!?&+/)\\]}\"'\u2019\u201d\u2026\\n]|$)|\\s+(?:and|plus)\\b)";
@@ -997,7 +1004,7 @@ function newPartsListed(text, re, features) {
     if (whole) end = whole[1];
     else {
       out.push({ said: m[0], part: partKey(m[1]) });
-      const tail = LIST_TAIL.exec(t.slice(end));
+      const tail = BRAKE.test(m[1]) && LIST_TAIL.exec(t.slice(end));
       if (tail) end += tail[0].length;
     }
     for (let join = LIST_JOIN.exec(t.slice(end)); join; join = LIST_JOIN.exec(t.slice(end))) {

@@ -13,6 +13,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildTemplateDescription, runGuardrails } from '../extension/src/rewriteTemplate.js';
+import { runGuardrails as hostedGuardrails } from '../supabase/functions/_shared/guardrails.ts';
 import { vehicle } from './helpers.js';
 
 const FEATURES = ['Power Windows', 'Cruise Control', 'Backup Camera', 'Bluetooth', 'Keyless Entry', 'Tow Package', 'Navigation System', 'Heated Seats', 'Apple CarPlay'];
@@ -25,8 +26,15 @@ const car = (patch = {}) => ({
 });
 const ctxOf = (v = car()) => ({ vehicle: v, dealer: EXAMPLE, salesperson: SAM, priceNote: '', price: v.price });
 const PART = /^Says "(.*)", but the website says nothing about new or replaced parts for this car$/s;
-// the new-part claims the checks find in the template with the sentence added
-const claimed = (sentence, c = ctxOf()) => runGuardrails(`${buildTemplateDescription(c)}\n${sentence}`, c).problems.map((p) => PART.exec(p.text)).filter(Boolean).map((m) => m[1]);
+// the new-part claims the checks find in the template with the sentence
+// added; the hosted checker (supabase/functions/_shared/guardrails.ts) must
+// find the same problems
+const claimed = (sentence, c = ctxOf()) => {
+  const text = `${buildTemplateDescription(c)}\n${sentence}`;
+  const { problems } = runGuardrails(text, c);
+  assert.deepEqual(JSON.parse(JSON.stringify(hostedGuardrails(text, c).problems)), JSON.parse(JSON.stringify(problems)), `the hosted checker says the same: ${sentence}`);
+  return problems.map((p) => PART.exec(p.text)).filter(Boolean).map((m) => m[1]);
+};
 
 test('every part in a list after "new" is claimed, across commas, "and", "&", "/", "+" and "plus"', () => {
   for (const [sentence, claims] of [
@@ -124,4 +132,29 @@ test('the website\'s own words are read as before: a list there backs each part 
   const c = ctxOf(car({ descriptionRaw: 'Recent service: new tires, brakes and rotors, plus new shocks. Comes with new struts & pads.' }));
   for (const sentence of ['New tires, brakes, rotors and shocks.', 'New struts and pads.', 'New rotors/brakes.']) assert.deepEqual(claimed(sentence, c), [], sentence);
   assert.deepEqual(claimed('New tires, brakes and a battery.', c), ['New tires, brakes and a battery']);
+});
+
+test('a list after "new" stops at a line break: the next line\'s first word is never read as part of the list', () => {
+  // the website says the tires are new, so only a part the list goes on to is a claim
+  const c = ctxOf(car({ descriptionRaw: 'Just put on new tires.' }));
+  for (const sentence of [
+    'It rides on new tires\nEngine and transmission run great.', 'Set of new tires\nBrakes, rotors and pads were inspected.',
+    'Just put on new tires\nTransmission, engine and exhaust all strong.', 'New tires,\nbrakes and rotors were inspected.',
+    '+ New tires\n+ Brakes', 'New tires /\nbrakes checked.',
+  ]) {
+    assert.deepEqual(claimed(sentence, c), [], JSON.stringify(sentence));
+  }
+  // a part after a comma is claimed when its line goes on with something else, not with words about its state
+  assert.deepEqual(claimed('New tires, struts\nBrakes inspected at our shop.', c), ['New tires, struts']);
+  // "and", "&" and "plus" join across a line break, as they did before the list was read
+  assert.deepEqual(claimed('New tires\nand brakes.', c), ['New tires\nand brakes']);
+});
+
+test('a part is named in two words only when it is one part ("brake pads", "brake rotors"); two parts with nothing between them are no list', () => {
+  const c = ctxOf(car({ descriptionRaw: 'Just put on new tires.' }));
+  assert.deepEqual(claimed('New tires brakes and rotors.', c), []);
+  assert.deepEqual(claimed('New battery tires and struts.', c), ['New battery']);
+  assert.deepEqual(claimed('New brake rotors and pads.', c), ['New brake', 'New brake rotors and pads']);
+  assert.deepEqual(claimed('New tires, brake rotors and struts.', c), ['New tires, brake rotors', 'New tires, brake rotors and struts']);
+  assert.deepEqual(claimed('New tires, struts brakes and rotors.', c), ['New tires, struts']);
 });

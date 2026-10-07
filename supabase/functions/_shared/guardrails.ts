@@ -713,19 +713,23 @@ function newPartsSaid(text: unknown, re: RegExp, more: RegExp): Array<{ said: st
 // In the text checked, the list after a "new <part>" claim is followed across
 // commas, "and", "&", "/", "+" and "plus": each next item that is a part on
 // its own (maybe after "the", "a", "an" or "both", "new", and "front",
-// "rear", "front and rear" or "front/rear"; maybe in two part words, "brake
-// pads") is claimed too, and the list stops at anything else ("HEMI engine",
-// "Bosch wipers"). A listed part followed by words about its state
+// "rear", "front and rear" or "front/rear"; "brake pads" and "brake rotors"
+// are one part each) is claimed too, and the list stops at anything else
+// ("HEMI engine", "Bosch wipers", "tires brakes"). The list never goes on
+// past a line break, apart from "and", "&" or "plus" with spaces around it,
+// as before the list was read. A listed part followed by words about its state
 // ("inspected", "look great", "are original") is not claimed; followed by a
 // newness word or anything else, it is. After a comma alone, one of the
 // car's own features as the website writes it ("Brake Assist") is that
 // feature, and the list goes on past it; a claim inside one of them ("New
 // Tires/Brakes") is the website's own words.
-const LIST_JOIN = /^(?:\s*,\s*(?:(?:and|plus)\s+|[&+/]\s*)?|\s*[&+/]\s*|\s+(?:and|plus)\s+)/i;
-const ONLY_A_COMMA = /^\s*,\s*$/;
-const LIST_ITEM = new RegExp(`^(?:(?:the|a|an|both)\\s+)?((?:brand[\\s-]+)?new\\s+)?(?:(?:front\\s*(?:and|&|\\/)\\s*rear|rear\\s*(?:and|&|\\/)\\s*front|front|rear)\\s+)?(${PARTS})\\b(?:\\s+(?:${PARTS})\\b)?`, 'i');
-const LIST_TAIL = new RegExp(`^\\s+(?:${PARTS})\\b`, 'i');
-const LIST_STATE = /^\s+(?:(?:is|are|was|were|has|have|had|been|got|all|both|also)\s+){0,3}(?:inspected|checked|serviced|looks?|good|in\s+good\s+shape|original)\b/i;
+const LIST_JOIN = /^(?:[^\S\n]*,[^\S\n]*(?:(?:and|plus)[^\S\n]+|[&+/][^\S\n]*)?|[^\S\n]*[&+/][^\S\n]*|\s+(?:and|&|plus)\s+)/i;
+const ONLY_A_COMMA = /^[^\S\n]*,[^\S\n]*$/;
+const SP = '[^\\S\\n]'; // a space that is not a line break
+const LIST_ITEM = new RegExp(`^(?:(?:the|a|an|both)${SP}+)?((?:brand(?:${SP}|-)+)?new${SP}+)?(?:(?:front${SP}*(?:and|&|\\/)${SP}*rear|rear${SP}*(?:and|&|\\/)${SP}*front|front|rear)${SP}+)?(${PARTS})\\b(?:(?<=brakes?)${SP}+(?:pads|rotors?)\\b)?`, 'i');
+const BRAKE = /^brakes?$/i;
+const LIST_TAIL = new RegExp(`^${SP}+(?:pads|rotors?)\\b`, 'i');
+const LIST_STATE = new RegExp(`^${SP}+(?:(?:is|are|was|were|has|have|had|been|got|all|both|also)${SP}+){0,3}(?:inspected|checked|serviced|looks?|good|in${SP}+good${SP}+shape|original)\\b`, 'i');
 const ITEM_NEW = /(?:brand[\s-]+)?new\b/i;
 const FEATURE_ENDS = "(?=[^\\S\\n]*(?:[,.;:!?&+/)\\]}\"'\u2019\u201d\u2026\\n]|$)|\\s+(?:and|plus)\\b)";
 function featureSpans(t: string, features: unknown): Array<[number, number]> {
@@ -746,7 +750,7 @@ function newPartsListed(text: unknown, re: RegExp, features: unknown): Array<{ s
     if (whole) end = whole[1];
     else {
       out.push({ said: m[0], part: partKey(m[1]) });
-      const tail = LIST_TAIL.exec(t.slice(end));
+      const tail = BRAKE.test(m[1]) && LIST_TAIL.exec(t.slice(end));
       if (tail) end += tail[0].length;
     }
     for (let join = LIST_JOIN.exec(t.slice(end)); join; join = LIST_JOIN.exec(t.slice(end))) {

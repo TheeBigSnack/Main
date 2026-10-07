@@ -133,6 +133,12 @@ const texts = [
   sixty('2019 Ram 1500 Big Horn with new tires, struts and brakes that were replaced last month, new tires/rotors + pads, and fresh tires, the battery, front and rear shocks.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn with new tires, HEMI engine, brakes; new tires, brakes inspected; new tires, Brake Assist, Battery Saver, struts; new tires and brake assist; new brake pads and rotors; a new set of tires plus new front/rear brakes are brand new.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn. Highlights: New Tires/Brakes, New Brake Pads & Rotors, Brake Assist, Wipers - Rain Sensing, Rear Wiper/Washer and wipers, new tires, brakes for winter.') + '\nVIN TESTVIN0000000001.',
+  // the list stops at a line break (but for "and", "&" and "plus" with spaces around them), and only "brake pads" and "brake rotors" are one part in two words
+  sixty('2019 Ram 1500 Big Horn. It rides on new tires\nEngine and transmission run great.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. Set of new tires\nBrakes, rotors and pads were inspected.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. Just put on new tires\nTransmission, engine and exhaust all strong.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. New tires, struts\nBrakes inspected at our shop.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. New tires brakes and rotors. New brake rotors and pads. New tires\nand brakes. + New battery\n+ Wipers') + '\nVIN TESTVIN0000000001.',
 ];
 const contexts = [
   { vehicle, dealer, priceNote: '', price: 28995 },
