@@ -1593,3 +1593,34 @@ test('Rule 4: the dealer\'s own price, a selling special or a plain price that c
   assert.deepEqual(choosePrices(labeledPrices({ price: 24000, callForPrice: 'Y', callPrice: 'Call for price' })), { price: 24000, priceLabel: 'price', priceBeforeFees: null });
 });
 
+// R-8, repair cycle 2 round 3: the footnotes the round before still missed
+// after a price's label: a list of numbers or a letter in a superscript tag
+// ("Offer<sup>1,2</sup>", "Offer<sup>a</sup>"), whose removed tag glued the
+// note onto the word before it, a letter or a list in brackets ("(a)",
+// "(1, 2)") and superscript brackets ("⁽¹⁾"). The standard-data reader reads
+// the same footnotes, from one shared pattern (schemaOrgNormalize.js
+// LABEL_NOTE).
+test('R-8: a footnote of several numbers or a letter, in a superscript tag or in brackets, after a price\'s label changes nothing', () => {
+  const quoted = (label) => `the list labels its price "${label}", which Lot Current does not read as the selling price`;
+  const none = (label) => ({ price: null, priceLabel: quoted(label), priceBeforeFees: null });
+  const P = (dprice) => choosePrices(labeledPrices({ pricing: { dprice } }), { dealer: 'Sample Chevrolet' });
+  for (const label of ['Your Carvana Offer<sup>1,2</sup>', 'Your Carvana Offer<sup>a</sup>', 'Your Carvana Offer ⁽¹⁾', 'Your Carvana Offer (a)', 'Your Carvana Offer (1, 2)', 'Your Carvana Offer<sup><b>1</b></sup>', 'Your Carvana Offer*1,2', 'Market Value<sup>A</sup>']) {
+    assert.deepEqual(P([{ label: 'Price', value: '$21,000' }, { label, value: '$19,000', isFinalPrice: true }]), none(label), `"${label}" marked final beside a plain price`);
+    assert.deepEqual(P([{ label, value: '$19,000' }]), none(label), `"${label}" alone is quoted`);
+  }
+  assert.equal(labelWords('Your Carvana Offer<sup>1,2</sup>'), 'Your Carvana Offer');
+  assert.equal(labelWords('Your Carvana Offer<sup>a</sup>'), 'Your Carvana Offer');
+  // a tag between two words keeps them apart, and a word's own letters are never a footnote
+  assert.equal(labelWords('Your<br>Carvana Offer'), 'Your Carvana Offer');
+  assert.equal(priceKind({ label: 'Internet<br>Price', key: '', final: false, value: 1 }), 'selling');
+  assert.equal(labelWords('Plan A'), 'Plan A');
+  // the same footnotes on DealerOn's own label and Dealer.com's, and the dealer's price with one is still the dealer's
+  const [c] = platformCars(1, { from: 790 });
+  const car = { ...c, certified: false };
+  for (const label of ['Market Value (1)', 'Market Value *1', 'Our Offer<sup>1,2</sup>']) {
+    const on = normalizeInventoryRecord({ ...dealerOnCard(car).VehicleCard, VehiclePriceLabel: label }, { origin: DEALERON_ORIGIN });
+    assert.deepEqual([on.price, on.priceLabel], [null, quoted(label)], `DealerOn's own label "${label}"`);
+  }
+  const own = normalizeInventoryRecord({ ...dealerOnCard(car).VehicleCard, VehiclePriceLabel: 'Sample Motors Price<sup>1,2</sup>' }, { origin: DEALERON_ORIGIN });
+  assert.deepEqual([own.price, own.priceBeforeFees], [car.base + car.fee, car.base]);
+});

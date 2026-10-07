@@ -22,7 +22,7 @@
 
 import { toNumber, shortLocation, conditionWordFromPath } from '../src/normalize.js';
 import { parseVehiclePage } from './schemaOrgParse.js';
-import { normalizeVehicle as normalizeStandard, GUIDE_PRICE_WORDS, LABEL_MARKS } from './schemaOrgNormalize.js';
+import { normalizeVehicle as normalizeStandard, GUIDE_PRICE_WORDS, LABEL_MARKS, LABEL_NOTE } from './schemaOrgNormalize.js';
 
 const VIN = /^[A-HJ-NPR-Z0-9]{17}$/;
 const MAX_DEPTH = 8;
@@ -212,15 +212,22 @@ const NOT_THE_PRICE = /msrp|\bwas\b|original|previous|prior|\bold\b|list ?price|
 // "Your Carvana Offer*" did not end in "Offer" for the offer test, so "your"
 // made it a selling price again. The label is still quoted as the website
 // writes it.
-// A footnote is also read when it is written as a number in brackets ("(1)",
-// "[2]", "(*)"), a mark with a number ("*1"), inside an HTML tag
-// ("<sup>*</sup>", "<sup>1</sup>") or as an HTML entity ("&#42;",
-// "&trade;"): a number in a superscript tag is dropped, other tags too, and
-// entities read as their characters first, anywhere in the label ("Kelley
-// Blue Book<sup>&reg;</sup> Value" reads "Kelley Blue Book® Value"). A bare
-// number at the end is kept: nothing says it is a footnote.
-const SUP_NUMBER = /<sup\b[^<>]*>\s*(?:\(\s*\d{1,3}\s*\)|\[\s*\d{1,3}\s*\]|\d{1,3})\s*<\/sup\s*>/gi;
-const TAG = /<\/?[a-z][^<>]*>/gi;
+// A footnote is also read when it is written as a number, a short list of
+// numbers or a letter in brackets ("(1)", "[2]", "(1, 2)", "(a)", "(*)"), a
+// mark with a number ("*1", "*1,2") (LABEL_NOTE, shared with the
+// standard-data reader), inside an HTML tag ("<sup>*</sup>", "<sup>1</sup>",
+// "<sup>1,2</sup>", "<sup>a</sup>") or as an HTML entity ("&#42;",
+// "&trade;"): a superscript holding only a number, a list of numbers or a
+// letter is dropped, other tags too, and entities read as their characters
+// first, anywhere in the label ("Kelley Blue Book<sup>&reg;</sup> Value"
+// reads "Kelley Blue Book® Value"). A tag between two words keeps them
+// apart ("Internet<br>Price"), so a note is never glued onto the word
+// before it. A bare number or letter at the end is kept: nothing says it is
+// a footnote.
+const SUP_INNER = String.raw`\d{1,3}(?:\s*,\s*\d{1,3}){0,3}|[A-Za-z]`;
+const SUP_NOTE = new RegExp(String.raw`<sup\b[^<>]*>(?:\s|<[^<>]*>)*(?:\(\s*(?:${SUP_INNER})\s*\)|\[\s*(?:${SUP_INNER})\s*\]|${SUP_INNER})(?:\s|<[^<>]*>)*<\/sup\s*>`, 'gi');
+const TAGS = /(?:<\/?[a-z][^<>]*>)+/gi;
+const untagged = (text) => text.replace(TAGS, (tags, at, all) => (/\w/.test(all[at - 1] || '') && /\w/.test(all[at + tags.length] || '') ? ' ' : ''));
 const ENTITY = /&(?:#(\d{1,7})|#x([0-9a-f]{1,6})|([a-z][a-z0-9]{1,31}));/gi;
 const NAMED_ENTITY = { amp: '&', nbsp: ' ', reg: '®', trade: '™', dagger: '†', Dagger: '‡', ast: '*', midast: '*', excl: '!', sect: '§', sup1: '¹', sup2: '²', sup3: '³', apos: '\'', rsquo: '’', quot: '"' };
 const entityText = (whole, dec, hex, name) => {
@@ -228,9 +235,9 @@ const entityText = (whole, dec, hex, name) => {
   if (code !== null) return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : ' ';
   return NAMED_ENTITY[name] ?? NAMED_ENTITY[name.toLowerCase()] ?? ' ';
 };
-const NOTE_END = new RegExp(String.raw`(?:[(\[]\s*(?:\d{1,3}|[${LABEL_MARKS}]{1,3})\s*[)\]]|[${LABEL_MARKS}]\d{1,3}|[\s:.${LABEL_MARKS}])$`);
+const NOTE_END = new RegExp(String.raw`(?:${LABEL_NOTE}|[\s:.${LABEL_MARKS}])$`);
 export function labelWords(label) {
-  let text = String(label || '').replace(SUP_NUMBER, '').replace(TAG, '').replace(ENTITY, entityText);
+  let text = untagged(String(label || '').replace(SUP_NOTE, '')).replace(ENTITY, entityText);
   for (;;) {
     // a footnote is short: only the label's last characters are read each time
     const note = NOTE_END.exec(text.slice(-12));

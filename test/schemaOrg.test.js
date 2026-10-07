@@ -1047,3 +1047,29 @@ test('parity: the sandbox lot too, with its descriptions, features and single-pa
     }
   }
 });
+
+// R-8, PR #9's repair cycle 2 round 3: the inventory-data reader sets aside a
+// footnote written "(1)", "[1]", "*1", "(a)" or "(1, 2)" after a guide's or an
+// offer's label; this reader did not, so "Market Value (1): $24,995" as a
+// page's only price was taken as the car's price there. Both readers now read
+// the same footnotes, from one pattern (LABEL_NOTE).
+test('price: a footnote in brackets or a mark with a number after a guide\'s or an old price\'s words changes nothing', () => {
+  const at = (text, price = 24995) => priceFromOffers(car({ offers: { '@type': 'Offer', price, priceCurrency: 'USD' } }), shown(text));
+  const quoted = (label) => ({ value: null, label: `the page labels its only price "${label}", which Lot Current does not read as the selling price`, reason: `the page labels its only price "${label}", which Lot Current does not read as the selling price` });
+  for (const [text, label] of [
+    ['Market Value (1): $24,995', 'Market Value'],
+    ['Market Value [1] $24,995', 'Market Value'],
+    ['Market Value *1 $24,995', 'Market Value'],
+    ['Market Value (a) $24,995', 'Market Value'],
+    ['Market Value (1, 2) $24,995', 'Market Value'],
+    ['Market Value ⁽¹⁾ $24,995', 'Market Value'],
+    ['Instant Cash Offer (1) $24,995', 'Cash Offer'],
+    ['Was (1) $24,995', 'Was'],
+    ['MSRP [2]: $24,995', 'MSRP'],
+  ]) assert.deepEqual(at(text), quoted(label), text);
+  // beside a current price the noted figure is a guide's or an old one, and the current price is read
+  assert.equal(at('Market Value (1) $26,000 Our price $24,995').value, 24995);
+  // a footnote after the selling price's own words changes nothing either
+  assert.equal(at('Internet Price (1) $24,995').value, 24995);
+  assert.equal(at('Our Price *1 $24,995').value, 24995);
+});
