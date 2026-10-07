@@ -111,13 +111,23 @@ try {
   assert.match(await panel.textContent('#panel'), stepOf('you'));
   // a number in the role keeps the Marketplace form shut for nearly every car: the step says so as it is typed, and stops once it is gone
   assert.equal(await panel.getAttribute('#wizTitle', 'aria-describedby'), 'wizTitleWarn');
-  assert.equal(await panel.getAttribute('#wizTitleWarn', 'aria-live'), 'polite', 'a screen reader hears the warning');
+  assert.equal(await panel.getAttribute('#wizTitleWarn', 'aria-live'), null, 'the warning under the field changes on every key, so it is not spoken on each');
+  assert.equal(await panel.getAttribute('#wizTitleSay', 'aria-live'), 'polite', 'a screen reader hears the warning from the live region beside it');
   assert.equal((await panel.textContent('#wizTitleWarn')).trim(), '', 'no warning for the default role');
-  await panel.fill('#wizTitle', '2nd shift sales');
-  await panel.waitForSelector('#wizTitleWarn .banner.warn');
+  assert.equal((await panel.textContent('#wizTitleSay')).trim(), '');
+  // typed key by key: the warning follows every key, the live region changes once, when the warning comes
+  await panel.evaluate(() => {
+    window.__sayWrites = 0;
+    new MutationObserver((list) => { window.__sayWrites += list.length; }).observe(document.querySelector('#wizTitleSay'), { childList: true, characterData: true, subtree: true });
+  });
+  await panel.fill('#wizTitle', '');
+  await panel.locator('#wizTitle').pressSequentially('2nd shift sales');
+  await panel.waitForFunction(() => /"Second shift sales"/.test(document.querySelector('#wizTitleWarn').textContent));
   assert.match(await panel.textContent('#wizTitleWarn'), /^A number in your role \("2nd"\) keeps the Marketplace form shut for nearly every car: every number in a description must match the website's data for the car\. Write the number as a word or leave it out, for example "Second shift sales"\.$/);
+  assert.equal((await panel.textContent('#wizTitleSay')).trim(), "A number in your role keeps the Marketplace form shut for nearly every car: every number in a description must match the website's data for the car. Write the number as a word or leave it out.");
+  assert.equal(await panel.evaluate(() => window.__sayWrites), 1, 'the live region was written once over 15 keys');
   await panel.fill('#wizTitle', 'sales consultant');
-  await panel.waitForFunction(() => document.querySelector('#wizTitleWarn').textContent.trim() === '');
+  await panel.waitForFunction(() => document.querySelector('#wizTitleWarn').textContent.trim() === '' && document.querySelector('#wizTitleSay').textContent.trim() === '');
   await panel.click('#wizNext'); // -> account (when configured), then address
   if (STEPS.includes('account')) {
     await panel.waitForSelector('#wizEmail');

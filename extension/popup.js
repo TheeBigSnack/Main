@@ -8,7 +8,7 @@ import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile,
 import { capStatus, capCount, logPost, askWhenListed, DEFAULT_DAILY_CAP } from './src/cap.js';
 import { noteTakenDown, stillListedNow } from './src/takenDown.js';
 import { TITLE_STATUSES, CONDITIONS } from './src/listingData.js';
-import { checkClosingLine, cleanClosingLine, CLOSING_LINE_MAX_WORDS, settingNumberWarning } from './src/rewriteTemplate.js';
+import { checkClosingLine, cleanClosingLine, CLOSING_LINE_MAX_WORDS, settingNumberWarning, settingNumberNotice } from './src/rewriteTemplate.js';
 import { createQueue, currentVin, describe as describeQueue } from './src/queue.js';
 import { FORM_MAP, applyOverrides } from './facebook/formMap.js';
 import { listingLink } from './facebook/detectPost.js';
@@ -853,15 +853,20 @@ const field = (label, name, value, attrs = 'type="text"') =>
 // A number in the role or the name, or a dealership name that reads as a
 // price or a mileage, is in every description and keeps the Marketplace form
 // shut for nearly every car (src/rewriteTemplate.js settingNumberWarning).
-// Settings says so under the field, in a live region the input is described
-// by, when the form is drawn and as the person types; Save still saves it.
-// Set-up's You and address steps say the same (wizard.js).
+// Settings says so under the field, and the input is described by that
+// warning, when the form is drawn and as the person types; Save still saves
+// it. The warning quotes the number and a way to write the value, so it
+// changes on nearly every key; a screen reader is told through a live region
+// of its own beside it (<name>Say), written only when the warning comes or
+// goes, so it is spoken once, not on every key. Set-up's You and address
+// steps say the same (wizard.js).
 const WARNED_FIELDS = Object.freeze({ salespersonName: 'name', salespersonTitle: 'role', dealerName: 'dealer' });
 function settingWarningHtml(name, value) {
   const text = settingNumberWarning(WARNED_FIELDS[name], value);
   return text ? `<div class="banner warn">${esc(text)}</div>` : '';
 }
-const settingWarning = (name, value) => `<div id="${name}Warn" aria-live="polite">${settingWarningHtml(name, value)}</div>`;
+const settingNotice = (name, value) => settingNumberNotice(WARNED_FIELDS[name], value);
+const settingWarning = (name, value) => `<div id="${name}Warn">${settingWarningHtml(name, value)}</div><div id="${name}Say" class="sr" aria-live="polite">${esc(settingNotice(name, value))}</div>`;
 const choices = (list, current) =>
   `<option value="" ${current === '' ? 'selected' : ''}>Leave blank</option>` + list.map((o) => `<option value="${esc(o)}" ${o === current ? 'selected' : ''}>${esc(o)}</option>`).join('');
 
@@ -1771,8 +1776,13 @@ async function init() {
   // Settings, the warning under the name, role or dealership name follows the typing
   $('panel').addEventListener('input', (ev) => {
     if (Object.hasOwn(WARNED_FIELDS, ev.target.name)) {
-      const region = $(`${ev.target.name}Warn`);
-      if (region) region.innerHTML = settingWarningHtml(ev.target.name, ev.target.value);
+      const { name, value } = ev.target;
+      const shown = $(`${name}Warn`);
+      if (shown) shown.innerHTML = settingWarningHtml(name, value);
+      // the live region only when the warning comes or goes: a screen reader speaks every write
+      const say = $(`${name}Say`);
+      const notice = settingNotice(name, value);
+      if (say && say.textContent !== notice) say.textContent = notice;
       return;
     }
     if (ev.target.id !== 'readySearch') return;

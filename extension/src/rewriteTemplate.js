@@ -1066,24 +1066,34 @@ function settingNumberProblems(prose, check, { role, name, dealerName }) {
 }
 
 // The warning set-up and Settings show under the role, the name or the
-// dealership's name while it holds a number that keeps the form shut ('' for
-// none): any digit in the role or the name; a dealership name only when it
-// reads as a price or a mileage. Plain text.
-export function settingNumberWarning(setting, value) {
+// dealership's name while it holds a number that keeps the form shut: any
+// digit in the role or the name; a dealership name only when it reads as a
+// price or a mileage. `text` quotes the number and a way to write the value,
+// so it follows every key; `notice` says the same without them, so it stays
+// the same while the warning stands. null for no warning. Plain text.
+function settingWarning(setting, value) {
   const v = oneLine(value);
   const w = SETTING_WORDS[setting];
-  if (!w || !/\d/.test(v)) return '';
+  if (!w || !/\d/.test(v)) return null;
   const example = w.example(v);
   const like = example && example !== v ? `, for example "${example}"` : '';
   if (setting === 'dealer') {
     const said = [...mileageClaims(v), ...dollarAmounts(v)];
-    if (!said.length) return '';
-    return `The dealership's name reads as a price or a mileage ("${said[0].text}"), which keeps the Marketplace form shut for nearly every car: every price and mileage in a description must match the listing. Write the number as a word${like}.`;
+    if (!said.length) return null;
+    const say = (quote, eg) => `The dealership's name reads as a price or a mileage${quote}, which keeps the Marketplace form shut for nearly every car: every price and mileage in a description must match the listing. Write the number as a word${eg}.`;
+    return { text: say(` ("${said[0].text}")`, like), notice: say('', '') };
   }
   const numbers = (v.match(/\S*\d\S*/g) || []).map((s) => s.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ''));
   const advice = setting === 'role' ? 'Write the number as a word or leave it out' : 'Leave it out';
-  return `A number in your ${setting} (${numbers.map((n) => `"${n}"`).join(', ')}) keeps the Marketplace form shut for nearly every car: every number in a description must match the website's data for the car. ${advice}${like}.`;
+  const say = (quote, eg) => `A number in your ${setting}${quote} keeps the Marketplace form shut for nearly every car: every number in a description must match the website's data for the car. ${advice}${eg}.`;
+  return { text: say(` (${numbers.map((n) => `"${n}"`).join(', ')})`, like), notice: say('', '') };
 }
+// The warning shown under the field ('' for none).
+export const settingNumberWarning = (setting, value) => (settingWarning(setting, value) || { text: '' }).text;
+// What a screen reader is told when the warning comes ('' for none): the
+// warning without the number and the example, which change as the person
+// types, so a live region written with it is spoken once, not on every key.
+export const settingNumberNotice = (setting, value) => (settingWarning(setting, value) || { notice: '' }).notice;
 
 // The problems a person may still post with: the length and the tone. Every
 // other problem (a number, price, mileage or claim the website doesn't make,

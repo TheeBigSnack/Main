@@ -10,7 +10,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildTemplateDescription, runGuardrails, ruleProblems, settingNumberWarning, numbersAsWords } from '../extension/src/rewriteTemplate.js';
+import { buildTemplateDescription, runGuardrails, ruleProblems, settingNumberWarning, settingNumberNotice, numbersAsWords } from '../extension/src/rewriteTemplate.js';
 
 const CAR = { vin: '1TESTVEH0NA000123', year: 2021, make: 'Example', model: 'Sedan', trim: 'LX', name: '2021 Example Sedan LX', mileage: 34567, price: 20986, features: ['Heated Seats', 'Backup Camera', 'Bluetooth', 'Remote Start'], descriptionRaw: '' };
 const DEALER = { name: 'Example Motors', city: 'Springfield' };
@@ -122,8 +122,9 @@ test('numbers as words: ordinals and small numbers, with a capital where the wor
 // ---------- the warning in set-up and Settings ----------
 // Shown under the field as soon as it holds such a number: drawn with the
 // step or the form, and brought up to date as the person types. The field
-// is described by it (aria-describedby), and it sits in a live region, so a
-// screen reader hears it when it appears.
+// is described by it (aria-describedby), and a live region beside it says
+// the same without the number and the example, so a screen reader hears it
+// when it appears (and only then: the tests after these).
 import { wiz, wizardHtml, handleWizardInput } from '../extension/wizard.js';
 import { withDefaults } from '../extension/src/settings.js';
 import { loadPopup, POPUP_ORIGIN } from './popupHarness.js';
@@ -131,11 +132,15 @@ import { siteKeys } from '../extension/src/storageKeys.js';
 import { MY_STORE } from './helpers.js';
 
 const unesc = (s) => s.replace(/&(amp|lt|gt|quot|#39);/g, (_, e) => ({ amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'" })[e]);
-// the input with this attribute, and the live region the page draws for it
+// the input with this attribute, the warning the page draws under it (not a live region: it changes on every key), and the live region beside it
 const inputWith = (html, attr) => (new RegExp(`<input\\b[^>]*\\s${attr}[^>]*>`).exec(html) || [''])[0];
 const region = (html, id) => {
-  const m = new RegExp(`<div id="${id}" aria-live="polite">(.*?)</div>(?=\\s*(?:<|$))`, 's').exec(html);
+  const m = new RegExp(`<div id="${id}">(.*?)</div>(?=\\s*(?:<|$))`, 's').exec(html);
   return m ? unesc(m[1].replace(/<[^>]+>/g, '')) : null;
+};
+const liveRegion = (html, id) => {
+  const m = new RegExp(`<div id="${id}" class="sr" aria-live="polite">(.*?)</div>`, 's').exec(html);
+  return m ? unesc(m[1]) : null;
 };
 const ROLE_WARNING = settingNumberWarning('role', '2nd shift sales');
 const DEALER_WARNING = settingNumberWarning('dealer', '8 Mile Auto');
@@ -150,11 +155,15 @@ test('set-up warns under the role, the name and the dealership name while they h
   assert.match(inputWith(html, 'id="wizTitle"'), /aria-describedby="wizTitleWarn"/, 'the role field is described by its warning');
   assert.match(inputWith(html, 'id="wizName"'), /aria-describedby="wizNameWarn"/);
   assert.equal(region(html, 'wizTitleWarn'), ROLE_WARNING, 'a role with a number is warned about when the step opens');
+  assert.equal(liveRegion(html, 'wizTitleSay'), settingNumberNotice('role', '2nd shift sales'), 'the live region says it without the number and the example');
+  assert.equal(settingNumberNotice('role', '2nd shift sales'), 'A number in your role keeps the Marketplace form shut for nearly every car: every number in a description must match the website\'s data for the car. Write the number as a word or leave it out.');
   assert.equal(region(html, 'wizNameWarn'), '', 'a name with no number is not');
+  assert.equal(liveRegion(html, 'wizNameSay'), '');
   wiz.step = 'address';
   html = wizardHtml();
   assert.match(inputWith(html, 'id="wizDealer"'), /aria-describedby="wizDealerWarn"/);
   assert.equal(region(html, 'wizDealerWarn'), DEALER_WARNING);
+  assert.equal(liveRegion(html, 'wizDealerSay'), 'The dealership\'s name reads as a price or a mileage, which keeps the Marketplace form shut for nearly every car: every price and mileage in a description must match the listing. Write the number as a word.');
 
   // typing: the warning follows the field
   handleWizardInput({ id: 'wizDealer', value: 'Route 19 Motors' });
@@ -184,8 +193,11 @@ test('Settings warns under Your role, Your name and Dealership name while they h
   assert.match(inputWith(html, 'name="salespersonName"'), /aria-describedby="salespersonNameWarn"/);
   assert.match(inputWith(html, 'name="dealerName"'), /aria-describedby="dealerNameWarn"/);
   assert.equal(region(html, 'salespersonTitleWarn'), ROLE_WARNING);
+  assert.equal(liveRegion(html, 'salespersonTitleSay'), settingNumberNotice('role', '2nd shift sales'));
   assert.equal(region(html, 'salespersonNameWarn'), '');
+  assert.equal(liveRegion(html, 'salespersonNameSay'), '');
   assert.equal(region(html, 'dealerNameWarn'), DEALER_WARNING);
+  assert.equal(liveRegion(html, 'dealerNameSay'), settingNumberNotice('dealer', '8 Mile Auto'));
 
   const type = (name, value) => p.el('panel').listeners.input({ target: { name, value } });
   type('salespersonTitle', 'Second shift sales');
@@ -199,4 +211,78 @@ test('Settings warns under Your role, Your name and Dealership name while they h
   const q = await loadPopup({ local: { [k.settings]: { ...settings, salesperson: { name: 'Sam', title: 'sales consultant' }, dealer: { ...settings.dealer, name: 'Route 19 Motors' } } } });
   await q.tab('settings');
   for (const id of ['salespersonTitleWarn', 'salespersonNameWarn', 'dealerNameWarn']) assert.equal(region(q.panel(), id), '', id);
+});
+
+// ---------- what a screen reader hears while the person types ----------
+// The warning under the field follows every key (it quotes the number and a
+// way to write the whole value), and the field is described by it. A screen
+// reader speaks a live region each time it is written, so the live region is
+// a separate one that is written only when the warning comes or goes, never
+// on a key that leaves it standing.
+// An element that counts the writes to it, as a screen reader would speak each write to a live region.
+function countingElement(id) {
+  let html = '';
+  const el = { id, writes: 0 };
+  Object.defineProperty(el, 'innerHTML', { get: () => html, set: (v) => { html = String(v); el.writes += 1; }, configurable: true });
+  Object.defineProperty(el, 'textContent', { get: () => unesc(html.replace(/<[^>]+>/g, '')), set: (v) => { html = String(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); el.writes += 1; }, configurable: true });
+  return el;
+}
+// the id of the live region the page draws for this field, and the id the field is described by
+function regionsOf(html, field, inputAttr) {
+  const live = new RegExp(`<div id="(${field}\\w*)"[^>]*\\saria-live="polite"`).exec(html);
+  const described = /aria-describedby="([^"]+)"/.exec(inputWith(html, inputAttr));
+  return { live: live && live[1], described: described && described[1] };
+}
+const prefixes = (value) => [...value].map((_, i) => value.slice(0, i + 1));
+const text = (el) => el.textContent.trim();
+
+test('typing a role in set-up: the warning under it follows every key, and the live region is written only when the warning comes or goes', () => {
+  wiz.active = true;
+  wiz.step = 'you';
+  wiz.settings = withDefaults({ salesperson: { name: 'Sam', title: 'sales consultant' }, dealer: { name: 'Example Motors', city: 'Springfield', state: 'OH', zip: '43215' } });
+  const html = wizardHtml();
+  const { live, described } = regionsOf(html, 'wizTitle', 'id="wizTitle"');
+  assert.ok(live, 'a live region for the role');
+  const elements = new Map();
+  globalThis.document = { getElementById: (id) => { if (!elements.has(id)) elements.set(id, countingElement(id)); return elements.get(id); } };
+  const liveEl = document.getElementById(live);
+  const type = (value) => handleWizardInput({ id: 'wizTitle', value });
+
+  for (const value of prefixes('2nd shift sales')) type(value);
+  assert.equal(liveEl.writes, 1, `the live region is spoken once, when the warning comes, not on each of the 15 keys (written ${liveEl.writes} times)`);
+  assert.ok(text(liveEl), 'what it says');
+  assert.equal(text(document.getElementById(described)), settingNumberWarning('role', '2nd shift sales'), 'the field is described by the whole warning, as typed so far');
+  // deleting back to nothing: written once more, when the warning goes
+  for (const value of prefixes('2nd shift sales').reverse().slice(1)) type(value);
+  type('');
+  assert.equal(liveEl.writes, 2);
+  assert.equal(text(liveEl), '');
+  assert.equal(text(document.getElementById(described)), '');
+  // another number: the warning comes again, and is spoken again
+  for (const value of prefixes('Team 3')) type(value);
+  assert.equal(liveEl.writes, 3);
+  wiz.active = false;
+});
+
+test('typing a role in Settings: the warning under it follows every key, and the live region is written only when the warning comes or goes', async () => {
+  const k = siteKeys(POPUP_ORIGIN);
+  const p = await loadPopup({ local: { [k.settings]: { ...MY_STORE, salesperson: { name: 'Sam', title: 'sales consultant' }, dealer: { name: 'Example Motors', city: 'Springfield', state: 'OH', zip: '43215' } } } });
+  await p.tab('settings');
+  const { live, described } = regionsOf(p.panel(), 'salespersonTitle', 'name="salespersonTitle"');
+  assert.ok(live, 'a live region for the role');
+  const liveEl = p.el(live);
+  const fresh = countingElement(live);
+  Object.defineProperty(liveEl, 'innerHTML', Object.getOwnPropertyDescriptor(fresh, 'innerHTML'));
+  Object.defineProperty(liveEl, 'textContent', Object.getOwnPropertyDescriptor(fresh, 'textContent'));
+  const writes = () => fresh.writes;
+  const type = (value) => p.el('panel').listeners.input({ target: { name: 'salespersonTitle', value } });
+
+  for (const value of prefixes('2nd shift sales')) type(value);
+  assert.equal(writes(), 1, `the live region is spoken once, when the warning comes, not on each of the 15 keys (written ${writes()} times)`);
+  assert.ok(text(liveEl));
+  assert.equal(unesc(p.el(described).innerHTML.replace(/<[^>]+>/g, '')).trim(), settingNumberWarning('role', '2nd shift sales'));
+  for (const value of prefixes('2nd shift sales').reverse().slice(1)) type(value);
+  type('');
+  assert.equal(writes(), 2);
+  assert.equal(text(liveEl), '');
 });

@@ -26,7 +26,7 @@ import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { signInStart, signInFinish, currentSession, rewriteEndpointFor } from './src/accountFlow.js';
 import { loadSession, redeemInvite } from './src/account.js';
 import { wizardSteps, accountStepModel, joinedFrom, rewriteAtAccount, termsSummary, TERMS_PENDING, addressHint } from './src/wizardSteps.js';
-import { settingNumberWarning } from './src/rewriteTemplate.js';
+import { settingNumberWarning, settingNumberNotice } from './src/rewriteTemplate.js';
 
 const steps = () => wizardSteps(accountsConfigured());
 // The Account step's own state: what was typed and answered, never a token.
@@ -64,15 +64,20 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 // A number in the role or the name, or a dealership name that reads as a
 // price or a mileage, is in every description and keeps the Marketplace form
 // shut for nearly every car (src/rewriteTemplate.js settingNumberWarning).
-// The field says so under it, in a live region its input is described by:
+// The field says so under it, and its input is described by that warning:
 // drawn with the step, and brought up to date as the person types
-// (handleWizardInput). Settings says the same (popup.js).
+// (handleWizardInput). The warning quotes the number and a way to write the
+// value, so it changes on nearly every key; a screen reader is told through a
+// live region of its own beside it (<id>Say), written only when the warning
+// comes or goes, so it is spoken once, not on every key. Settings says the
+// same (popup.js).
 const WARNED_FIELDS = Object.freeze({ wizName: 'name', wizTitle: 'role', wizDealer: 'dealer' });
 function warningHtml(id, value) {
   const text = settingNumberWarning(WARNED_FIELDS[id], value);
   return text ? `<div class="banner warn">${esc(text)}</div>` : '';
 }
-const warningRegion = (id, value) => `<div id="${id}Warn" aria-live="polite">${warningHtml(id, value)}</div>`;
+const noticeOf = (id, value) => settingNumberNotice(WARNED_FIELDS[id], value);
+const warningRegion = (id, value) => `<div id="${id}Warn">${warningHtml(id, value)}</div><div id="${id}Say" class="sr" aria-live="polite">${esc(noticeOf(id, value))}</div>`;
 const money = (n) => (typeof n === 'number' && Number.isFinite(n) ? '$' + Math.round(n).toLocaleString('en-US') : '—');
 const key = (origin) => siteKeys(origin).wizard; // the wizard's own persisted state
 // The Price step's model from the last read (showsLower, gap, example); empty for a read saved before the step existed.
@@ -590,11 +595,16 @@ async function wizardClick(id, ctx) {
 }
 
 // Typing in the name, role or dealership name: the warning under it follows
-// what is typed (nothing is saved until Next, as before).
+// what is typed, and the live region beside it is written only when what it
+// says changes, that is when the warning comes or goes (nothing is saved
+// until Next, as before).
 export function handleWizardInput(target) {
   if (!wiz.active || !target || !Object.hasOwn(WARNED_FIELDS, target.id)) return;
-  const region = document.getElementById(`${target.id}Warn`);
-  if (region) region.innerHTML = warningHtml(target.id, target.value);
+  const shown = document.getElementById(`${target.id}Warn`);
+  if (shown) shown.innerHTML = warningHtml(target.id, target.value);
+  const say = document.getElementById(`${target.id}Say`);
+  const notice = noticeOf(target.id, target.value);
+  if (say && say.textContent !== notice) say.textContent = notice;
 }
 
 export function handleWizardChange(target) {
