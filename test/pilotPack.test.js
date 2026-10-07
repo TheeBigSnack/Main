@@ -231,6 +231,10 @@ test('CI packs the pilot zip too, before store-check, so every push checks it', 
   assert.ok(at('npm run pack') > 0, 'the pack job packs');
   assert.ok(at('npm run pack -- --pilot') > at('npm run pack'), 'then the pilot zip');
   assert.ok(at('npm run store-check') > at('npm run pack -- --pilot'), 'then checks both');
+  // and the wizard flow's job runs set-up on the pilot zip as well (no Account step)
+  const e2e = ci.slice(ci.indexOf('\n  e2e:\n'), ci.indexOf('\n  demo:\n'));
+  const step = e2e.indexOf("\n      - if: matrix.flow == 'wizard'\n        run: npm run pack -- --pilot && npm run test:e2e:wizard -- --zip \"$(ls dist/*-pilot.zip)\"\n");
+  assert.ok(step > e2e.indexOf('\n      - run: npm run test:e2e:${{ matrix.flow }}\n'), 'the wizard job runs set-up on the pilot zip after the flow itself');
 });
 
 // Who gets which zip, where a tester or the owner reads it: testers on a
