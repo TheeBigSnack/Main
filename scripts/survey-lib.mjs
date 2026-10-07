@@ -13,7 +13,7 @@
 import { extractJsonLd, vehicleNodes, pageFacts } from '../extension/adapters/schemaOrgParse.js';
 import { vinInAddress, looksLikeCarAddress } from '../extension/adapters/schemaOrg.js';
 import { vinCheckDigit } from '../extension/src/vin.js';
-import { findCardList, totalCount, labeledPrices, priceKind, normalizeInventoryRecord } from '../extension/adapters/inventoryJson.js';
+import { findCardList, totalCount, labeledPrices, priceKind, ownPriceLabel, labelIsNotThePrice, normalizeInventoryRecord } from '../extension/adapters/inventoryJson.js';
 
 export const DEFAULTS = Object.freeze({
   out: 'survey-out',
@@ -517,7 +517,9 @@ const FILLED = ['stock', 'year', 'make', 'model', 'trim', 'url', 'inventoryType'
  * DealerOn and Dealer.com readers (extension/adapters/inventoryJson.js) see
  * them: where the list is, how many cars and the total the answer says, the
  * first record's field names and types, every price label with the kind the
- * reader gives it, and how many records filled each flat-vehicle field. No
+ * reader gives it, the records' own label for their price when they carry
+ * one in a field of its own (and whether the reader then takes no price),
+ * and how many records filled each flat-vehicle field. No
  * value is kept (no VIN, price, mileage or text). null when the answer holds
  * no car list.
  */
@@ -532,6 +534,7 @@ export function recordsShape(json, href) {
     filled[f] = flat.filter((v) => (Array.isArray(v[f]) ? v[f].length > 0 : v[f] !== null && v[f] !== undefined && v[f] !== '')).length;
   }
   const labels = new Map();
+  const ownLabels = new Map();
   cards.forEach((card, i) => {
     const dealer = (flat[i] && flat[i].location) || '';
     for (const e of labeledPrices(card)) {
@@ -541,6 +544,14 @@ export function recordsShape(json, href) {
       const id = `${key}|${label}|${kind}|${e.final}`;
       if (!labels.has(id)) labels.set(id, { key, label, kind, final: e.final, cars: 0 });
       labels.get(id).cars += 1;
+    }
+    const own = ownPriceLabel(card);
+    if (own) {
+      const key = scrub(own.key);
+      const label = scrub(own.label);
+      const id = `${key}|${label}`;
+      if (!ownLabels.has(id)) ownLabels.set(id, { key, label, notThePrice: labelIsNotThePrice(own.label), cars: 0 });
+      ownLabels.get(id).cars += 1;
     }
   });
   const conditions = {};
@@ -554,6 +565,7 @@ export function recordsShape(json, href) {
     total: totalCount(json),
     keys: keyPaths(cards[0], 4, 150),
     priceLabels: [...labels.values()].slice(0, 20),
+    ownLabels: [...ownLabels.values()].slice(0, 20),
     conditions,
     filled,
   };
@@ -868,6 +880,8 @@ export function renderReportMd(r) {
         L.push(`    - filled by the reader (of ${rs.count}): ${Object.entries(rs.filled).map(([k, n]) => `${k} ${n}`).join(', ')}`);
         if (rs.priceLabels.length) L.push(`    - price labels: ${rs.priceLabels.map((p) => `"${esc(p.label)}" (\`${esc(p.key)}\`, ${p.kind}${p.final ? ', final' : ''}, ${p.cars} cars)`).join('; ')}`);
         else L.push('    - price labels: none the reader recognised');
+        if (rs.ownLabels && rs.ownLabels.length) L.push(`    - the records' own label for their price: ${rs.ownLabels.map((p) => `"${esc(p.label)}" (\`${esc(p.key)}\`, ${p.notThePrice ? 'not the selling price: the reader takes no price' : 'the price beside it stands'}, ${p.cars} cars)`).join('; ')}`);
+        else L.push("    - the records' own label for their price: no field of its own");
         L.push(`    - first record's fields: ${rs.keys.map((k) => '`' + esc(k) + '`').join(', ')}`);
       }
     }

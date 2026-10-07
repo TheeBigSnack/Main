@@ -992,6 +992,50 @@ test('R-8: a lone guide or offer label is quoted, never read as the price; a cas
   assert.equal(on.priceLabel, 'the list labels its price "Instant Cash Offer Price", which Lot Current does not read as the selling price');
 });
 
+// R-8, the repair round: DealerOn carries its price's label in a field of
+// its own (VehiclePriceLabel, as test/platformSites.js has it). When that
+// label names a guide's value or an offer, the price beside it is that
+// figure, whatever the price field is called, so the car gets no price and
+// the label is quoted. Before, "Market Value" there was ignored and the car
+// went out at its Internet Price. A guide's value under a name with no
+// "price" in it (VehicleMarketValue, VehicleKbbValue) was not seen at all,
+// so a car with only that figure got the plain "Call for price".
+test('R-8: a record that labels its price "Market Value" in a field of its own gets no price, the label quoted; a guide value under its own name is quoted too', () => {
+  const [c] = platformCars(1, { from: 560 });
+  const quoted = (label) => `the list labels its price "${label}", which Lot Current does not read as the selling price`;
+  const card = dealerOnCard(c).VehicleCard;
+  const { VehicleRetailPrice, ...onlyInternet } = card;
+  assert.ok(VehicleRetailPrice);
+  for (const label of ['Market Value', 'Market Price', 'Instant Cash Offer', 'Your Cash Offer', 'KBB Value', 'Trade-In Value', 'Estimated Value']) {
+    const v = normalizeInventoryRecord({ ...onlyInternet, VehiclePriceLabel: label }, { origin: DEALERON_ORIGIN });
+    assert.deepEqual([v.price, v.priceLabel, v.priceBeforeFees], [null, quoted(label), null], label);
+    assert.equal(assessVehicle(v, withDefaults({})).decision, DECISION.NOT_READY, `${label}: Not ready`);
+    // beside a retail price too: the website's own price is the guide's figure, so the retail one is not taken either
+    const full = normalizeInventoryRecord({ ...card, VehiclePriceLabel: label }, { origin: DEALERON_ORIGIN });
+    assert.deepEqual([full.price, full.priceLabel], [null, quoted(label)], `${label}, beside a retail price`);
+  }
+  // the usual labels change nothing
+  for (const label of ['Sample Motors Price', 'Internet Price', 'Sale Price', 'Price', 'Our Price', 'Retail Price', '']) {
+    const v = normalizeInventoryRecord({ ...card, VehiclePriceLabel: label }, { origin: DEALERON_ORIGIN });
+    assert.deepEqual([v.price, v.priceBeforeFees], [c.base + c.fee, c.base], `"${label}"`);
+  }
+  // a guide's value under a name of its own, with no price beside it: quoted, never "Call for price"
+  const { VehicleInternetPrice, ...noPrices } = onlyInternet;
+  assert.ok(VehicleInternetPrice);
+  for (const [key, label] of [['VehicleMarketValue', 'Market Value'], ['VehicleKbbValue', 'Kbb Value'], ['VehicleTradeInValue', 'Trade In Value'], ['VehicleInstantCashOffer', 'Instant Cash Offer']]) {
+    const v = normalizeInventoryRecord({ ...noPrices, [key]: 24995 }, { origin: DEALERON_ORIGIN });
+    assert.deepEqual([v.price, v.priceLabel], [null, quoted(label)], key);
+  }
+  const com = normalizeInventoryRecord({ ...dealerComRecord(c), pricing: {}, marketValue: '$24,995' }, { origin: DEALERCOM_ORIGIN });
+  assert.deepEqual([com.price, com.priceLabel], [null, quoted('market Value')]);
+  // beside the selling price, such a figure is neither the price nor the lower price
+  const beside = normalizeInventoryRecord({ ...card, VehicleMarketValue: 30000, VehicleTradeInValue: 15000 }, { origin: DEALERON_ORIGIN });
+  assert.deepEqual([beside.price, beside.priceBeforeFees], [c.base + c.fee, c.base]);
+  // a payment or a bonus is no guide's label: not quoted as one
+  assert.deepEqual(choosePrices([{ value: 399, label: 'Estimated Payment', key: '', final: false }]), { price: null, priceLabel: 'Call for price', priceBeforeFees: null });
+  assert.deepEqual(choosePrices([{ value: 1000, label: 'Trade-In Bonus', key: '', final: false }, { value: 500, label: 'Trade-In Assistance', key: '', final: false }]).priceLabel, 'Call for price');
+});
+
 // The CHANGELOG's "one car that can't be checked holds back only itself"
 // holds on DealerOn and Dealer.com too, through the scan runner and the
 // rescan diff of the reviewed code: a car whose own page fails is listed

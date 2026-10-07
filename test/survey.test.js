@@ -232,6 +232,18 @@ test('jsonEndpoint lays out the car records as the platform readers see them, ke
   assert.equal(on.records.total, 1);
   assert.deepEqual([on.records.filled.price, on.records.filled.mileage, on.records.filled.url], [1, 1, 1]);
   assert.ok(on.records.keys.includes('VehicleCard.VehicleVin: string') || on.records.keys.includes('VehicleVin: string'));
+  assert.deepEqual(on.records.ownLabels, [], 'no record labels its price in a field of its own');
+  // a record's own label for its price (DealerOn's VehiclePriceLabel in the fixtures): what it says, and whether the reader then takes no price
+  const labelled = { DisplayCards: [
+    { VehicleCard: { ...dealerOn.DisplayCards[0].VehicleCard, VehiclePriceLabel: 'Sample Motors Price' } },
+    { VehicleCard: { ...dealerOn.DisplayCards[0].VehicleCard, VehicleVin: VIN2, VehiclePriceLabel: 'Market Value' } },
+  ] };
+  const own = jsonEndpoint({ url: SITE + '/api/vhcliaa/vehicle-pages/cosmos/srp/vehicles/123/456', status: 200, contentType: 'application/json', body: JSON.stringify(labelled) });
+  assert.deepEqual(own.records.ownLabels, [
+    { key: 'VehiclePriceLabel', label: 'Sample Motors Price', notThePrice: false, cars: 1 },
+    { key: 'VehiclePriceLabel', label: 'Market Value', notThePrice: true, cars: 1 },
+  ]);
+  assert.equal(own.records.filled.price, 1, 'the "Market Value" car has no price');
   assert.equal(jsonEndpoint({ url: SITE + '/vin-lookup', body: JSON.stringify({ note: 'ask about ' + VIN }), contentType: 'application/json' }).records, undefined, 'a VIN outside a list is no car list');
 });
 
@@ -372,7 +384,7 @@ test('the reports: the per-site report.md carries the platform evidence, the gap
     list: { finalUrl: LIST, title: 'Used', platform: fingerprint({ url: LIST, html: '' }), server: pageAnatomy(DEALERCOM_LIKE, LIST, 200), rendered: pageAnatomy(DEALERON_LIKE, LIST, 200), pagination: { shapes: ['?pt='] } },
     carPages: [{ url: SITE + '/v/1', status: 200, jsonLd: jsonLdSummary(CAR_PAGE), microdata: {}, serverVins: 1, photoHosts: { 'photos.example-cdn.test': 1 } }],
     carPagesSummary: { read: 1, withVehicleJsonLd: 1, withVehicleMicrodata: 0 },
-    jsonEndpoints: [{ method: 'GET', pattern: SITE + '/api/inventory?page=…', status: 200, topKeys: ['vehicles'], vinCount: 2, page: 'list page', paging: { page: 1 }, records: { listPath: 'vehicles', count: 2, total: null, keys: ['vin: string', 'price: number'], priceLabels: [{ key: 'price', label: 'price', kind: 'plain', final: false, cars: 2 }], conditions: { '(none)': 2 }, filled: { price: 2, mileage: 0 } } }],
+    jsonEndpoints: [{ method: 'GET', pattern: SITE + '/api/inventory?page=…', status: 200, topKeys: ['vehicles'], vinCount: 2, page: 'list page', paging: { page: 1 }, records: { listPath: 'vehicles', count: 2, total: null, keys: ['vin: string', 'price: number'], priceLabels: [{ key: 'price', label: 'price', kind: 'plain', final: false, cars: 2 }], ownLabels: [{ key: 'PriceLabel', label: 'Market Value', notThePrice: true, cars: 2 }], conditions: { '(none)': 2 }, filled: { price: 2, mileage: 0 } } }],
     excerpt: { from: SITE + '/v/1', text: jsonLdExcerpt(CAR_PAGE) },
     requests: { survey: 4, robots: 1, list: 1, listServerHtml: 1, carPages: 1, browserTotal: 9, blockedMedia: 3, lotSyncScan: 5 },
     bot: { signs: [] },
@@ -388,6 +400,7 @@ test('the reports: the per-site report.md carries the platform evidence, the gap
   assert.match(md, /car records at `vehicles`: 2 on this answer, total said nowhere/);
   assert.match(md, /filled by the reader \(of 2\): price 2, mileage 0/);
   assert.match(md, /first record's fields: `vin: string`, `price: number`/);
+  assert.match(md, /the records' own label for their price: "Market Value" \(`PriceLabel`, not the selling price: the reader takes no price, 2 cars\)/);
   assert.match(md, /```json\n[\s\S]*vehicleIdentificationNumber/);
   assert.match(md, /\*\*Verdict: partly\.\*\*/);
   assert.match(md, /cap: at most 8 pages per site/);

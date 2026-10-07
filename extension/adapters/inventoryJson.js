@@ -202,6 +202,13 @@ const NOT_THE_PRICE = /msrp|\bwas\b|original|previous|prior|\bold\b|list ?price|
 // drift. Never the price, whatever words sit beside it ("Your Cash Offer"),
 // and when the record has no other price the reason quotes the label.
 const GUIDE_PRICE = new RegExp(String.raw`\b(?:${GUIDE_PRICE_WORDS})\b`, 'i');
+// A label that IS a guide's or an offer's figure: those words at its end,
+// or followed only by "price", "value" or "offer" ("Market Value", "KBB
+// Value", "Instant Cash Offer Price"), as the standard-data reader's
+// REFERENCE_CUE ends them. Not "Estimated Payment" or "Trade-In Bonus": a
+// payment or an incentive named after a guide or a trade is never quoted as
+// if it might be the car's price, and a field so named is not read.
+const GUIDE_LABEL = new RegExp(String.raw`\b(?:${GUIDE_PRICE_WORDS})\b\.?(?:[\s:\-\u2013\u2014\u00ae\u2122]*(?:price|pricing|value|offer)\b)*[\s:\-\u2013\u2014\u00ae\u2122]*$`, 'i');
 // The base price a dealer's own price is built from on these platforms:
 // "Retail Price", "Retail Value", a "starting" price.
 const BASE_WORDS = /retail|\bbase\b|asking|starting/i;
@@ -227,9 +234,11 @@ function amount(value) {
 /**
  * Every amount the record labels as a price, with its label and where it
  * came from: label/value objects (Dealer.com's pricing entries:
- * { label, value, typeClass, isFinalPrice }) and fields named for a price
- * (finalPrice, VehicleInternetPrice, retailPrice). Nested up to four levels;
- * never inside photos or features.
+ * { label, value, typeClass, isFinalPrice }), fields named for a price
+ * (finalPrice, VehicleInternetPrice, retailPrice) and fields named for a
+ * guide's value or an offer (VehicleMarketValue, kbbValue: never the price,
+ * read so a car with only such a figure has its label quoted). Nested up to
+ * four levels; never inside photos or features.
  * @param {object} record
  * @returns {{ value: number, label: string, key: string, final: boolean }[]}
  */
@@ -250,7 +259,7 @@ export function labeledPrices(record) {
     }
     for (const [k, v] of Object.entries(x)) {
       if (/image|photo|picture|feature|option|media|attribute/i.test(k)) continue;
-      const n = /price/i.test(k) ? amount(v) : null;
+      const n = /price/i.test(k) || GUIDE_LABEL.test(spaced(k)) ? amount(v) : null;
       if (n !== null) out.push({ value: n, label: spaced(k).replace(/^Vehicle\s+/i, ''), key: k, final: keyName(k) === 'finalprice' });
       else if (v && typeof v === 'object') visit(v, k, depth + 1);
     }
@@ -274,7 +283,7 @@ const nameWords = (text) => String(text || '').toLowerCase().replace(/[^a-z0-9 ]
  */
 export function priceKind(entry, dealer = '') {
   const words = `${entry.label} ${spaced(entry.key)}`;
-  if (NOT_THE_PRICE.test(words) || GUIDE_PRICE.test(words)) return 'other';
+  if (labelIsNotThePrice(words)) return 'other';
   if (entry.final) return 'selling';
   if (BASE_WORDS.test(words)) return 'base';
   if (SELLING_WORDS.test(words)) return 'selling';
@@ -290,16 +299,39 @@ export function priceKind(entry, dealer = '') {
 
 const NO_PRICE = (label) => ({ price: null, priceLabel: label, priceBeforeFees: null });
 
-// The labels of a guide's or an offer's figures, quoted for a person to
-// check: some websites label their own selling price that way ("Market
-// Price"), and the price is still not taken.
-function guideLabelled(entries) {
-  const labels = [...new Set(entries.filter((e) => GUIDE_PRICE.test(`${e.label} ${spaced(e.key)}`)).map((e) => String(e.label || spaced(e.key)).slice(0, 60)))];
-  if (!labels.length) return null;
-  const quoted = labels.slice(0, 3).map((l) => `"${l}"`);
+// Labels quoted for a person to check, as the reason a car has no price.
+function quoteLabels(labels) {
+  const quoted = [...new Set(labels.map((l) => String(l).slice(0, 60)))].slice(0, 3).map((l) => `"${l}"`);
   const list = quoted.length > 1 ? `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}` : quoted[0];
   return `the list labels its ${quoted.length > 1 ? 'prices' : 'price'} ${list}, which Lot Current does not read as the selling price`;
 }
+
+// The labels of a guide's or an offer's figures, quoted: some websites
+// label their own selling price that way ("Market Price"), and the price is
+// still not taken. A payment or an incentive is not such a label.
+function guideLabelled(entries) {
+  const labels = entries.map((e) => e.label || spaced(e.key)).filter((l) => GUIDE_LABEL.test(l));
+  return labels.length ? quoteLabels(labels) : null;
+}
+
+// The record's own label for its price, in a field of its own (DealerOn's
+// VehiclePriceLabel, as the fixtures have it: "Sample Motors Price"), read
+// at the record's top level under a name such as PriceLabel or PriceTitle:
+// { key, label }, or null when it has none.
+const OWN_LABEL = /^(?:display|final|selling|main|primary)?price(?:label|title|caption)$/;
+export function ownPriceLabel(record) {
+  if (!isPlain(record)) return null;
+  for (const [k, v] of Object.entries(record)) {
+    if (typeof v !== 'string' || !OWN_LABEL.test(keyName(k))) continue;
+    const label = textOf(v);
+    if (label && amount(label) === null) return { key: k, label: label.slice(0, 60) };
+  }
+  return null;
+}
+
+// Whether a label names something other than the selling price: a guide's
+// value, an offer, an MSRP, a payment (the words priceKind reads as 'other').
+export const labelIsNotThePrice = (label) => NOT_THE_PRICE.test(label) || GUIDE_PRICE.test(label);
 
 /**
  * The website's price and, when it shows one, the lower base price.
@@ -317,11 +349,16 @@ function guideLabelled(entries) {
  * name does not explain next to the plain or base price ("Two prices on
  * the website"). A record whose only figures are a guide's or an offer's
  * ("Market Price", "Instant Cash Offer") gets no price either, and the label
- * quotes them (guideLabelled).
+ * quotes them (guideLabelled). So does a record whose own label for its
+ * price (`label`, ownPriceLabel's label) names something other than the selling
+ * price ("Market Value", "Instant Cash Offer", "MSRP"): the price it labels
+ * is that figure whatever its field is called, and with the website's own
+ * price unknown no other figure on the record is taken instead.
  * @param {{ value: number, label: string, key: string, final: boolean }[]} entries
- * @param {{ dealer?: string }} [context]
+ * @param {{ dealer?: string, label?: string|null }} [context]
  */
-export function choosePrices(entries, { dealer = '' } = {}) {
+export function choosePrices(entries, { dealer = '', label = null } = {}) {
+  if (label && labelIsNotThePrice(label)) return NO_PRICE(quoteLabels([label]));
   const kinds = (entries || []).map((e) => ({ ...e, kind: priceKind(e, dealer) }));
   const of = (kind) => kinds.filter((e) => e.kind === kind);
   const selling = of('selling');
@@ -544,7 +581,8 @@ export function normalizeInventoryRecord(card, { origin, page = null } = {}) {
   const readableType = marked && (demoWord || loanerWord) ? 'Certified' : null;
   const title = textOf(pick(card, N.title));
   const location = textOf(pick(card, N.location, { nested: true })) || null;
-  const prices = choosePrices(labeledPrices(card), { dealer: location || '' });
+  const own = ownPriceLabel(card);
+  const prices = choosePrices(labeledPrices(card), { dealer: location || '', label: own && own.label });
   const cardPhotos = imageUrls(pick(card, N.images), url || origin);
   const photos = page && Array.isArray(page.photos) && page.photos.length ? page.photos.slice() : cardPhotos;
   const counted = toNumber(textOf(pick(card, N.photoCount)));
