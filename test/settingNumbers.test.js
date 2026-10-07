@@ -55,6 +55,10 @@ test('the reason names the role only when the number comes from the role alone',
   // the same number elsewhere in the text is not the role's alone: the plain reason, which stays true once the role changes
   const keys = runGuardrails(text.replace('Highlights:', 'Find it in row 2. Highlights:'), c);
   assert.deepEqual(ruleProblems(keys), [{ code: 'unknown-number', text: '"2" isn\'t in the website\'s data for this car' }]);
+  // the role is set aside only where it stands as words of its own: a role of "2" does not hide a wrong "12,000 miles"
+  const bare = ctxFor({ salesperson: { name: 'Sam', title: '2' } });
+  const wrongMiles = runGuardrails(buildTemplateDescription(bare).replace('34,567 miles', '12,000 miles'), bare);
+  assert.deepEqual(ruleProblems(wrongMiles).map((p) => p.code), ['setting-number', 'unknown-number', 'mileage-mismatch']);
   // a car whose own data holds the number passes: a number in the role keeps the form shut for nearly every car, not every one
   const rowSeats = { ...CAR, features: [...CAR.features, '2nd Row Captain\'s Chairs'] };
   assert.deepEqual(checked(ctxFor({ vehicle: rowSeats, salesperson: { name: 'Sam', title: '2nd shift sales' } })).g.problems, []);

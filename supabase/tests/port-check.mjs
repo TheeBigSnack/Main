@@ -147,6 +147,7 @@ const contexts = [
   { vehicle, dealer, salesperson: { name: 'Alex 2', title: '3rd shift sales' }, priceNote: '', price: 28995 },
   { vehicle, dealer: { name: '8 Mile Auto', city: 'Springfield' }, salesperson: { name: 'Alex', title: 'sales consultant' }, priceNote: '', price: 28995 },
   { vehicle, dealer: { name: 'Route 19 Motors', city: 'Springfield' }, salesperson: { name: 'Alex', title: 'Team 2 sales, 24/7' }, priceNote: '', price: 28995 },
+  { vehicle, dealer, salesperson: { name: 'Alex', title: '2' }, priceNote: '', price: 28995 },
   {},
 ];
 

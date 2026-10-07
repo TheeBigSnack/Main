@@ -820,6 +820,9 @@ function settingNumberText(setting: Setting, value: string): string {
     : "has a number in it, and every number in a description must match the website's data for the car";
   return `${w.your} "${value}" ${why}; change it in Settings (${w.field})${how}`;
 }
+// The text with each value set aside where it stands as words of its own:
+// "Sam 2" in "I'm Sam 2, ...", never the "2" of "12,000".
+const setAside = (text: string, values: string[]): string => values.reduce((out, value) => out.replace(new RegExp(`(?<![\\p{L}\\p{N}])${escapeRe(value).replace(/ /g, '\\s+')}(?![\\p{L}\\p{N}])`, 'giu'), ' '), text);
 // The problems the text no longer gives with every such setting set aside
 // (gone), and one problem for each setting that, with the others set aside,
 // still gives one of those; nothing is set aside when no setting is to blame.
@@ -828,7 +831,7 @@ function settingNumberProblems(prose: string, check: (text: string) => Guardrail
   const settings = ([['role', oneLine(role)], ['name', oneLine(name)], ['dealer', oneLine(dealerName)]] as [Setting, string][]).filter(([, value]) => /\d/.test(value));
   if (!settings.length) return none;
   const said = (text: string) => new Set(check(text).map((p) => p.text));
-  const aside = (list: [Setting, string][]) => said(without(prose, list.map(([, value]) => value)));
+  const aside = (list: [Setting, string][]) => said(setAside(prose, list.map(([, value]) => value)));
   const rest = aside(settings);
   const gone = new Set([...said(prose)].filter((t) => !rest.has(t)));
   if (!gone.size) return none;
