@@ -213,8 +213,16 @@ const GUIDE_LABEL = new RegExp(String.raw`\b(?:${GUIDE_PRICE_WORDS})\b\.?(?:[\s:
 // "Retail Price", "Retail Value", a "starting" price.
 const BASE_WORDS = /retail|\bbase\b|asking|starting/i;
 // The price the website says it sells at: a platform's final price, an
-// internet, sale or selling price.
-const SELLING_WORDS = /\bfinal|internet|\bdealer\b|\bsale\b|selling|\bour\b|\byour\b|e-?price|\bnow\b/i;
+// internet, sale or selling price ("Our Price", "Your Price" too).
+const SELLER_WORDS = /\bfinal|internet|\bdealer\b|\bsale\b|selling|e-?price|\bnow\b/i;
+const SELLING_WORDS = new RegExp(String.raw`${SELLER_WORDS.source}|\bour\b|\byour\b`, 'i');
+// A label that ends in "Offer" is an offer for the buyer's car ("Sell Us
+// Your Car Offer", "Your Carvana Offer", "Our Offer", "Best Offer"), never
+// the price, whatever else it says and even marked final; "your" and "our"
+// do not make it the website's price. Only the website's own selling words
+// do ("Internet Offer", "Sale Offer"), as before.
+const OFFER_END = /\boffers?\s*[:.]?\s*$/i;
+const isOfferForTheCar = (label) => OFFER_END.test(String(label || '')) && !SELLER_WORDS.test(String(label));
 const GENERIC_PRICE = /^\s*(?:the\s+)?price\s*:?\s*$/i;
 const NAMED_PRICE = /^\s*[A-Za-z][\w.&'’ -]{0,40}\s+price\s*:?\s*$/i;
 
@@ -308,7 +316,7 @@ export function isDealerPrice(label, dealer = '') {
 export function priceKind(entry, dealer = '') {
   const dealers = isDealerPrice(entry.label, dealer);
   const words = `${dealers ? '' : entry.label} ${spaced(entry.key)}`;
-  if (labelIsNotThePrice(words)) return 'other';
+  if (labelIsNotThePrice(words) || (!dealers && isOfferForTheCar(entry.label))) return 'other';
   if (entry.final) return 'selling';
   if (BASE_WORDS.test(words)) return 'base';
   if (SELLING_WORDS.test(words)) return 'selling';
@@ -330,7 +338,7 @@ function quoteLabels(labels) {
 // label their own selling price that way ("Market Price"), and the price is
 // still not taken. A payment or an incentive is not such a label.
 function guideLabelled(entries) {
-  const labels = entries.map((e) => e.label || spaced(e.key)).filter((l) => GUIDE_LABEL.test(l));
+  const labels = entries.map((e) => e.label || spaced(e.key)).filter((l) => GUIDE_LABEL.test(l) || isOfferForTheCar(l));
   return labels.length ? quoteLabels(labels) : null;
 }
 
@@ -350,8 +358,9 @@ export function ownPriceLabel(record) {
 }
 
 // Whether a label names something other than the selling price: a guide's
-// value, an offer, an MSRP, a payment (the words priceKind reads as 'other').
-export const labelIsNotThePrice = (label) => NOT_THE_PRICE.test(label) || GUIDE_PRICE.test(label);
+// value, an offer for the car, an MSRP, a payment (the words priceKind reads
+// as 'other').
+export const labelIsNotThePrice = (label) => NOT_THE_PRICE.test(label) || GUIDE_PRICE.test(label) || isOfferForTheCar(label);
 
 /**
  * The website's price and, when it shows one, the lower base price.

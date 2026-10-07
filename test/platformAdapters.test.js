@@ -1162,3 +1162,33 @@ test('R-3: a loaner or demo word in any condition field counts, not only the fir
     assert.equal(assessVehicle(v, withDefaults({})).decision, DECISION.READY, type);
   }
 });
+
+// R-8, repair round 2: an offer for the car written with a hyphen ("Your
+// Cash-Offer"), or with no guide's word at all ("Sell Us Your Car Offer",
+// "Your Carvana Offer"). Before, "your" made such a label a selling price,
+// and a final flag made "Cash-Offer" one, so the offer was taken ahead of a
+// plain "Price". A label that ends in "Offer" is now never the price,
+// whatever words sit beside it, and a lone one is quoted.
+test('R-8: an offer for the car written with a hyphen, or with no guide\'s word, is never the price', () => {
+  const quoted = (label) => `the list labels its price "${label}", which Lot Current does not read as the selling price`;
+  const OFFERS = ['Your Cash-Offer', 'Your Instant-Offer', 'Instant-Cash-Offer', 'Sell Us Your Car Offer', 'Your Carvana Offer', 'Our Offer', 'Your Trade Offer:', 'Best Offer', 'Market-Value', 'Kelley Blue-Book Value', 'Fair-Market Price'];
+  for (const label of OFFERS) {
+    const beside = labeledPrices({ pricing: { dprice: [{ label: 'Price', value: '$21,000' }, { label, value: '$19,000' }] } });
+    assert.deepEqual(choosePrices(beside), { price: 21000, priceLabel: 'Price', priceBeforeFees: null }, `"${label}" beside a plain price`);
+    const final = labeledPrices({ pricing: { dprice: [{ label: 'Price', value: '$21,000' }, { label, value: '$19,000', isFinalPrice: true }] } });
+    assert.deepEqual(choosePrices(final), { price: 21000, priceLabel: 'Price', priceBeforeFees: null }, `"${label}" marked final`);
+    assert.equal(priceKind({ label, key: '', final: true, value: 1 }, 'Example Motors'), 'other', label);
+    assert.deepEqual(choosePrices([{ value: 19000, label, key: '', final: false }]), { price: null, priceLabel: quoted(label), priceBeforeFees: null }, `"${label}" alone is quoted`);
+  }
+  assert.deepEqual(choosePrices(labeledPrices({ pricing: { dprice: [{ label: 'Price', value: '$21,000' }, { label: 'Cash-Offer', value: '$19,000', isFinalPrice: true }] } })).price, 21000);
+  // a record's own label that is an offer leaves the car with no price, quoted
+  const [c] = platformCars(1, { from: 590 });
+  const on = normalizeInventoryRecord({ ...dealerOnCard({ ...c, certified: false }).VehicleCard, VehiclePriceLabel: 'Your Cash-Offer' }, { origin: DEALERON_ORIGIN });
+  assert.deepEqual([on.price, on.priceLabel], [null, quoted('Your Cash-Offer')]);
+  // an offer word that is not the last word of a price's label changes nothing,
+  // and the website's own selling words still make an offer its price, as before
+  for (const label of ['Offer Price', 'Internet Price', 'Special Offer Price', 'Internet Offer', 'Sale Offer']) {
+    assert.equal(priceKind({ label, key: '', final: true, value: 1 }, 'Example Motors'), 'selling', label);
+  }
+  assert.equal(priceKind({ label: 'Internet Offer', key: '', final: false, value: 1 }, 'Example Motors'), 'selling');
+});

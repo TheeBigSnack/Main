@@ -194,8 +194,10 @@ const AMOUNT = /(\bUSD?\s*\$|(?<![A-Za-z])\$|\bUSD\b)\s*(\d{1,3}(?:,\d{3}){1,2}|
 // with the inventory-data reader (inventoryJson.js priceKind and
 // choosePrices), so both readers quote the same labels and neither ever
 // takes such a figure, an instant or cash offer for the car included, for
-// the price. One list: add a word here, never in a copy.
-export const GUIDE_PRICE_WORDS = String.raw`market value|market price|fair market|fair purchase|typical listing|book value|trade[-\s]?in(?: value| offer)?|kbb|kelley(?: blue book)?|blue book|black book|nada|j\.?\s?d\.?\s?power|cash offer|instant offer|edmunds|estimated(?: value)?`;
+// the price. One list: add a word here, never in a copy. The words of a
+// phrase may be joined by a space, a hyphen or nothing ("Cash Offer",
+// "Cash-Offer", "cashoffer"), as labels and field names write them.
+export const GUIDE_PRICE_WORDS = String.raw`market[-\s]?value|market[-\s]?price|fair[-\s]?market|fair[-\s]?purchase|typical[-\s]?listing|book[-\s]?value|trade[-\s]?in(?:[-\s]?value|[-\s]?offer)?|kbb|kelley(?:[-\s]?blue[-\s]?book)?|blue[-\s]?book|black[-\s]?book|nada|j\.?\s?d\.?\s?power|cash[-\s]?offer|instant[-\s]?offer|edmunds|estimated(?:[-\s]?value)?`;
 const REFERENCE_CUE = new RegExp(String.raw`\b(?:was|msrp|m\.s\.r\.p|retail|list|compared? at|original(?:ly)?|reg(?:ular)?|previous(?:ly)?|based on|${GUIDE_PRICE_WORDS}|window sticker|sticker)\b\.?(?:[\s:\-\u2013\u2014\u00ae\u2122]*(?:price|pricing|of|a|the|at|for|value)\b)*[\s:\-\u2013\u2014\u00ae\u2122]*$`, 'i');
 
 // Every dollar amount the page shows: its value, whether it is written with

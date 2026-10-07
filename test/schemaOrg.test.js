@@ -499,7 +499,9 @@ test('price: a guide or estimate value, a class that strikes the old price throu
   // a value from a price guide, an estimate or the window sticker at the stale markup amount
   for (const label of ['KBB Fair Market Value', 'Market value', 'Sticker price', 'Book value:', 'Estimated value', 'Window sticker', 'Kelley Blue Book® Value:', 'Trade-in value', 'Edmunds True Market Value',
     // a guide's own labels, and an offer to buy the car
-    'Kelley Blue Book® Fair Purchase Price', 'KBB Fair Purchase Price', 'Kelley Blue Book Typical Listing Price', 'Instant Cash Offer', 'NADA value', 'J.D. Power value', 'JD Power', 'Black Book', 'Average market price', 'Fair Market Price']) {
+    'Kelley Blue Book® Fair Purchase Price', 'KBB Fair Purchase Price', 'Kelley Blue Book Typical Listing Price', 'Instant Cash Offer', 'NADA value', 'J.D. Power value', 'JD Power', 'Black Book', 'Average market price', 'Fair Market Price',
+    // the same words joined by a hyphen (R-8, repair round 2)
+    'Instant Cash-Offer', 'Instant-Offer', 'Market-Value', 'Kelley Blue-Book Value', 'Fair-Market Price']) {
     assert.equal(at(26000, `${label} $26,000 Our price $24,995`), null, label);
     assert.equal(at(24995, `${label} $26,000 Our price $24,995`), 24995, `${label}: the current price is still read`);
   }
@@ -532,6 +534,9 @@ test('price: when the page\'s only price carries a guide\'s or an old price\'s l
     // an offer for the car, in the list shared with the inventory-data reader (GUIDE_PRICE_WORDS)
     ['Instant Offer $24,995', 'Instant Offer'],
     ['Your Trade-In Offer: $24,995', 'Trade-In Offer'],
+    // the words joined by a hyphen are the same words (R-8, repair round 2)
+    ['Your Cash-Offer $24,995', 'Cash-Offer'],
+    ['Market-Price $24,995', 'Market-Price'],
   ]) assert.deepEqual(at(text), quoted(label), text);
   // the same label next to a current price is a stale or guide value, as before
   const notShown = { value: null, label: 'the page does not show this price', reason: 'the page does not show this price' };
