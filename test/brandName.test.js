@@ -4,8 +4,8 @@
 // the repo, code comments included (the owner and the testers read those), in
 // any case, with or without what can sit between the words (a space,
 // hyphen, dot or underscore, a non-breaking, zero-width or other invisible
-// space or mark, any of them written plainly or as an HTML entity, a JS
-// escape or a URL escape, Markdown emphasis, an inline HTML or SVG tag, or a
+// space or mark SEP lists, any of them written plainly or as an HTML
+// entity, a JS escape or a URL escape, Markdown emphasis, an inline HTML or SVG tag, or a
 // wrapped line; SEP below lists the marks), and in file names, the names of
 // images and other binary files included.
 //
@@ -78,8 +78,12 @@ const WRAP = `(?:\\n${SEP}(?:(?://|/?\\*|#|--|>|;|<!--)${SEP})?)?`;
 // "applotsync", "finallotsync", "ITSLOTSYNC"), nor after a word that ends in
 // another listed stem ("zea" of zealot, "came" of Camelot). Written that way
 // it cannot be told apart from "slot", "plot", "blot", "clot", "allot" or
-// "pilot" ("timeslotsync" is a time slot). As the next word of a camelCase
-// name, or after a separator, it is still caught ("carsLotSync",
+// "pilot" ("timeslotsync" is a time slot). That includes a common ending such
+// as "mate" (automate, estimate, of matelot), and a regular expression's \b
+// or \s right before the name, whose b or s reads as a stem letter, so a
+// pattern such as /\blotsync/ in a test is not reported. Other English words
+// that end in "lot" are reported ("backlotsync"). As the next word of a
+// camelCase name, or after a separator, it is still caught ("carsLotSync",
 // "web lotsync", "APP-LOTSYNC").
 // The case is spelled out in the classes, so the expressions carry no i
 // flag, which would make that capital L match any l.
