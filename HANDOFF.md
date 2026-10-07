@@ -759,7 +759,7 @@ The privacy texts say a salesperson sees only their own post timings. That is tr
 - On standard-data websites, `extension/adapters/README.md` names the layouts and addresses where a car can still get another car's price, and a car beside one other car's tile in its price block gets no price (R-6, not fixed).
 - A scan whose VIN links gave no car, or nearly none, says it is not complete, but the car links it left out are still not read (R-10, partial).
 - The site probe does not take a used-list link whose address names a town that shares a make's name ("/used-cars-lincoln/"), or that adds a view, page-size or tracking query.
-- Bare amounts under 1,000 are not checked. In a draft, a comma list after "new" checks only its first part. The price note itself may still carry a steer that uses no "I", "me" or "my".
+- Bare amounts under 1,000 are not checked. Done in section 23: in a draft, a comma list after "new" is read item by item, and a price note that says "not the dealer" may hold only price and fee words. What is left is in 23.2.
 - Done in section 23: a role with a digit ("2nd shift sales") still makes the template fail its own number check, by design, but the reason now names the role and set-up and Settings warn as it is typed. What is left is in 23.2.
 - The VIN check's Chevrolet City Express prefix (3N63M in `src/vin.js`) was written from memory and not checked against a decoder. A wrong prefix only fails to accept a real City Express, and never flags a correct record.
 - Done in section 23: a save refused in a second window is said there, with its text kept to copy. What is left is in 23.2.
@@ -867,6 +867,10 @@ A cloud session in the Lot Current project (the "Build the plan's Claude steps" 
 - **A second window's refused save**: said on a not-saved screen that names the car under way elsewhere, keeps the description changed there and any listing link typed there to copy, and names what else was lost.
 - **My listings and To do**: a listing is compared only with a scan taken since it got its price; Updated records the basis it used.
 - **The old-name check** from PR #11, ported and made stricter; close #11 once #12 is merged.
+- **"Not the dealer" in the price note** (both ports, `PRICE_NOTE_WORDS`): a note that says it passes only when every word is a price or fee word on a closed list, or a word of the dealership's own name or city; its only numbers are dollar amounts, percentages and numbers in that name or city, and a run of amounts joined only by marks is refused at seven digits, so a phone number written as amounts is refused. Set-up and Settings warn as the note is typed. "Not the dealers" and "not the dealerships" are banned like the singular.
+- **The list after "new"** (both ports): "New tires, struts and brakes" claims all three; the list stops at the first item that is not a part on its own, and a feature the website names ("Brake Assist") is skipped after a comma. A differential run against `a06d852` over about 258,000 texts found no change outside these two rules.
+- **The flows' storage waits**: Playwright's `waitForFunction` never awaited an async check, so the flows' waits on chrome.storage and the badge ended at once and the popup flow failed now and then on CI. They poll through `test/e2e/until.mjs`, and `test/posting.test.js` refuses the async form. The same fix went to PR #9.
+- **PR #9** (the DealerOn and Dealer.com readers) got #10 merged in and the review's R-3, R-8 and R-22 fixes, with nine repair rounds recorded in its own HANDOFF section 21; merge it after #10 and before #12.
 - Small corrections: the hints on where the sign-off and the VIN line sit, the demo script's queue step, comments that overclaimed.
 - Outside the repository (the project folder): `launch/checks/live-check-walkthrough.md` and `results-sheet.md` match this build (plan step 3); the pilot pitch files in `launch/pilot/` and the new `set-up-day.md`; the attorney cover email and the attorney-choice note say 16 October.
 
@@ -876,6 +880,9 @@ A cloud session in the Lot Current project (the "Build the plan's Claude steps" 
 - A second window's copy stopped by the re-check whose save was refused still holds that post, so **Back to the list** there can drop the other window's post once that window's side panel has closed.
 - The set-up and Settings warning about a number in the role counts the dealership's name, city and ZIP as facts but not a ticked store's name; a dealership city or store name that reads as a mileage still fails with the plain mileage reason.
 - The old-name check still passes the name glued after the stem of a word it lists (s, p, b, c, "al", "pi", "mate" and the like), a regular expression's `\b` or `\s` included.
+- The price note's word rule: a steer said only in listed words ("Do not go to the dealer.", "Cash price paid to the secretary.") still passes, since the fee places' words are on the list; "incl", "see", "agent" and "signing" are not on it, so a note using them is refused; fees written as amounts joined only by marks ("$1,299 + $499", "$499.00/$25.00") reach seven digits and are refused in a note that says "not the dealer". The help says each.
+- The list after "new": a listed part followed by state wording other than the known state words ("New tires, engine runs great.") is still read as claimed.
+- The Supabase functions import `npm:@supabase/supabase-js@2` without an exact version, so each deploy and each CI stack run takes the newest 2.x. On 2026-10-07 CI's stack job failed once because npm published 2.117.3 while the job started (the re-run passed). Pinning a version or committing a Deno lockfile is the owner's call, since it changes what production imports.
 - Version 0.6.0 waits for the live-check walkthrough's results.
 
 ## 11. Quick reference
