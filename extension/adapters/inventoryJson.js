@@ -245,7 +245,10 @@ const NOTE_END = new RegExp(String.raw`(?:${LABEL_NOTE}|[\s:.${LABEL_MARKS}])$`)
 // tag patterns above never spend long on a page's worth of text.
 const LABEL_MAX = 300;
 export function labelWords(label) {
-  let text = untagged(String(label || '').slice(0, LABEL_MAX).replace(SUP_NOTE, '').replace(TAG_NOTE, '')).replace(ENTITY, entityText);
+  let tagged = String(label || '').slice(0, LABEL_MAX).replace(SUP_NOTE, '');
+  // several notes in a row at the end ("<span>1</span><span>2</span>")
+  for (let n = 0; n < 4 && TAG_NOTE.test(tagged); n += 1) tagged = tagged.replace(TAG_NOTE, '');
+  let text = untagged(tagged).replace(ENTITY, entityText);
   for (;;) {
     // a footnote is short: only the label's last characters are read each time
     const note = NOTE_END.exec(text.slice(-12));
@@ -285,10 +288,11 @@ const GENERIC_PRICE = /^\s*(?:the\s+)?price\s*:?\s*$/i;
 const PRICE_NAME = /price|\bspecials?\b/i;
 const NAMED_PRICE = /^\s*[A-Za-z][\w.&'’ -]{0,40}\s+price\s*:?\s*$/i;
 // In a list of prices, a line about a sale or the dealer that is not a
-// price ("Sale Event", "Sale ends Sunday", "Dealer Notes"), and an amount
+// price ("Sale Event", "Sale ends Sunday", "Dealer Notes"; "Year End Sale"
+// is still a price's label), and an amount
 // added to or taken off the price ("-$500", "+$499"): a price is never
 // signed.
-const LIST_NOTE = /\b(?:events?|ends?|expires?|notes?|disclaimers?|details?)\b/i;
+const LIST_NOTE = /\b(?:events?|ends|expires?|notes?|disclaimers?|details)\b/i;
 const SIGNED = /^\s*[-+−–(]/;
 // Where a label/value entry holds its amount.
 const VALUE_FIELDS = ['value', 'amount', 'price', 'displayValue'];
@@ -343,9 +347,9 @@ export function labeledPrices(record) {
   // never a sale event, a note or a signed adjustment, holding text or
   // nothing at all (an entry of a list of prices, or one with a value field,
   // that holds nothing; a field holding null is left out); and when it
-  // holds some text and its name says it is a plain
-  // "Price" or, from a label, a "<Something> Price" (priceKind 'named'
-  // without the dealership's name; choosePrices reads it with the name)
+  // holds some text and its name says it is a plain "Price" or, from a
+  // label, a "<Something> Price" (priceKind 'named' without the
+  // dealership's name; choosePrices reads it with the name)
   const unreadable = (entry, raw, { labelled = false, listed = false, present = false, typed: held = false } = {}) => {
     const written = typeof raw === 'string' || typeof raw === 'number';
     if (entry.final) {
@@ -394,11 +398,12 @@ export function labeledPrices(record) {
       ownField = VALUE_FIELDS.find((f) => x[f] !== undefined && x[f] !== null) || null;
     }
     // Below the record's top level and outside a price container
-    // ("pricing", "prices", "dprice"), a field named just "price" is the
-    // figure of what holds it (a package, a warranty, an incentive, an
-    // accessory): labelled by that, as a named entry is, so it is never the
-    // car's plain "Price", read or not.
-    const holder = depth > 0 && !listed ? name || spaced(key) : '';
+    // ("pricing", "prices", "dprice", or "offers", where standard vehicle
+    // data keeps the car's price), a field named just "price" is the figure
+    // of what holds it (a package, a warranty, an incentive, an accessory):
+    // labelled by that, as a named entry is, so it is never the car's plain
+    // "Price", read or not.
+    const holder = depth > 0 && !listed && !/^offers?$/.test(keyName(key)) ? name || spaced(key) : '';
     for (const [k, v] of Object.entries(x)) {
       if (/image|photo|picture|feature|option|media|attribute/i.test(k)) continue;
       if (k === ownField && typeof v !== 'object') continue;

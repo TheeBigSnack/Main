@@ -1787,3 +1787,16 @@ test('R-8: a footnote inside any tag at the label\'s end, or a range in a supers
   labelWords(`Offer${'<a href="#n">'.repeat(20000)}1`);
   assert.ok(Date.now() - started < 1000, `a 100,000-character label took ${Date.now() - started} ms`);
 });
+
+// Rule 4, repair cycle 3, checking the fixes above: a car's price held the
+// standard-data way (offers.price) is still the car's price; a sale named
+// for the year's end is still a price label, a sale that ends is not; and
+// several footnotes in tags at a label's end are all set aside.
+test('Rule 4 and R-8: offers.price is still the price, "Year End Sale" is still a price label, and several tagged footnotes are all set aside', () => {
+  assert.deepEqual(choosePrices(labeledPrices({ VehicleRetailPrice: 24000, offers: { price: 24500, priceCurrency: 'USD' } })), { price: 24500, priceLabel: 'price', priceBeforeFees: 24000 });
+  const P = (dprice) => choosePrices(labeledPrices({ pricing: { dprice } }), { dealer: 'Sample Chevrolet' });
+  assert.equal(P([{ label: 'Price', value: '$24,000' }, { label: 'Year End Sale', value: 'Call' }]).price, null, '"Year End Sale" reading "Call"');
+  assert.equal(P([{ label: 'Price', value: '$24,000' }, { label: 'Sale ends Sunday', value: 'Call' }]).price, 24000, '"Sale ends Sunday" is no price');
+  assert.equal(labelWords('Your Carvana Offer<span>1</span><span>2</span>'), 'Your Carvana Offer');
+  assert.equal(labelWords('Your Carvana Offer<sup>1</sup><a href="#n2">2</a>'), 'Your Carvana Offer');
+});
