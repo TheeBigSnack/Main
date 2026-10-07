@@ -1210,7 +1210,7 @@ test('R-8: a final price set aside as an offer or a guide\'s value leaves the ca
   const quoted = (label) => `the list labels its price "${label}", which Lot Current does not read as the selling price`;
   const none = (label) => ({ price: null, priceLabel: quoted(label), priceBeforeFees: null });
   const P = (dprice, dealer = 'Sample Chevrolet') => choosePrices(labeledPrices({ pricing: { dprice } }), { dealer });
-  for (const label of ['Special Offer', 'Today\'s Offer', 'Holiday Offer', 'Best Offer', 'Your Carvana Offer', 'Instant Cash Offer', 'Market Value', 'Kelley Blue Book Price', 'KBB Value', 'MSRP']) {
+  for (const label of ['Special Offer', 'Today\'s Offer', 'Holiday Offer', 'Best Offer', 'Your Carvana Offer', 'Instant Cash Offer', 'Market Value', 'Kelley Blue Book Price', 'KBB Value', 'MSRP', 'Conditional Final Price', 'Employee Price']) {
     assert.deepEqual(P([{ label: 'Price', value: '$24,000' }, { label: 'Doc Fee', value: '$499' }, { label, value: '$22,499', isFinalPrice: true }]), none(label), `"${label}" marked final beside a plain price`);
     assert.deepEqual(P([{ typeClass: 'retailPrice', label: 'Retail Price', value: '$24,000' }, { label, value: '$22,499', isFinalPrice: true }]), none(label), `"${label}" marked final beside a base price`);
   }
@@ -1228,6 +1228,8 @@ test('R-8: a final price set aside as an offer or a guide\'s value leaves the ca
     const on = normalizeInventoryRecord({ ...dealerOnCard(car).VehicleCard, VehiclePriceLabel: label }, { origin: DEALERON_ORIGIN });
     assert.deepEqual([on.price, on.priceLabel, on.priceBeforeFees], [null, quoted(label), null], `DealerOn, own label "${label}": the same`);
   }
+  // a final entry whose label is plain but whose platform type is not the price: the type's words are quoted
+  assert.deepEqual(P([{ typeClass: 'retailPrice', label: 'Retail Price', value: '$24,000' }, { typeClass: 'msrp', label: 'Price', value: '$26,000', isFinalPrice: true }]), none('msrp'));
   // the dealership's own final price is still the price, the base price below it
   const own = normalizeInventoryRecord(record, { origin: DEALERCOM_ORIGIN });
   assert.deepEqual([own.price, own.priceBeforeFees], [car.base + car.fee, car.base]);
