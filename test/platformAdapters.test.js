@@ -2390,3 +2390,95 @@ test('Rule 4: a selling price field holding \'\' or 0 beside one that reads is a
   const both = normalizeInventoryRecord({ ...card, VehicleSalePrice: 'Call' }, { origin: DEALERON_ORIGIN });
   assert.deepEqual([both.price, both.priceLabel], [null, 'the list\'s "Sale Price" reads "Call", which Lot Current does not read as an amount']);
 });
+
+// R-8, repair cycle 3 round 9, the verifier's regressions: round 9 read
+// the buyer's-car test ("offer" before "sale") in the label with the
+// entry's typeClass appended, so "Sale Offer" typed salePrice read "Sale
+// Offer sale Price" and was set aside: a Dealer.com car Ready at its $117,000
+// sale price went out Ready at its $118,000 retail price instead. That test
+// reads the label alone now; the typeClass may still exempt an offer word or
+// mark an entry as an offer, as before the round. And a label ending in
+// "Sale Price" with an offer word before it ("Special Offer Sale Price") is
+// the website's sale price, not a sale after an offer.
+test('R-8: an offer word the website\'s price words explain is still the price when the entry is typed salePrice, and "<...Offer...> Sale Price" is a sale price, on DealerOn and Dealer.com', () => {
+  const [c] = platformCars(1, { from: 780 });
+  const car = { ...c, certified: false };
+  assert.equal(car.base, 118000);
+  const comFull = dealerComRecord(car);
+  const comCard = { ...comFull, pricing: { ...comFull.pricing, dprice: comFull.pricing.dprice.slice(0, 2) } };
+  const { VehicleInternetPrice, VehiclePriceLabel, ...onCard } = dealerOnCard(car).VehicleCard;
+  const quoted = (label) => `the list labels its price "${label}", which Lot Current does not read as the selling price`;
+  for (const label of ['Sale Offer', 'Internet Offer', 'E-Price Offer', 'Year End Sale Offer', 'Sale Price - Offer Ends 10/31']) {
+    assert.equal(priceKind({ label, key: 'dprice.salePrice', final: false, value: 1 }), 'selling', `"${label}" typed salePrice`);
+    for (const final of [false, true]) {
+      const entry = { typeClass: 'salePrice', label, value: '$117,000', ...(final ? { isFinalPrice: true } : {}) };
+      const com = normalizeInventoryRecord({ ...comFull, pricing: { retailPrice: '$118,000', dprice: [{ typeClass: 'retailPrice', label: 'Price', value: '$118,000' }, entry] } }, { origin: DEALERCOM_ORIGIN });
+      assert.deepEqual([com.price, com.priceLabel, com.priceBeforeFees, assessVehicle(com, withDefaults({})).decision], [117000, label, null, DECISION.READY], `Dealer.com, "${label}" typed salePrice${final ? ', final' : ''}`);
+    }
+    for (const [what, record, origin] of [['DealerOn', onCard, DEALERON_ORIGIN], ['Dealer.com', comCard, DEALERCOM_ORIGIN]]) {
+      const v = normalizeInventoryRecord({ ...record, offers: [{ typeClass: 'salePrice', label, value: '$117,000' }] }, { origin });
+      assert.deepEqual([v.price, v.priceLabel, v.priceBeforeFees, assessVehicle(v, withDefaults({})).decision], [117000, label, null, DECISION.READY], `${what} retail-only, offers "${label}" typed salePrice`);
+    }
+  }
+  // an offer for the buyer's car typed salePrice is still an offer, and a typeClass "offer" still marks one
+  for (const label of ['Carvana offer, sale ends Sunday', 'Sale Offer for Your Car', 'Your Offer Now']) {
+    const com = normalizeInventoryRecord({ ...comFull, pricing: { dprice: [{ typeClass: 'salePrice', label, value: '$117,000' }] } }, { origin: DEALERCOM_ORIGIN });
+    assert.deepEqual([com.price, com.priceLabel], [null, quoted(label)], `Dealer.com, "${label}" typed salePrice`);
+  }
+  assert.equal(priceKind({ label: 'Price', key: 'dprice.offer', final: false, value: 1 }), 'other');
+  assert.equal(priceKind({ label: 'Internet Price', key: 'dprice.offer', final: false, value: 1 }), 'selling', 'the website\'s price words beside a typeClass "offer", as before');
+  // "<...Offer...> Sale Price" is the website's sale price
+  const P = (dprice) => choosePrices(labeledPrices({ pricing: { dprice } }), { dealer: 'Sample Chevrolet' });
+  for (const label of ['Special Offer Sale Price', 'Special Offer: Sale Price', 'Limited Time Offer - Sale Price', 'Offer Ends 10/31 - Sale Price', 'Holiday Offer Internet Sale Price', 'Sale Price (offer good through our Fall Sale)']) {
+    assert.equal(priceKind({ label, key: '', final: false, value: 1 }), 'selling', label);
+    assert.deepEqual(P([{ label: 'Price', value: '$21,000' }, { label, value: '$20,500' }]), { price: 20500, priceLabel: label, priceBeforeFees: null }, `"${label}" beside a plain price`);
+    const on = normalizeInventoryRecord({ ...dealerOnCard(car).VehicleCard, VehiclePriceLabel: label }, { origin: DEALERON_ORIGIN });
+    assert.deepEqual([on.price, on.priceLabel], [car.base + car.fee, 'Internet Price'], `DealerOn, VehiclePriceLabel "${label}"`);
+  }
+  assert.equal(priceKind({ label: 'Carvana offer, sale ends Sunday', key: '', final: false, value: 1 }), 'other', 'a sale after the offer word, not a sale price');
+});
+
+// Rule 4, repair cycle 3 round 9, the verifier's findings: the round's
+// empty-selling-price rule kept a final price holding nothing only when the
+// platform flagged it final, so Dealer.com's entry typed finalPrice or
+// labelled "Final Price" with no isFinalPrice, holding '' or nothing, beside
+// a readable internet price was dropped and the car went out Ready. A label
+// or typeClass that says final counts as final there. And a "<Something>
+// Price" field holding a zero written as text ("$0", "0.00") held a
+// retail-only car while 0 and "0" did not: a zero is no price there.
+test('Rule 4: an empty price that says final still holds the car beside a selling price, and a zero in a "<Something>Price" field is no price, on DealerOn and Dealer.com', () => {
+  const [c] = platformCars(1, { from: 780 });
+  const car = { ...c, certified: false };
+  const comFull = dealerComRecord(car);
+  const [retail, doc] = comFull.pricing.dprice;
+  const withFinal = (entry) => normalizeInventoryRecord({ ...comFull, pricing: { ...comFull.pricing, dprice: [retail, doc, { typeClass: 'internetPrice', label: 'Internet Price', value: '$118,490' }, entry] } }, { origin: DEALERCOM_ORIGIN });
+  for (const V of ['', '$0', null]) {
+    for (const [entry, label] of [[{ typeClass: 'finalPrice', label: 'Final Price', value: V }, 'Final Price'], [{ label: 'Final Price', value: V }, 'Final Price'], [{ typeClass: 'finalPrice', label: 'Today', value: V }, 'Today']]) {
+      const v = withFinal(entry);
+      assert.deepEqual([v.price, v.priceLabel, assessVehicle(v, withDefaults({})).decision], [null, `the list's "${label}" has no amount`, DECISION.NOT_READY], `Dealer.com, ${JSON.stringify(entry)}`);
+    }
+  }
+  const card = dealerOnCard(car).VehicleCard;
+  for (const V of ['', '$0']) {
+    const v = normalizeInventoryRecord({ ...card, VehicleFinalSalePrice: V }, { origin: DEALERON_ORIGIN });
+    assert.deepEqual([v.price, v.priceLabel, assessVehicle(v, withDefaults({})).decision], [null, 'the list\'s "Final Sale Price" has no amount', DECISION.NOT_READY], `DealerOn, VehicleFinalSalePrice ${JSON.stringify(V)}`);
+  }
+  // a zero in a named field is no price, however it is written: a retail-only car is Ready at its retail price
+  const comCard = { ...comFull, pricing: { ...comFull.pricing, dprice: comFull.pricing.dprice.slice(0, 2) } };
+  const { VehicleInternetPrice, VehiclePriceLabel, ...onCard } = card;
+  const both = (fields) => [
+    ['Dealer.com', normalizeInventoryRecord({ ...comCard, pricing: { ...comCard.pricing, ...fields } }, { origin: DEALERCOM_ORIGIN })],
+    ['DealerOn', normalizeInventoryRecord({ ...onCard, ...fields }, { origin: DEALERON_ORIGIN })],
+  ];
+  for (const V of [0, '0', '$0', '0.00', '$0.00']) {
+    for (const [what, v] of both({ specialPrice: V, VehicleWebPrice: V })) {
+      assert.deepEqual([v.price, assessVehicle(v, withDefaults({})).decision], [car.base, DECISION.READY], `${what}, a named field holding ${JSON.stringify(V)}`);
+    }
+  }
+  // other text there still holds the car (the strict side), quoted
+  for (const [key, text, label] of [['specialPrice', 'N/A', 'special Price'], ['VehicleWeeklyPrice', '$89/wk', 'Weekly Price'], ['VehicleShowPrice', 'Always', 'Show Price']]) {
+    for (const [what, v] of both({ [key]: text })) {
+      assert.deepEqual([v.price, v.priceLabel, assessVehicle(v, withDefaults({})).decision], [null, `the list's "${label}" reads "${text}", which Lot Current does not read as an amount`, DECISION.NOT_READY], `${what}, ${key} "${text}"`);
+    }
+  }
+});

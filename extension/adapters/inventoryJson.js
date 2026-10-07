@@ -286,20 +286,31 @@ const SELLING_WORDS = new RegExp(String.raw`${SELLER_WORDS.source}|\bour\b|\byou
 // not make it the website's price. Only "price" right after the word ("Offer
 // Price", "Special Offer Price") or the website's own price words beside it
 // do (OFFER_PRICE_WORDS: "Internet Offer", "Sale Offer", "E-Price Offer",
-// "Selling Price Offer"), and those only when the label does not also read
-// as an offer for the buyer's car (SELL_YOUR_CAR: the offer word before
-// "sale", "Carvana offer, sale ends Sunday"; selling or trading the buyer's
-// car named, "Sale Offer for Your Car", "Selling Your Car? Our Offer"). Its
-// own short list, never SELLER_WORDS: "dealer", "final" and "now" sit beside
-// offers for the buyer's car ("Instant Dealer Offer", "Your Final Offer",
-// "Your Offer Now"). The offer word is read wherever it sits, as a guide's
-// words are.
+// "Selling Price Offer", or an entry typed as a sale or internet price),
+// and those only when the label itself does not also read as an offer for
+// the buyer's car (readsAsCarOffer: selling or trading the buyer's car
+// named, "Sale Offer for Your Car", "Selling Your Car? Our Offer"; or
+// "sale" after the offer word, "Carvana offer, sale ends Sunday", unless
+// the label names the website's sale price, "Special Offer Sale Price",
+// "Sale Price (offer good through our Fall Sale)"). Its own short list,
+// never SELLER_WORDS: "dealer", "final" and "now" sit beside offers for the
+// buyer's car ("Instant Dealer Offer", "Your Final Offer", "Your Offer
+// Now"). The offer word is read wherever it sits, as a guide's words are.
+// `typed` is what the platform types the entry as (its typeClass or field
+// name, spaced): it may mark an entry as an offer ("offer") or let the
+// website's price words explain one ("salePrice"), as the label's words
+// do, but the buyer's-car test reads the label alone, so a typeClass
+// "salePrice" never makes "Sale Offer" read "Sale Offer sale Price".
 const OFFER_WORD = /\boffers?\b(?![\s\-–—]*pric)/i;
 const OFFER_PRICE_WORDS = /\binternet\b|\bselling\b|\be-?price\b|\bsale\b/i;
-const SELL_YOUR_CAR = /\boffers?\b.*\bsale\b|\bsell\b|\bselling\s+(?:us\s+)?(?:your|my)\b|\btrad(?:e|ing)\b|\byour\s+(?:car|vehicle|truck|suv|ride|trade)\b|\bfor\s+your\b/i;
-const isOfferForTheCar = (label) => {
-  const words = labelWords(label);
-  return OFFER_WORD.test(words) && (!OFFER_PRICE_WORDS.test(words) || SELL_YOUR_CAR.test(words));
+const SELL_YOUR_CAR = /\bsell\b|\bselling\s+(?:us\s+)?(?:your|my)\b|\btrad(?:e|ing)\b|\byour\s+(?:car|vehicle|truck|suv|ride|trade)\b|\bfor\s+your\b/i;
+const OFFER_THEN_SALE = /\boffers?\b.*\bsale\b/i;
+const SALE_PRICE = /\bsale\s*pric/i;
+const readsAsCarOffer = (words) => SELL_YOUR_CAR.test(words) || (OFFER_THEN_SALE.test(words) && !SALE_PRICE.test(words));
+const isOfferForTheCar = (label, typed = '') => {
+  const own = labelWords(label);
+  const words = typed ? `${own} ${typed}` : own;
+  return OFFER_WORD.test(words) && (!OFFER_PRICE_WORDS.test(words) || readsAsCarOffer(own));
 };
 const GENERIC_PRICE = /^\s*(?:the\s+)?price\s*:?\s*$/i;
 // A name that says its figure is a price: "...Price", "Internet Special".
@@ -316,6 +327,9 @@ const lastKeyPart = (key) => spaced(String(key || '').split('.').pop());
 // platform types it as (a typeClass "internetPrice", a field "salePrice"), or
 // by the platform's final mark (labeledPrices, choosePrices).
 const namesSellingPrice = (e) => e.final || PRICE_NAME.test(labelWords(e.label)) || PRICE_NAME.test(lastKeyPart(e.key)) || SELLING_ONLY.test(labelWords(e.label).trim());
+// Whether an entry says it is the website's final price: the platform's
+// final mark, or "final" in its label or in its typeClass or field name.
+const saysFinal = (e) => e.final || /\bfinal\b/i.test(labelWords(e.label)) || /\bfinal\b/i.test(lastKeyPart(e.key));
 const NAMED_PRICE = /^\s*[A-Za-z][\w.&'’ -]{0,40}\s+price\s*:?\s*$/i;
 // In a list of prices, a line about a sale or the dealer that is not a
 // price ("Sale Event", "Sale ends Sunday", "Dealer Notes"; "Year End Sale"
@@ -386,6 +400,10 @@ const FINAL_FIELD = /^finalprice(?:formatted|text|displayed|display|value|amount
 // "finalPrice" -> "final Price", "VehicleInternetPrice" -> "Vehicle Internet Price".
 const spaced = (key) => String(key).replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').trim();
 
+// A price's text that holds no amount at all: nothing, or a zero ("0",
+// "$0", "0.00"), as an unused field holds.
+const isEmptyText = (text) => /^\s*(?:\$?\s*0+(?:\.0+)?)?\s*$/.test(String(text ?? ''));
+
 function amount(value) {
   if (typeof value === 'number') return Number.isFinite(value) && value > 0 ? value : null;
   if (typeof value !== 'string') return null;
@@ -454,8 +472,10 @@ export function labeledPrices(record) {
   // record's own (not an entry of a list of prices) named "<Something>
   // Price" ("specialPrice", "webPrice", DealerOn's "VehicleDisplayPrice")
   // holding text is kept too, but only when no plain or selling price of
-  // the record's own reads (namedFields, below); never a yes or a no there,
-  // nor a call-for-price field ("callPrice", "callForPrice").
+  // the record's own reads (namedFields, below); never a yes or a no or a
+  // zero there, however it is written ("0", "$0", "0.00"), nor a
+  // call-for-price field ("callPrice", "callForPrice"). Any other text
+  // there ("N/A", "$89/wk", "Always") holds the car: the strict side.
   const namedFields = new Set();
   const unreadable = (entry, raw, { labelled = false, listed = false, present = false, typed: held = false } = {}) => {
     const written = typeof raw === 'string' || typeof raw === 'number';
@@ -475,7 +495,7 @@ export function labeledPrices(record) {
     }
     if (!written || !entry.text || !named) return;
     if (kind === 'plain' || (labelled && kind === 'named')) out.push(entry);
-    else if (kind === 'named' && !entry.aside && typeof raw === 'string' && !YES_NO.test(raw.trim()) && !CALL_FIELD.test(keyName(entry.key))) {
+    else if (kind === 'named' && !entry.aside && typeof raw === 'string' && !YES_NO.test(raw.trim()) && !isEmptyText(raw) && !CALL_FIELD.test(keyName(entry.key))) {
       namedFields.add(entry);
       out.push(entry);
     }
@@ -595,7 +615,7 @@ export function priceKind(entry, dealer = '') {
   // The offer word is read in the label and in what the platform types the
   // entry as (its typeClass or field name), never in the name of the list
   // holding it: an "offers" list keeps the car's own price ("Price").
-  const offer = isOfferForTheCar(own) || isOfferForTheCar(`${own} ${lastKeyPart(entry.key)}`);
+  const offer = isOfferForTheCar(own) || isOfferForTheCar(own, lastKeyPart(entry.key));
   if (NOT_THE_PRICE.test(labelWords(words)) || GUIDE_PRICE.test(labelWords(words)) || offer) return 'other';
   if (entry.final) return 'selling';
   if (BASE_WORDS.test(words)) return 'base';
@@ -613,10 +633,6 @@ function quoteLabels(labels) {
   const list = quoted.length > 1 ? `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}` : quoted[0];
   return `the list labels its ${quoted.length > 1 ? 'prices' : 'price'} ${list}, which Lot Current does not read as the selling price`;
 }
-
-// A price's text that holds no amount at all: nothing, or a zero ("0",
-// "$0", "0.00"), as an unused field holds.
-const isEmptyText = (text) => /^\s*(?:\$?\s*0+(?:\.0+)?)?\s*$/.test(String(text ?? ''));
 
 // The website's own price that is not a plain amount, quoted for a person
 // to check: "the list's final price reads "$40,590*", which Lot Current does
@@ -752,15 +768,19 @@ export function choosePrices(entries, { dealer = '', label = null } = {}) {
   // A selling price holding '' or 0 (an unused field, DealerOn's
   // VehicleSalePrice beside its internet price) is an empty field, as one
   // holding null is, when another selling price of the record reads: it
-  // holds nothing. A final one still holds.
-  const unused = (e) => sellingReads && !e.final && isEmptyText(e.text);
+  // holds nothing. One that says it is final still holds, whether the
+  // platform flags it or its label or typeClass says so ("Final Price",
+  // a typeClass "finalPrice", "VehicleFinalSalePrice").
+  const unused = (e) => sellingReads && !saysFinal(e) && isEmptyText(e.text);
   const unread = finalReads ? [] : all.filter((e) => (e.value === null || e.value === undefined) && !unused(e) && (e.final || e.kind === 'selling' || (!sellingReads && (e.kind === 'plain' || e.kind === 'named'))));
   if (unread.length) {
     // what the website shows is quoted: the final price, else one holding
     // text that is not an amount ("Call"), else an empty one
     const first = unread.find((e) => e.final) || unread.find((e) => !isEmptyText(e.text)) || unread[0];
-    // an empty one beside the record's own label: that label is what a person sees
-    return isEmptyText(first.text) && !first.final && ownIsSelling ? ownUnread() : NO_PRICE(unreadablePrice(first));
+    // an empty one beside the record's own label, with no selling price
+    // that reads: that label is what a person sees, and its price has no
+    // amount (beside one that reads, the empty one itself is quoted)
+    return isEmptyText(first.text) && !first.final && !sellingReads && ownIsSelling ? ownUnread() : NO_PRICE(unreadablePrice(first));
   }
   if (elsewhere.length && !sellingReads) return NO_PRICE(quoteLabels(elsewhere.map((e) => e.label || spaced(e.key))));
   const asideUnread = finalReads ? [] : elsewhere.filter((e) => (e.value === null || e.value === undefined) && !unused(e));
