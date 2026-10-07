@@ -182,6 +182,8 @@ try {
   assert.doesNotMatch(await popup.textContent('.panel'), /Update price/);
   await tab(popup, 'mine').click();
   assert.match(await popup.textContent('.panel'), /Wagoneer[\s\S]*Listed \$36,883/);
+  // its price is newer than the last scan, and that scan shows the same price: it matches (src/rescan.js listingLine)
+  assert.match(await popup.locator('.row', { hasText: 'Wagoneer' }).textContent(), /Matches the website/);
 
   // ---- 3. Take the Ram down, its listing link forgotten (as for a car marked posted by hand), with a second Ram of the same name and price posted too: Your listings opens, nothing is ticked off there or on the other Ram's listing; the person opens this Ram's listing and clicks Mark as sold; Lot Current notices ----
   await popup.evaluate(async ({ o, vin, twin }) => {
