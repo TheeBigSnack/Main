@@ -11,7 +11,7 @@ Every version ships the same way. A person writes the release notes, `npm run re
    - `CHANGELOG.md` has no `## 0.6.0 (` heading, or a newer version sits above it, or `## Unreleased` is missing, below it or still holds entries (they ship in 0.6.0, so they belong under its heading);
    - the README's first line does not carry the new major and minor number.
 
-   Then it writes the version into `extension/manifest.json`, `package.json` and both places in `package-lock.json`, runs `npm test`, `npm run pack` and `npm run pack -- --pilot`, and prints the next steps. If the tests or either pack fail, it puts the three files back as they were.
+   Then it writes the version into `extension/manifest.json`, `package.json` and both places in `package-lock.json`, runs `npm test`, `npm run pack` and `npm run pack -- --pilot`, and prints the next steps. If the tests or either pack fail, it puts the three files back as they were and removes a zip it packed in that run, so a release that stops leaves no zip of a version nothing is stamped with.
 
    **A build that names the account project.** When `extension/src/accountConfig.js` names a Supabase project (`npm run set-project` filled it in), the build shows the optional Account step in the first-run wizard and sign-in under Settings, and the printed steps say so. That sign-in works only once the project is set up, so hand such a build to no tester and upload it nowhere before `docs/production-setup.md` steps 3 to 5 are done and `npm run check-deploy` shows no FAIL. The config cannot simply be emptied for the meantime: the Supabase deploy workflow refuses a project the committed config does not name.
 

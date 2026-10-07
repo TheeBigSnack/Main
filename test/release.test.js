@@ -163,6 +163,8 @@ function world({ status = '', changelogEntry = null, readme = REAL['README.md'],
   if (changelogEntry) files['CHANGELOG.md'] = REAL['CHANGELOG.md'].replace(/^## Unreleased\n/m, '').replace('# Changelog\n\n', `# Changelog\n\n## Unreleased\n\n## ${changelogEntry} (2026-10-01, a test entry)\n\nChanged\n- Nothing.\n\n`);
   const runs = [];
   const writes = [];
+  const removed = [];
+  const dist = new Set(); // the zips in dist/
   const out = [];
   const err = [];
   const io = {
@@ -171,24 +173,28 @@ function world({ status = '', changelogEntry = null, readme = REAL['README.md'],
       return files[rel];
     },
     write: (rel, text) => { writes.push(rel); files[rel] = text; },
-    exists: (rel) => {
-      const version = JSON.parse(files['extension/manifest.json']).version;
-      if (rel === zipPath(version)) return packWrites && runs.includes(COMMANDS.pack);
-      if (COMMANDS.pilotPack && rel === releaseScript.pilotZipPath(version)) return pilotWrites && runs.includes(COMMANDS.pilotPack);
-      return false;
-    },
+    exists: (rel) => dist.has(rel),
     run: (cmd) => {
       runs.push(cmd);
+      // a pack writes its zip at the version the files carry then
+      const version = JSON.parse(files['extension/manifest.json']).version;
       if (cmd === COMMANDS.status) return { code: 0, stdout: status };
       if (cmd === COMMANDS.test) return { code: testCode, stdout: '' };
-      if (cmd === COMMANDS.pack) return { code: packCode, stdout: '' };
-      if (cmd === COMMANDS.pilotPack) return { code: pilotCode, stdout: '' };
+      if (cmd === COMMANDS.pack) {
+        if (packWrites) dist.add(zipPath(version));
+        return { code: packCode, stdout: '' };
+      }
+      if (cmd === COMMANDS.pilotPack) {
+        if (pilotWrites) dist.add(releaseScript.pilotZipPath(version));
+        return { code: pilotCode, stdout: '' };
+      }
       throw new Error(`ran ${cmd.join(' ')}`);
     },
+    remove: (rel) => { removed.push(rel); dist.delete(rel); },
     log: (s) => out.push(s),
     error: (s) => err.push(s),
   };
-  return { io, files, runs, writes, out: () => out.join('\n'), err: () => err.join('\n') };
+  return { io, files, runs, writes, removed, out: () => out.join('\n'), err: () => err.join('\n') };
 }
 
 test('a dirty tree is refused before anything is written or run', () => {
@@ -391,6 +397,45 @@ test('failing tests, a failed pack or a failed pilot pack put the three files ba
     assert.match(w.err(), new RegExp(`are back at ${CURRENT.replace(/\./g, '\\.')}`));
     assert.doesNotMatch(w.out(), /is packed/);
   }
+});
+
+// A release that stops after npm run pack has written the store zip must
+// not leave it behind: the version files go back, so that zip is of a
+// version nothing is stamped with, and it offers sign-in.
+test('a release that stops after the pack removes the zip it packed, and says so', () => {
+  const next = bump(CURRENT, 'patch');
+  const store = zipPath(next);
+  const pilot = releaseScript.pilotZipPath(next);
+  const cases = [
+    [{ pilotCode: 1, pilotWrites: false }, [store]], // the pilot pack refused, as it does before writing
+    [{ pilotWrites: false }, [store]], // it said it worked but wrote nothing
+    [{ packCode: 1 }, [store]], // the pack failed with a zip at that name in dist/
+    [{ pilotCode: 1 }, [store, pilot]], // the pilot pack failed with a pilot zip at that name in dist/
+  ];
+  for (const [opts, gone] of cases) {
+    const w = world({ changelogEntry: next, ...opts });
+    assert.equal(release(['patch'], w.io), 1);
+    assert.deepEqual(w.removed, gone, `removed (${JSON.stringify(opts)})`);
+    for (const z of gone) assert.equal(w.io.exists(z), false);
+    assert.ok(w.err().includes(`${gone.join(' and ')}, packed in this run, ${gone.length > 1 ? 'are' : 'is'} removed`), `the message names them (${JSON.stringify(opts)}):\n${w.err()}`);
+  }
+  // nothing packed, nothing removed
+  for (const opts of [{ testCode: 1 }, { packWrites: false }]) {
+    const w = world({ changelogEntry: next, ...opts });
+    assert.equal(release(['patch'], w.io), 1);
+    assert.deepEqual(w.removed, [], JSON.stringify(opts));
+    assert.doesNotMatch(w.err(), /removed/);
+  }
+  // a release that goes through keeps both zips
+  const ok = world({ changelogEntry: next });
+  assert.equal(release(['patch'], ok.io), 0, ok.err());
+  assert.deepEqual(ok.removed, []);
+  // it removes only the two zips this version's packs write, and the checklist says so
+  const src = read('scripts/release.mjs').replace(/^\s*\/\/.*$/gm, '');
+  assert.deepEqual([...src.matchAll(/\bpacked\.push\(([^;]*)\);/g)].map((m) => m[1]), ['zipPath(version)', 'pilotZipPath(version)']);
+  assert.deepEqual([...src.matchAll(/\.remove\(([^)]*)\)/g)].map((m) => m[1]), ['z'], 'one remove, of a zip in that list');
+  assert.match(src, /for \(const z of left\) io\.remove\(z\);/);
+  assert.match(read('docs/release.md'), /removes a zip it packed in that run/);
 });
 
 test('the script never commits, tags, pushes or reaches the network: four commands, one runner', () => {

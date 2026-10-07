@@ -20,7 +20,7 @@
 // both places in package-lock.json (a text edit, so formatting and key order
 // stay), runs the unit tests, `npm run pack` and `npm run pack -- --pilot`,
 // and prints the next steps. If the tests or either pack fail, it puts the
-// three files back as they were.
+// three files back as they were and removes a zip it packed in that run.
 //
 // The pilot zip (the same files with the account settings left empty, so no
 // sign-in) is what testers get while sign-in cannot work and while the pilot
@@ -34,7 +34,7 @@
 // prints. It runs the four commands in COMMANDS and nothing else.
 
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -283,7 +283,7 @@ function accountUrlOf(io) {
   }
 }
 
-// The whole release. io: { read(rel), write(rel, text), exists(rel), run(cmd) -> { code, stdout }, log(s), error(s) }.
+// The whole release. io: { read(rel), write(rel, text), exists(rel), remove(rel), run(cmd) -> { code, stdout }, log(s), error(s) }.
 // Returns the exit code.
 export function release(argv, io) {
   const args = parseArgs(argv);
@@ -343,16 +343,25 @@ export function release(argv, io) {
     return 0;
   }
 
+  // The zips this run may have written. When it stops, the version files go
+  // back, so a zip left in dist/ would be of a version nothing is stamped
+  // with (and the store one offers sign-in): each is removed again.
+  const packed = [];
   const restore = (why) => {
     for (const f of VERSION_FILES) io.write(f, texts[f]);
-    io.error(`release: ${why}; ${VERSION_FILES.join(', ')} are back at ${current}.`);
+    const left = packed.filter((z) => io.exists(z));
+    for (const z of left) io.remove(z);
+    const zips = left.length ? `, and ${left.join(' and ')}, packed in this run, ${left.length > 1 ? 'are' : 'is'} removed` : '';
+    io.error(`release: ${why}; ${VERSION_FILES.join(', ')} are back at ${current}${zips}.`);
     return 1;
   };
   for (const f of VERSION_FILES) io.write(f, next[f]);
   io.log(`${current} -> ${version} in ${VERSION_FILES.join(', ')} (both places in the lockfile).`);
   if (io.run(COMMANDS.test).code !== 0) return restore('the unit tests failed at the new version');
+  packed.push(zipPath(version));
   if (io.run(COMMANDS.pack).code !== 0) return restore('npm run pack failed');
   if (!io.exists(zipPath(version))) return restore(`npm run pack did not write ${zipPath(version)}`);
+  packed.push(pilotZipPath(version));
   if (io.run(COMMANDS.pilotPack).code !== 0) return restore('npm run pack -- --pilot failed (its message above says why)');
   if (!io.exists(pilotZipPath(version))) return restore(`npm run pack -- --pilot did not write ${pilotZipPath(version)}`);
   io.log('');
@@ -387,6 +396,7 @@ function realIo() {
     read: (rel) => readFileSync(at(rel), 'utf8'),
     write: (rel, text) => writeFileSync(at(rel), text),
     exists: (rel) => existsSync(at(rel)),
+    remove: (rel) => rmSync(at(rel), { force: true }),
     run: (cmd) => runCommand(cmd),
     log: (s) => console.log(s),
     error: (s) => console.error(s),
