@@ -192,8 +192,11 @@ test('an invisible character never hides a word, and a mark that turns the text 
 });
 
 test('known gap, for the owner to decide: a steer said only in listed words still passes', () => {
-  // every word here is one that plain price and fee wording needs (cash, price, paid, not, no, dealer, fees), so the word list cannot tell these from a plain note
-  for (const extra of ['No dealer or fees.', 'No Example Motors or fees.', 'Price without the dealer or fees.', 'Cash price and fees are not paid to the dealer.', 'Fees are not paid to the dealer.', 'No dealer and no fees.', 'Cash price is not paid to the dealership.']) {
+  // every word here is one that plain price and fee wording needs (do, not, go, to, cash, price, paid, directly, no, without, dealer, fees), so the word list cannot tell these from a plain note
+  for (const extra of [
+    'No dealer or fees.', 'No Example Motors or fees.', 'Price without the dealer or fees.', 'Cash price and fees are not paid to the dealer.', 'Fees are not paid to the dealer.', 'No dealer and no fees.',
+    'Cash price is not paid to the dealership.', 'Do not go to the dealer.', 'Do not go to Example Motors.', 'No dealer.', 'Price paid without the dealership.', 'The dealer is not paid.', 'Price is paid directly.',
+  ]) {
     assert.deepEqual(problems(withNote(`${FEES} ${extra}`)), [], extra);
   }
 });
