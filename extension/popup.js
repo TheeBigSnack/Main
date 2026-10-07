@@ -1,5 +1,5 @@
 import { assessVehicle, DECISION } from './src/classify.js';
-import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, listingLine, settleDiff, postedBasis, withPostedBasis, markLookDismissed, withWithheld, withheldOffer, acceptWithheld, scanCar } from './src/rescan.js';
+import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, listingLine, settleDiff, postedBasis, withPostedBasis, markLookDismissed, withWithheld, withheldOffer, acceptWithheld, scanCar, priceItemWaits } from './src/rescan.js';
 import { draftPrice, markDraftPosted, draftPriceUpdate, withPriceUpdate, draftPill, draftScanCar } from './src/drafts.js';
 import { performScan, keepSeenBasis } from './src/scanRunner.js';
 import { todoCountFor, originsFor } from './src/rescanSchedule.js';
@@ -523,16 +523,22 @@ function viewTodo(l) {
   const updates = d?.priceUpdates || [];
   if (updates.length) {
     parts.push(
-      section('Update price', 'warn', updates.map((p) =>
-        row(p, {
-          sub: (p.yours ? 'Your listing' : colleagueEntry(p.vin) ? `Posted by ${byWhom(colleagueEntry(p.vin))}` : 'Not marked as posted') + (p.stock ? ' · Stock ' + esc(p.stock) : ''),
-          right: `${money(p.from)} → <b>${money(p.to)}</b> <span class="${p.change < 0 ? 'down' : 'up'}">${signedMoney(p.change)}</span>`,
-          action: p.yours
+      section('Update price', 'warn', updates.map((p) => {
+        // an item worked out on a scan taken before your listing got the price it carries (updated on another
+        // computer since and brought by sync: src/rescan.js priceItemWaits) is the listing and the website as they
+        // were then: as on My listings, its price waits for the next scan, with neither price of that scan named
+        // and nothing to record or fill
+        const entry = state.posted[p.vin];
+        const waits = priceItemWaits(p, entry, d);
+        return row(p, {
+          sub: (waits ? '<span class="pill">Price compared at the next scan</span> ' : '') + (p.yours ? 'Your listing' : colleagueEntry(p.vin) ? `Posted by ${byWhom(colleagueEntry(p.vin))}` : 'Not marked as posted') + (p.stock ? ' · Stock ' + esc(p.stock) : ''),
+          right: waits ? `Listed ${money(entry.price)}` : `${money(p.from)} → <b>${money(p.to)}</b> <span class="${p.change < 0 ? 'down' : 'up'}">${signedMoney(p.change)}</span>`,
+          action: p.yours && !waits
             ? `<span class="actions"><button type="button" class="small go" data-action="upkeep" data-kind="price" data-vin="${esc(p.vin)}" data-price="${p.to}" title="Opens your listing with the new price ready to fill in; you click Update">Open &amp; update price</button><button type="button" class="small" data-action="priceUpdated" data-vin="${esc(p.vin)}" data-price="${p.to}">Updated</button></span>`
             : '',
           muted: !p.yours,
-        })
-      ))
+        });
+      }))
     );
   }
   const now = Date.now();

@@ -638,6 +638,42 @@ test('My listings\' line: a scan from before the listing\'s price names no price
   }
 });
 
+// To do (popup.js viewTodo) follows the same time rule for a price item on
+// one of your listings: an item worked out on a scan taken before the listing
+// got the price it carries now (updated on another computer and brought by
+// sync, which settles no to-do list) waits for the next scan, with nothing to
+// record, as My listings says for the same listing.
+test('a To do price item from a scan taken before the listing\'s price waits for the next scan, by the rule My listings follows', () => {
+  const waits = rescan.priceItemWaits;
+  assert.equal(typeof waits, 'function', 'rescan.js exports priceItemWaits');
+  const at = (day) => `2026-10-0${day}T09:00:00.000Z`;
+  const s = repriced(snapshot(LOT, MY_STORE, at(2)), VIN.ram, 27163, 26673);
+  const listed = { name: 'Ram', price: 27663, basis: 'website', postedAt: at(1) };
+  const d = { ...diffScans(s, s, { posted: { [VIN.ram]: listed }, confirm: confirmed(), basis: 'website' }), takenAt: at(2) };
+  const [item] = d.priceUpdates;
+  assert.deepEqual([item.vin, item.yours, item.from, item.to], [VIN.ram, true, 27663, 27163]);
+  assert.equal(waits(item, listed, d), false, 'priced before the scan: the item stands, with Updated');
+  const synced = { ...listed, price: 26663, updatedAt: at(3) }; // updated after the scan on another computer
+  assert.equal(waits(item, synced, d), true);
+  assert.equal(myListingsText(synced, s), 'Price compared at the next scan', 'as My listings says for it');
+  assert.equal(waits(item, { ...listed, updatedAt: at(2) }, d), false, 'updated the moment the scan was taken counts as before it');
+  assert.equal(waits(item, { ...listed, postedAt: at(3) }, d), true, 'posted after it too');
+  // a listing published from a draft filled before the scan (drafts.js markDraftPosted) counts from the draft
+  assert.equal(waits(item, { ...listed, postedAt: at(3), draftSavedAt: at(1) }, d), false);
+  // unknown times: as scanCar reads them, the item stands
+  assert.equal(waits(item, synced, { ...d, takenAt: undefined }), false);
+  assert.equal(waits(item, { name: 'Ram', price: 26663 }, d), false);
+  // only your own items, and only with the listing in hand
+  assert.equal(waits({ ...item, yours: false }, synced, d), false);
+  assert.equal(waits(item, undefined, d), false);
+  assert.equal(waits(null, synced, d), false);
+});
+
+// What My listings says for the Ram's listing `entry` on the last scan `snap` (listingLine).
+function myListingsText(entry, snap) {
+  return rescan.listingLine(entry, snap, VIN.ram, 'website').status.text;
+}
+
 // Every place that saves a scan records the basis it read (scanRunner.js
 // keepSeenBasis): the popup's Scan, set-up's read and the background rescan,
 // each handing over the scan's diff. A read held back as a website hiccup

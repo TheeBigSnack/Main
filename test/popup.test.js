@@ -871,6 +871,60 @@ test('My listings does not ask a listing posted after the last scan to take that
   assert.match(q.panel(), /<span class="pill good">Matches the website<\/span>/);
 });
 
+// The website's records, with the Ram's main price at `main`.
+const ramAt = (main) => Object.entries(fixtures).filter(([name]) => name !== '_about').map(([name]) => (name === 'usedNormal' ? raw(name, { extra_fields: { lightning: { pricing: { low: { value: main } } } } }) : raw(name)));
+
+// A listing whose price was updated on another computer after this
+// computer's last scan, brought here by sync (a sync settles no to-do list:
+// src/rescan.js settleDiff runs when a scan is saved). That scan's To do item
+// is the listing and the website as they were before the update. To do
+// follows the rule My listings follows (src/rescan.js scanCar): neither names
+// that scan's price for the listing or offers Updated to record it, a $500
+// raise here, and the next scan compares the listing with the website.
+test('To do and My listings offer no Updated at the last scan\'s price for a listing whose price was updated after that scan on another computer', async () => {
+  const ram = vehicle('usedNormal'); // $27,163 on the website
+  const settings = { ...MY_STORE, basis: 'website' };
+  const posted = { [ram.vin]: { name: ram.name, price: 27663, basis: 'website', postedAt: '2026-09-01T09:00:00.000Z' } };
+  const first = await loadPopup({ local: { [k.settings]: settings, [k.posted]: structuredClone(posted) } });
+  await first.scan();
+  assert.equal(first.status(), '', 'the scan went through');
+  assert.deepEqual(first.local[k.diff].priceUpdates.filter((u) => u.yours).map((u) => [u.vin, u.from, u.to]), [[ram.vin, 27663, 27163]]);
+  assert.match(first.panel(), new RegExp(`data-action="priceUpdated" data-vin="${ram.vin}" data-price="27163"`), 'the item offers Updated, as before');
+
+  // that scan two hours ago; an hour after it, the listing was updated on another computer to the website's price then, and sync brings it
+  const last = structuredClone(first.local[k.snapshot]);
+  const diff = structuredClone(first.local[k.diff]);
+  last.takenAt = diff.takenAt = new Date(Date.now() - 2 * 3600e3).toISOString();
+  const synced = { [ram.vin]: { ...posted[ram.vin], price: 26663, updatedAt: new Date(Date.now() - 3600e3).toISOString() } };
+  const p = await loadPopup({ local: { [k.settings]: settings, [k.snapshot]: last, [k.diff]: diff, [k.posted]: structuredClone(synced) } });
+  const todo = p.panel();
+  assert.doesNotMatch(todo, new RegExp(`data-action="priceUpdated" data-vin="${ram.vin}"|data-kind="price" data-vin="${ram.vin}"`), 'To do offers nothing to record or fill from that scan');
+  assert.doesNotMatch(todo, /\$27,663 → |→ <b>\$27,163<\/b>/, 'and names neither price of that scan as the change');
+  assert.match(todo, /<span class="pill ?">Price compared at the next scan<\/span> Your listing/);
+  assert.match(todo, /Listed \$26,663/);
+  await p.tab('mine');
+  assert.match(p.panel(), /<span class="pill ?">Price compared at the next scan<\/span>/, 'as My listings says');
+  assert.doesNotMatch(p.panel(), /data-action="priceUpdated"|\$27,163/);
+  assert.deepEqual(p.local[k.posted], synced, 'nothing recorded');
+
+  // the next scan, the website at the price the other computer gave the listing: nothing left to do
+  const q = await loadPopup({ local: p.local, records: ramAt(26663) });
+  await q.scan();
+  assert.equal(q.status(), '', 'the scan went through');
+  assert.equal((q.local[k.diff].priceUpdates || []).filter((u) => u.vin === ram.vin).length, 0);
+  assert.doesNotMatch(q.panel(), new RegExp(`data-vin="${ram.vin}"|Price compared at the next scan`));
+  await q.tab('mine');
+  assert.match(q.panel(), /<span class="pill good">Matches the website<\/span>/);
+
+  // and a scan that shows the website at another price since: both tabs offer Updated at it
+  const r = await loadPopup({ local: q.local, records: ramAt(26163) });
+  await r.scan();
+  assert.match(r.panel(), new RegExp(`data-action="priceUpdated" data-vin="${ram.vin}" data-price="26163"`));
+  assert.match(r.panel(), /\$26,663 → <b>\$26,163<\/b>/);
+  await r.tab('mine');
+  assert.match(r.panel(), new RegExp(`data-action="priceUpdated" data-vin="${ram.vin}" data-price="26163"`));
+});
+
 // Settings says before the save that a change is for new posts, with how
 // many listings the person has here; only where the website shows a lower
 // second price, since elsewhere there is no other price to choose.
