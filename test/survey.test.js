@@ -214,6 +214,12 @@ test('jsonEndpoint lays out the car records as the platform readers see them, ke
   assert.equal(rs.filled.photos, 1);
   assert.equal(rs.filled.drivetrain, 0, 'a field the records lack shows as 0');
   assert.deepEqual(rs.conditions, { used: 1, certified: 1 }, 'the condition words as the reader keeps them');
+  assert.deepEqual(rs.conditionFields, { inventoryType: { used: 1, certified: 1 } }, 'and each condition field\'s own words');
+  // a second condition field ("type: Loaner" beside "inventoryType: used") shows with its words, and a certified loaner is not counted as Certified Used
+  const twoFields = { inventory: [{ ...dealerCom.inventory[0], certified: true, type: 'Loaner' }, { ...dealerCom.inventory[0], vin: VIN2, attributes: [{ name: 'stockType', value: 'DEMO_UNIT' }] }] };
+  const second = jsonEndpoint({ url: SITE + '/apis/widget/INVENTORY_LISTING:inventory-data-bus1/getInventory?start=0', status: 200, contentType: 'application/json', body: JSON.stringify(twoFields) }).records;
+  assert.deepEqual(second.conditions, { used: 2 });
+  assert.deepEqual(second.conditionFields, { inventoryType: { used: 2 }, type: { Loaner: 1 }, stockType: { DEMO_UNIT: 1 } });
   assert.ok(rs.keys.includes('pricing.dprice[].label: string'));
   assert.ok(rs.keys.includes('address.accountName: string'));
   assert.ok(rs.keys.includes('images[].uri: string'));
@@ -389,7 +395,7 @@ test('the reports: the per-site report.md carries the platform evidence, the gap
     list: { finalUrl: LIST, title: 'Used', platform: fingerprint({ url: LIST, html: '' }), server: pageAnatomy(DEALERCOM_LIKE, LIST, 200), rendered: pageAnatomy(DEALERON_LIKE, LIST, 200), pagination: { shapes: ['?pt='] } },
     carPages: [{ url: SITE + '/v/1', status: 200, jsonLd: jsonLdSummary(CAR_PAGE), microdata: {}, serverVins: 1, photoHosts: { 'photos.example-cdn.test': 1 } }],
     carPagesSummary: { read: 1, withVehicleJsonLd: 1, withVehicleMicrodata: 0 },
-    jsonEndpoints: [{ method: 'GET', pattern: SITE + '/api/inventory?page=…', status: 200, topKeys: ['vehicles'], vinCount: 2, page: 'list page', paging: { page: 1 }, records: { listPath: 'vehicles', count: 2, total: null, keys: ['vin: string', 'price: number'], priceLabels: [{ key: 'price', label: 'price', kind: 'plain', final: false, cars: 2 }], ownLabels: [{ key: 'PriceLabel', label: 'Market Value', notThePrice: true, cars: 2 }], conditions: { '(none)': 2 }, filled: { price: 2, mileage: 0 } } }],
+    jsonEndpoints: [{ method: 'GET', pattern: SITE + '/api/inventory?page=…', status: 200, topKeys: ['vehicles'], vinCount: 2, page: 'list page', paging: { page: 1 }, records: { listPath: 'vehicles', count: 2, total: null, keys: ['vin: string', 'price: number'], priceLabels: [{ key: 'price', label: 'price', kind: 'plain', final: false, cars: 2 }], ownLabels: [{ key: 'PriceLabel', label: 'Market Value', notThePrice: true, cars: 2 }], conditions: { '(none)': 2 }, conditionFields: { inventoryType: { used: 1 }, type: { Loaner: 1 } }, filled: { price: 2, mileage: 0 } } }],
     excerpt: { from: SITE + '/v/1', text: jsonLdExcerpt(CAR_PAGE) },
     requests: { survey: 4, robots: 1, list: 1, listServerHtml: 1, carPages: 1, browserTotal: 9, blockedMedia: 3, lotSyncScan: 5 },
     bot: { signs: [] },
@@ -404,6 +410,7 @@ test('the reports: the per-site report.md carries the platform evidence, the gap
   assert.match(md, /paging in the address: `page=1`/);
   assert.match(md, /car records at `vehicles`: 2 on this answer, total said nowhere/);
   assert.match(md, /filled by the reader \(of 2\): price 2, mileage 0/);
+  assert.match(md, /condition fields: `inventoryType` used 1; `type` Loaner 1/);
   assert.match(md, /first record's fields: `vin: string`, `price: number`/);
   assert.match(md, /the records' own label for their price: "Market Value" \(`PriceLabel`, not the selling price: the reader takes no price, 2 cars\)/);
   assert.match(md, /```json\n[\s\S]*vehicleIdentificationNumber/);

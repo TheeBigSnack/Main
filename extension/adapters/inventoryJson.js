@@ -493,6 +493,29 @@ function conditionOf(card) {
   return DEMO_LETTERS.test(lettersOf(raw)) || LOANER_LETTERS.test(lettersOf(raw)) ? raw : '';
 }
 
+/**
+ * Every condition field the record carries, top level and attribute lists,
+ * in the order of N.condition's names: { key, text }. conditionOf reads the
+ * first; the demo, loaner and certified words are read in all of them, since
+ * a record can say "used" in one ("inventoryType") and "Loaner" in another
+ * ("type", "stockType").
+ * @param {object} card
+ * @returns {{ key: string, text: string }[]}
+ */
+export function conditionFields(card) {
+  if (!isPlain(card)) return [];
+  const out = [];
+  for (const layer of [card, attributeFields(card)]) {
+    for (const name of N.condition) {
+      for (const [k, v] of Object.entries(layer)) {
+        const text = keyName(k) === name ? textOf(v) : '';
+        if (text) out.push({ key: k, text });
+      }
+    }
+  }
+  return out;
+}
+
 function carfaxOf(card, vin) {
   const named = textOf(pick(card, N.carfax));
   if (/^https?:\/\//i.test(named)) return named;
@@ -594,11 +617,16 @@ export function normalizeInventoryRecord(card, { origin, page = null } = {}) {
   // sign from its mark: its type already says Certified Used. A certified
   // word in the condition itself ("Certified Loaner") is the same mark as
   // the flag. The gate counts that mark even when the title has words of its
-  // own (classify.js checkPreOwned).
-  const demoWord = DEMO_LETTERS.test(lettersOf(condition));
-  const loanerWord = LOANER_LETTERS.test(lettersOf(condition));
+  // own (classify.js checkPreOwned). A demo, loaner or certified word in any
+  // of the record's condition fields counts, not only in the first.
+  // Every condition field counts for these words, not only the first one
+  // present (conditionFields): "used" in one beside "Loaner" in another is a
+  // loaner, and "Certified" in another is the certified mark.
+  const fields = [condition, ...conditionFields(card).map((f) => f.text)];
+  const demoWord = fields.some((t) => DEMO_LETTERS.test(lettersOf(t)));
+  const loanerWord = fields.some((t) => LOANER_LETTERS.test(lettersOf(t)));
   const inventoryType = certified && !/\bnew\b/i.test(condition) && !demoWord && !loanerWord ? 'Certified Used' : condition || null;
-  const marked = certified || /\b(?:certified|cpo)\b/i.test(condition);
+  const marked = certified || fields.some((t) => /\b(?:certified|cpo)\b/i.test(conditionWords(t)));
   const readableType = marked && (demoWord || loanerWord) ? 'Certified' : null;
   const title = textOf(pick(card, N.title));
   const location = textOf(pick(card, N.location, { nested: true })) || null;

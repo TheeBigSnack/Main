@@ -1118,3 +1118,47 @@ test('R-8: a dealership whose name holds a guide or not-the-price word keeps its
   assert.equal(priceKind({ label: 'Old Town Price', key: '', final: false, value: 1 }, 'Old Town Ford'), 'selling');
   assert.equal(priceKind({ label: 'Old Town Price', key: '', final: false, value: 1 }, 'New Town Ford'), 'other');
 });
+
+// R-3, repair round 2: the loaner or demo word in a second condition field.
+// A record can carry more than one ("inventoryType: used" beside "type:
+// Loaner", DealerOn's VehicleCondition beside VehicleType); before, only the
+// first one present was read, so a certified loaner whose first field said
+// Used was renamed Certified Used, flagged as nothing, and reached Ready.
+// Every condition field now counts for the demo or loaner word and for the
+// certified mark.
+test('R-3: a loaner or demo word in any condition field counts, not only the first one present, on DealerOn and Dealer.com', () => {
+  const [c] = platformCars(1, { from: 580 });
+  const bare = `/${c.year}-${c.make}-${c.model}-${c.vin}`;
+  const com = (patch, certified) => normalizeInventoryRecord({ ...dealerComRecord({ ...c, certified }), ...patch }, { origin: DEALERCOM_ORIGIN });
+  const on = (patch, certified) => normalizeInventoryRecord({ ...dealerOnCard({ ...c, certified }).VehicleCard, VehicleCondition: 'Used', ...patch }, { origin: DEALERON_ORIGIN });
+  const cases = {
+    'Dealer.com, used with type Loaner': [(certified) => com({ inventoryType: 'used', type: 'Loaner' }, certified), 'loaner'],
+    'Dealer.com, used with stockType Demo': [(certified) => com({ inventoryType: 'used', stockType: 'Demo' }, certified), 'demo'],
+    'Dealer.com, used with newUsed Demo': [(certified) => com({ inventoryType: 'used', newUsed: 'Demo' }, certified), 'demo'],
+    'Dealer.com, used with a SERVICE_LOANER stock type in its attributes': [(certified) => com({ inventoryType: 'used', attributes: [{ name: 'stockType', value: 'SERVICE_LOANER' }] }, certified), 'loaner'],
+    'DealerOn, Used with VehicleType Loaner': [(certified) => on({ VehicleType: 'Loaner' }, certified), 'loaner'],
+    'DealerOn, Used with VehicleStockType CourtesyVehicle': [(certified) => on({ VehicleStockType: 'CourtesyVehicle' }, certified), 'loaner'],
+  };
+  for (const [what, [make, kind]] of Object.entries(cases)) {
+    for (const certified of [true, false]) {
+      const v = make(certified);
+      const where = `${what}${certified ? ', certified' : ''}`;
+      assert.doesNotMatch(String(v.inventoryType), /certified used/i, `${where}: never read as Certified Used`);
+      assert.deepEqual([v.isDemo, v.isLoaner], [kind === 'demo', kind === 'loaner'], `${where}: flagged like the platform's own flag`);
+      const verdict = checkPreOwned(v);
+      assert.equal(verdict.verdict, 'review', `${where}: ${verdict.reason}`);
+      assert.match(verdict.reason, new RegExp(`^Listed as pre-owned but also flagged as a ${kind}\\.`), where);
+      assert.equal(assessVehicle(v, withDefaults({})).decision, DECISION.REVIEW, `${where}: Needs a look, never Ready`);
+    }
+  }
+  // a certified word in another field is the certified mark too: a loaner the website also calls certified waits on Needs a look
+  const marked = com({ inventoryType: 'Loaner', type: 'Certified', link: bare }, false);
+  assert.deepEqual([marked.isLoaner, marked.readableType], [true, 'Certified']);
+  assert.equal(assessVehicle(marked, withDefaults({})).decision, DECISION.REVIEW);
+  // a second field that names a body or says nothing of the kind changes nothing
+  for (const type of ['SUV', 'Car', 'Pickup']) {
+    const v = com({ inventoryType: 'used', type }, true);
+    assert.deepEqual([v.inventoryType, v.isDemo, v.isLoaner], ['Certified Used', false, false], type);
+    assert.equal(assessVehicle(v, withDefaults({})).decision, DECISION.READY, type);
+  }
+});

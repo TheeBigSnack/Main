@@ -13,7 +13,7 @@
 import { extractJsonLd, vehicleNodes, pageFacts } from '../extension/adapters/schemaOrgParse.js';
 import { vinInAddress, looksLikeCarAddress } from '../extension/adapters/schemaOrg.js';
 import { vinCheckDigit } from '../extension/src/vin.js';
-import { findCardList, totalCount, labeledPrices, priceKind, ownPriceLabel, labelIsNotThePrice, isDealerPrice, normalizeInventoryRecord } from '../extension/adapters/inventoryJson.js';
+import { findCardList, totalCount, labeledPrices, priceKind, ownPriceLabel, labelIsNotThePrice, isDealerPrice, conditionFields, normalizeInventoryRecord } from '../extension/adapters/inventoryJson.js';
 
 export const DEFAULTS = Object.freeze({
   out: 'survey-out',
@@ -519,7 +519,8 @@ const FILLED = ['stock', 'year', 'make', 'model', 'trim', 'url', 'inventoryType'
  * first record's field names and types, every price label with the kind the
  * reader gives it, the records' own label for their price when they carry
  * one in a field of its own (and whether the reader then takes no price),
- * and how many records filled each flat-vehicle field. No
+ * the condition words as the reader keeps them and each condition field's
+ * own words, and how many records filled each flat-vehicle field. No
  * value is kept (no VIN, price, mileage or text). null when the answer holds
  * no car list.
  */
@@ -559,6 +560,17 @@ export function recordsShape(json, href) {
     const word = v.inventoryType ? scrub(v.inventoryType, 30) : '(none)';
     conditions[word] = (conditions[word] || 0) + 1;
   }
+  // each condition field's own words ("type: Loaner" beside "inventoryType:
+  // used"): the reader reads a demo, loaner or certified word in any of them
+  const fieldWords = {};
+  for (const card of cards) {
+    for (const { key, text } of conditionFields(card)) {
+      const field = scrub(key);
+      const word = scrub(text, 30);
+      if (!fieldWords[field]) fieldWords[field] = {};
+      fieldWords[field][word] = (fieldWords[field][word] || 0) + 1;
+    }
+  }
   return {
     listPath: path || '(top level)',
     count: cards.length,
@@ -567,6 +579,7 @@ export function recordsShape(json, href) {
     priceLabels: [...labels.values()].slice(0, 20),
     ownLabels: [...ownLabels.values()].slice(0, 20),
     conditions,
+    conditionFields: Object.fromEntries(Object.entries(fieldWords).slice(0, 10).map(([k, words]) => [k, Object.fromEntries(Object.entries(words).slice(0, 10))])),
     filled,
   };
 }
@@ -877,6 +890,7 @@ export function renderReportMd(r) {
       const rs = e.records;
       if (rs) {
         L.push(`    - car records at \`${esc(rs.listPath)}\`: ${rs.count} on this answer, total said ${rs.total ?? 'nowhere'}; conditions ${Object.entries(rs.conditions).map(([k, n]) => `${esc(k)} ${n}`).join(', ')}`);
+        if (rs.conditionFields && Object.keys(rs.conditionFields).length) L.push(`    - condition fields: ${Object.entries(rs.conditionFields).map(([k, words]) => `\`${esc(k)}\` ${Object.entries(words).map(([w, n]) => `${esc(w)} ${n}`).join(', ')}`).join('; ')}`);
         L.push(`    - filled by the reader (of ${rs.count}): ${Object.entries(rs.filled).map(([k, n]) => `${k} ${n}`).join(', ')}`);
         if (rs.priceLabels.length) L.push(`    - price labels: ${rs.priceLabels.map((p) => `"${esc(p.label)}" (\`${esc(p.key)}\`, ${p.kind}${p.final ? ', final' : ''}, ${p.cars} cars)`).join('; ')}`);
         else L.push('    - price labels: none the reader recognised');
