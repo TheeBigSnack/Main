@@ -134,6 +134,24 @@ test('the website\'s own words are read as before: a list there backs each part 
   assert.deepEqual(claimed('New tires, brakes and a battery.', c), ['New tires, brakes and a battery']);
 });
 
+test('a price note that lists new parts passes the template\'s own check: the note in the text is read the way it is as a source', () => {
+  // the note stands in the description whole; reading it with the old list reader as a source and the new one in the
+  // text made the template fail its own check on every car for a note such as "new tires/brakes"
+  for (const priceNote of [
+    'Price includes new tires/brakes; tax and tags extra.', 'Price includes new tires + brakes; tax and tags extra.',
+    'Price includes new brake pads and rotors; tax and tags extra.', 'Price includes new tires, the brakes and rotors; tax and tags extra.',
+    'Price includes new tires, front and rear brakes; tax and tags extra.', 'Every car gets new wipers and a battery check before delivery.',
+  ]) {
+    const c = { ...ctxOf(car({ descriptionRaw: '' })), priceNote };
+    const text = buildTemplateDescription(c);
+    assert.ok(text.includes(priceNote), text);
+    assert.deepEqual(runGuardrails(text, c).problems.filter((p) => !/^too-/.test(p.code)), [], priceNote);
+    assert.deepEqual(JSON.parse(JSON.stringify(hostedGuardrails(text, c).problems)), JSON.parse(JSON.stringify(runGuardrails(text, c).problems)), `the hosted checker says the same: ${priceNote}`);
+    // the note backs only its own parts: a part it does not list is still a claim
+    assert.deepEqual(claimed('New shocks too.', c), ['New shocks'], priceNote);
+  }
+});
+
 test('a list after "new" stops at a line break: the next line\'s first word is never read as part of the list', () => {
   // the website says the tires are new, so only a part the list goes on to is a claim
   const c = ctxOf(car({ descriptionRaw: 'Just put on new tires.' }));

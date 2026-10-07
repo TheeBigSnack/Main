@@ -369,7 +369,8 @@ function fillBlocker(description) {
   const stops = ruleProblems(runGuardrails(description, ctx()));
   if (!stops.length) return '';
   const fix = settingsFix(stops, state.descriptionSource) || 'Fix the description (or use Reset to template) first.';
-  return `The description fails ${stops.length === 1 ? 'a check' : `${stops.length} checks`} that must pass before the form is filled: ${stops.map((p) => p.text).join('; ')}. ${fix}`;
+  const why = stops.map((p) => p.text).join('; '); // a reason may end with its own full stop ("Change the note in Settings.")
+  return `The description fails ${stops.length === 1 ? 'a check' : `${stops.length} checks`} that must pass before the form is filled: ${why}${/[.!?]$/.test(why) ? '' : '.'} ${fix}`;
 }
 
 // The description's checks, run again on the text that would be filled (the
@@ -619,8 +620,9 @@ async function carStillCurrent(waiting = 'the form opens') {
     ? 'click Open the Marketplace form for a new form, and close the form opened before without publishing it'
     : 'click Open the Marketplace form again';
   const fix = settingsFix(stops, state.descriptionSource);
+  const why = stops.map((p) => p.text).join('; ');
   const next = !stops.length ? ` Check the review, then ${reopen}.`
-    : ` The description no longer matches it: ${stops.map((p) => p.text).join('; ')}. ${fix ? `${fix} Then` : 'Fix the description, then'} ${reopen}.`;
+    : ` The description no longer matches it: ${why}${/[.!?]$/.test(why) ? '' : '.'} ${fix ? `${fix} Then` : 'Fix the description, then'} ${reopen}.`;
   setStatus(`The website changed this car since it was read${what}.${next}`, 'error');
   await saveFlow();
   return false;

@@ -894,8 +894,9 @@ function claimProblems(text: string, ctx: GuardrailContext): GuardrailProblem[] 
     if (kind.what === 'certification' && listedCertified(ctx.vehicle)) continue;
     if (kind.part) {
       const said = new Set<string>();
-      // a part passes only when the website's own words say that part is new: naming it ("ABS Brakes") is not enough
-      const named = new Set(newPartsSaid(source, kind.re, LISTED_PARTS).map((p) => p.part));
+      // a part passes only when the website's own words say that part is new: naming it ("ABS Brakes") is not enough;
+      // the price note stands in the text whole, so its own list is read the way the text's is
+      const named = new Set([...newPartsSaid(source, kind.re, LISTED_PARTS), ...newPartsListed(ctx.priceNote, kind.re, ctx.vehicle && ctx.vehicle.features)].map((p) => p.part));
       for (const p of newPartsListed(text, kind.re, ctx.vehicle && ctx.vehicle.features)) {
         if (named.has(p.part) || said.has(p.part)) continue;
         said.add(p.part);

@@ -149,6 +149,7 @@ const texts = [
 const contexts = [
   { vehicle, dealer, priceNote: '', price: 28995 },
   { vehicle, dealer, priceNote: 'Price includes the $490 doc fee; tax and tags extra.', price: 28995 },
+  { vehicle, dealer, priceNote: 'Price includes new tires/brakes and new brake pads + rotors; tax and tags extra.', price: 28995 },
   { vehicle: { ...vehicle, carfaxOneOwner: true }, dealer, priceNote: 'Price includes the $500 doc fee; tax and tags extra.', price: 28995 },
   { vehicle: { ...vehicle, priceBeforeFees: null }, dealer: {}, priceNote: 'doc fee of $490', price: null },
   { vehicle, dealer, salesperson: { name: 'Alex', title: 'sales manager' }, priceNote: '', price: 28995 },

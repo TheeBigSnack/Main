@@ -2627,6 +2627,22 @@ function fillerFor(state, { said, typed, filled = async () => { throw new Error(
   );
 }
 
+test('the status line ends the reasons with one full stop, also when a reason ends with its own', () => {
+  const blocker = (texts) => new Function('state', ...PASSING_CHECKS_NAMES, `${dealerChecks()}\nreturn fillBlocker;`)(
+    { settings: { dealer: { name: 'Example Motors' } }, descriptionSource: 'template' },
+    () => ({ ok: false, problems: texts.map((text) => ({ code: 'banned-phrase', text })), words: 80 }),
+    (g) => g.problems,
+    () => ({}),
+  )('A fine truck. Sales consultant at Example Motors.');
+  const note = 'Your price note says "not the dealer", so it may only say where the fees go and what the price includes; take out "Text", or take out "not the dealer". Change the note in Settings.';
+  assert.equal(blocker([note]), `The description fails a check that must pass before the form is filled: ${note} Fix the description (or use Reset to template) first.`);
+  assert.equal(blocker(['Says "new brakes", but the website says nothing about new or replaced parts for this car']), 'The description fails a check that must pass before the form is filled: Says "new brakes", but the website says nothing about new or replaced parts for this car. Fix the description (or use Reset to template) first.');
+  assert.doesNotMatch(blocker(['One.', note]), /\.\./);
+  // the website-changed line (carStillCurrent) ends its reasons the same way
+  assert.match(fnText('carStillCurrent'), /const why = stops\.map\(\(p\) => p\.text\)\.join\('; '\);/);
+  assert.match(fnText('carStillCurrent'), /\$\{why\}\$\{\/\[\.!\?\]\$\/\.test\(why\) \? '' : '\.'\}/);
+});
+
 test('no way of filling the form types a description that does not name the dealership', async () => {
   // runFill is what "Fill it in now" (after a fields check) and "Fill again" call, and what Open the Marketplace form ends in
   const fill = async (dealer, description, step = 'probe') => {
