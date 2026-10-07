@@ -981,7 +981,8 @@ test('R-8: a lone guide or offer label is quoted, never read as the price; a cas
   // beside the selling price, an offer is neither the price nor the lower price
   assert.deepEqual(choosePrices([e(21000, 'Internet Price'), e(19000, 'Instant Cash Offer')]), { price: 21000, priceLabel: 'Internet Price', priceBeforeFees: null });
   assert.deepEqual(choosePrices([e(21000, 'Price'), e(19000, 'Your Cash Offer')]), { price: 21000, priceLabel: 'Price', priceBeforeFees: null });
-  assert.deepEqual(choosePrices([e(21000, 'Retail Price'), e(21500, 'Our Instant Offer', { final: true })]), { price: 21000, priceLabel: 'Retail Price', priceBeforeFees: null });
+  // marked final, an offer leaves the car with no price, quoted, never the base price beside it (second repair cycle)
+  assert.deepEqual(choosePrices([e(21000, 'Retail Price'), e(21500, 'Our Instant Offer', { final: true })]), quoted('Our Instant Offer'));
   // other figures that are not the price keep the plain reason
   assert.deepEqual(choosePrices([e(30000, 'MSRP')]), { price: null, priceLabel: 'Call for price', priceBeforeFees: null });
   // through both platforms' records: no price, the reason quoted on Not ready
@@ -1110,7 +1111,8 @@ test('R-8: a dealership whose name holds a guide or not-the-price word keeps its
     const record = dealerComRecord(car, { dealer });
     const dprice = record.pricing.dprice.map((e) => (e.isFinalPrice ? { ...e, label } : e));
     const v = normalizeInventoryRecord({ ...record, pricing: { ...record.pricing, dprice } }, { origin: DEALERCOM_ORIGIN });
-    assert.deepEqual([v.price, v.priceBeforeFees], [car.base, null], `Dealer.com, ${dealer}, "${label}": the guide's figure is not the price`);
+    // the guide's figure is not the price, and as the final price it leaves the car with none, quoted (second repair cycle; before, the base price was taken)
+    assert.deepEqual([v.price, v.priceLabel, v.priceBeforeFees], [null, quoted(label), null], `Dealer.com, ${dealer}, "${label}": the guide's figure is not the price`);
   }
   // the words a dealer name explains are only that name's: "Kelley Price" is no dealer's own price at another store
   assert.equal(priceKind({ label: 'Kelley Price', key: 'dprice.internetPrice', final: true, value: 1 }, 'Sample Chevrolet'), 'other');
@@ -1176,11 +1178,12 @@ test('R-8: an offer for the car written with a hyphen, or with no guide\'s word,
     const beside = labeledPrices({ pricing: { dprice: [{ label: 'Price', value: '$21,000' }, { label, value: '$19,000' }] } });
     assert.deepEqual(choosePrices(beside), { price: 21000, priceLabel: 'Price', priceBeforeFees: null }, `"${label}" beside a plain price`);
     const final = labeledPrices({ pricing: { dprice: [{ label: 'Price', value: '$21,000' }, { label, value: '$19,000', isFinalPrice: true }] } });
-    assert.deepEqual(choosePrices(final), { price: 21000, priceLabel: 'Price', priceBeforeFees: null }, `"${label}" marked final`);
+    // marked final: no price, quoted, never the plain price beside it (second repair cycle)
+    assert.deepEqual(choosePrices(final), { price: null, priceLabel: quoted(label), priceBeforeFees: null }, `"${label}" marked final`);
     assert.equal(priceKind({ label, key: '', final: true, value: 1 }, 'Example Motors'), 'other', label);
     assert.deepEqual(choosePrices([{ value: 19000, label, key: '', final: false }]), { price: null, priceLabel: quoted(label), priceBeforeFees: null }, `"${label}" alone is quoted`);
   }
-  assert.deepEqual(choosePrices(labeledPrices({ pricing: { dprice: [{ label: 'Price', value: '$21,000' }, { label: 'Cash-Offer', value: '$19,000', isFinalPrice: true }] } })).price, 21000);
+  assert.deepEqual(choosePrices(labeledPrices({ pricing: { dprice: [{ label: 'Price', value: '$21,000' }, { label: 'Cash-Offer', value: '$19,000', isFinalPrice: true }] } })), { price: null, priceLabel: quoted('Cash-Offer'), priceBeforeFees: null });
   // a record's own label that is an offer leaves the car with no price, quoted
   const [c] = platformCars(1, { from: 590 });
   const on = normalizeInventoryRecord({ ...dealerOnCard({ ...c, certified: false }).VehicleCard, VehiclePriceLabel: 'Your Cash-Offer' }, { origin: DEALERON_ORIGIN });
@@ -1191,4 +1194,43 @@ test('R-8: an offer for the car written with a hyphen, or with no guide\'s word,
     assert.equal(priceKind({ label, key: '', final: true, value: 1 }, 'Example Motors'), 'selling', label);
   }
   assert.equal(priceKind({ label: 'Internet Offer', key: '', final: false, value: 1 }, 'Example Motors'), 'selling');
+});
+
+// ---------- PR #9, second repair cycle ----------
+
+// R-8, second repair cycle: the entry the platform marks as the website's
+// price (Dealer.com's isFinalPrice) set aside as not the price: an offer
+// ("Special Offer", "Today's Offer"), a guide's value ("Market Value",
+// "Kelley Blue Book Price") or an MSRP. Before, the reader dropped it and
+// took the plain or base price beside it without a word, so the car could
+// be Ready at a figure the website does not show as its price. Now, as when
+// DealerOn's own price label names such a figure, the car gets no price and
+// Not ready quotes the label for a person to check.
+test('R-8: a final price set aside as an offer or a guide\'s value leaves the car with no price and the label quoted, never the plain or base price', () => {
+  const quoted = (label) => `the list labels its price "${label}", which Lot Current does not read as the selling price`;
+  const none = (label) => ({ price: null, priceLabel: quoted(label), priceBeforeFees: null });
+  const P = (dprice, dealer = 'Sample Chevrolet') => choosePrices(labeledPrices({ pricing: { dprice } }), { dealer });
+  for (const label of ['Special Offer', 'Today\'s Offer', 'Holiday Offer', 'Best Offer', 'Your Carvana Offer', 'Instant Cash Offer', 'Market Value', 'Kelley Blue Book Price', 'KBB Value', 'MSRP']) {
+    assert.deepEqual(P([{ label: 'Price', value: '$24,000' }, { label: 'Doc Fee', value: '$499' }, { label, value: '$22,499', isFinalPrice: true }]), none(label), `"${label}" marked final beside a plain price`);
+    assert.deepEqual(P([{ typeClass: 'retailPrice', label: 'Retail Price', value: '$24,000' }, { label, value: '$22,499', isFinalPrice: true }]), none(label), `"${label}" marked final beside a base price`);
+  }
+  // through the whole Dealer.com record: Not ready, the label quoted, as DealerOn's own label does
+  const [c] = platformCars(1, { from: 710 });
+  const car = { ...c, certified: false };
+  const record = dealerComRecord(car);
+  for (const label of ['Special Offer', 'Today\'s Offer', 'Market Value']) {
+    const dprice = record.pricing.dprice.map((e) => (e.isFinalPrice ? { ...e, label } : e));
+    const com = normalizeInventoryRecord({ ...record, pricing: { ...record.pricing, dprice } }, { origin: DEALERCOM_ORIGIN });
+    assert.deepEqual([com.price, com.priceLabel, com.priceBeforeFees], [null, quoted(label), null], `Dealer.com, final "${label}"`);
+    const a = assessVehicle(com, withDefaults({}));
+    assert.equal(a.decision, DECISION.NOT_READY, `Dealer.com, final "${label}": Not ready`);
+    assert.deepEqual(a.blockers.map((b) => b.text), [`No price on the website (${quoted(label)})`]);
+    const on = normalizeInventoryRecord({ ...dealerOnCard(car).VehicleCard, VehiclePriceLabel: label }, { origin: DEALERON_ORIGIN });
+    assert.deepEqual([on.price, on.priceLabel, on.priceBeforeFees], [null, quoted(label), null], `DealerOn, own label "${label}": the same`);
+  }
+  // the dealership's own final price is still the price, the base price below it
+  const own = normalizeInventoryRecord(record, { origin: DEALERCOM_ORIGIN });
+  assert.deepEqual([own.price, own.priceBeforeFees], [car.base + car.fee, car.base]);
+  // an offer that is not the final price changes nothing: the final price stands
+  assert.deepEqual(P([{ label: 'Price', value: '$24,000' }, { label: 'Special Offer', value: '$22,000' }, { label: 'Sample Price', value: '$24,499', isFinalPrice: true }]), { price: 24499, priceLabel: 'Sample Price', priceBeforeFees: 24000 });
 });

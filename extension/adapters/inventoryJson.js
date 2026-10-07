@@ -349,6 +349,11 @@ function guideLabelled(entries) {
   return labels.length ? quoteLabels(labels) : null;
 }
 
+// The words that set an entry aside, for a person to check: its label when
+// the label itself is not the price, else its key's last part ("msrp" for an
+// entry labelled just "Price" that the platform files as its MSRP).
+const setAsideWords = (e) => (e.label && labelIsNotThePrice(e.label) ? e.label : spaced(String(e.key || '').split('.').pop()) || e.label || 'Price');
+
 // The record's own label for its price, in a field of its own (DealerOn's
 // VehiclePriceLabel, as the fixtures have it: "Sample Motors Price"), read
 // at the record's top level under a name such as PriceLabel or PriceTitle:
@@ -390,13 +395,23 @@ export const labelIsNotThePrice = (label) => NOT_THE_PRICE.test(label) || GUIDE_
  * price ("Market Value", "Instant Cash Offer", "MSRP") and is not the
  * dealership's own "<Dealer> Price" (isDealerPrice): the price it labels
  * is that figure whatever its field is called, and with the website's own
- * price unknown no other figure on the record is taken instead.
+ * price unknown no other figure on the record is taken instead. The same
+ * holds for the entry the platform marks final when its label is set aside
+ * the same way ("Special Offer", "Market Value", "MSRP"): no price, the
+ * label quoted, never the plain or base price beside it.
  * @param {{ value: number, label: string, key: string, final: boolean }[]} entries
  * @param {{ dealer?: string, label?: string|null }} [context]
  */
 export function choosePrices(entries, { dealer = '', label = null } = {}) {
   if (label && labelIsNotThePrice(label) && !isDealerPrice(label, dealer)) return NO_PRICE(quoteLabels([label]));
   const kinds = (entries || []).map((e) => ({ ...e, kind: priceKind(e, dealer) }));
+  // The entry the platform marks as the website's price (Dealer.com's
+  // isFinalPrice) set aside as not the price: an offer ("Special Offer"), a
+  // guide's value ("Market Value"), an MSRP. The website's price is that
+  // figure, so, as for a record's own label above, no plain or base price is
+  // taken in its place: no price, and the label is quoted.
+  const setAside = kinds.filter((e) => e.final && e.kind === 'other');
+  if (setAside.length) return NO_PRICE(quoteLabels(setAside.map(setAsideWords)));
   const of = (kind) => kinds.filter((e) => e.kind === kind);
   const selling = of('selling');
   const plain = of('plain');
