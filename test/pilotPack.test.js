@@ -153,6 +153,36 @@ test('the pilot pack refuses, writing no pilot zip, when the committed config no
   }
 });
 
+// The pack does not trust the rewrite: it loads the copy it is about to
+// write as a module and refuses unless that gives accounts off. A rewrite
+// that went wrong (here, scripts/pilot-config.mjs changed in the temporary
+// copy) must stop the pack with nothing written, the same as a shape change.
+test('the pilot pack loads the rewritten copy before it writes, and refuses one that would leave accounts on', () => {
+  const wrong = [
+    ['a rewrite that keeps the values', (s) => s.replace(`block.replace(VALUE, "$1'',")`, 'block'), /ACCOUNT\.url is "[^"]+", not empty[\s\S]*accountsConfigured\(\) gives true, not false/],
+    ['a rewrite that empties the values but answers true', (s) => s.replace(`text.replace(BLOCK, (block) => block.replace(VALUE, "$1'',"));`, `text.replace(BLOCK, (block) => block.replace(VALUE, "$1'',")).replace(/=> Boolean\\(.*\\);$/m, '=> true;');`), /accountsConfigured\(\) gives true, not false/],
+  ];
+  for (const [what, change, reason] of wrong) {
+    const dir = copy();
+    try {
+      const script = join(dir, 'scripts/pilot-config.mjs');
+      const source = readFileSync(script, 'utf8');
+      const changed = change(source);
+      assert.notEqual(changed, source, `${what}: scripts/pilot-config.mjs no longer has the line this test changes`);
+      writeFileSync(script, changed);
+      const r = pack(dir, '--pilot');
+      assert.equal(r.code, 1, `${what}: refused\n${r.out}`);
+      assert.match(r.out, /would not turn accounts off/, `${what}: the message says why`);
+      assert.match(r.out, reason, `${what}: and what the loaded copy gave`);
+      assert.match(r.out, /Nothing was packed/, what);
+      assert.ok(!existsSync(join(dir, PILOT)), `${what}: no pilot zip`);
+      assert.ok(!existsSync(join(dir, 'dist')), `${what}: nothing written at all`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
 test('the pack refuses an option it does not know, so a typo never gives a zip with sign-in', () => {
   const dir = copy();
   try {
