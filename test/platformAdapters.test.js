@@ -1548,3 +1548,48 @@ test('Rule 3: a certified record whose own condition is any new phrase ("New In 
   assert.deepEqual([graded.inventoryType, graded.readableType], ['Certified Used', null]);
 });
 
+// Rule 4, repair cycle 2 round 3: an entry that is not marked final but
+// whose label names the website's price ("<Dealer> Price", "Internet
+// Special", a plain "Price") was kept only when its words alone said selling
+// price, read without the dealership's name. So "Sample Price" at Sample
+// Chevrolet holding "$40,490*" or "Call for Price" was dropped, and the car
+// went out Ready at the retail price, a figure the website does not give as
+// its price. Such an entry is now kept and judged with the dealership's name:
+// no price, and what the list says is quoted.
+test('Rule 4: the dealer\'s own price, a selling special or a plain price that can\'t be read leaves the car with no price, quoted, never the base price', () => {
+  const P = (dprice, dealer = 'Sample Chevrolet') => choosePrices(labeledPrices({ pricing: { dprice } }), { dealer });
+  const why = (label, text) => `the list's "${label}" reads "${text}", which Lot Current does not read as an amount`;
+  const none = (priceLabel) => ({ price: null, priceLabel, priceBeforeFees: null });
+  // the reviewer's whole record: Dealer.com's dealer-named entry, not marked final
+  const [c] = platformCars(1, { from: 780 });
+  const car = { ...c, certified: false };
+  const record = dealerComRecord(car);
+  const withEntry = (value) => normalizeInventoryRecord({ ...record, pricing: { ...record.pricing, dprice: [record.pricing.dprice[0], record.pricing.dprice[1], { label: 'Sample Price', value, isFinalPrice: false }] } }, { origin: DEALERCOM_ORIGIN });
+  const own = `$${(car.base + car.fee).toLocaleString('en-US')}`;
+  for (const text of [`${own}*`, 'Call for Price']) {
+    const v = withEntry(text);
+    assert.deepEqual([v.price, v.priceLabel, v.priceBeforeFees], [null, why('Sample Price', text), null], `"Sample Price" reading "${text}"`);
+    assert.equal(assessVehicle(v, withDefaults({})).decision, DECISION.NOT_READY);
+  }
+  const reads = withEntry(own);
+  assert.deepEqual([reads.price, reads.priceLabel, reads.priceBeforeFees], [car.base + car.fee, 'Sample Price', car.base], 'one that reads is the price, as before');
+  assert.equal(assessVehicle(reads, withDefaults({})).decision, DECISION.READY);
+  // in a list of prices
+  assert.deepEqual(P([{ label: 'Price', value: '$24,000' }, { label: 'Sample Price', value: 'Call for Price' }]), none(why('Sample Price', 'Call for Price')));
+  assert.deepEqual(P([{ label: 'Price', value: '$24,000' }, { label: 'Sample Price', value: '$24,499' }]), { price: 24499, priceLabel: 'Sample Price', priceBeforeFees: 24000 });
+  // a "<Something> Price" the dealership's name does not explain: no price whether it reads or not
+  assert.deepEqual(P([{ label: 'Price', value: '$24,000' }, { label: 'Sample Price', value: 'Call for Price' }], 'Other Motors'), none(why('Sample Price', 'Call for Price')));
+  assert.deepEqual(P([{ label: 'Price', value: '$24,000' }, { label: 'Sample Price', value: '$24,499' }], 'Other Motors'), none('Two prices on the website'));
+  // a selling special that can't be read is quoted; one that reads is the price
+  assert.deepEqual(P([{ label: 'Price', value: '$24,000' }, { label: 'Internet Special', value: 'Call' }]), none(why('Internet Special', 'Call')));
+  assert.deepEqual(P([{ label: 'Price', value: '$24,000' }, { label: 'Internet Special', value: '$23,000' }]), { price: 23000, priceLabel: 'Internet Special', priceBeforeFees: null });
+  // a plain price that can't be read, with only a base price that reads: no price; a selling price that reads still stands
+  assert.deepEqual(P([{ label: 'Retail Price', value: '$24,000' }, { label: 'Price', value: 'Call for Price' }]), none(why('Price', 'Call for Price')));
+  assert.deepEqual(P([{ label: 'Internet Price', value: '$23,000' }, { label: 'Price', value: 'Call for Price' }]), { price: 23000, priceLabel: 'Internet Price', priceBeforeFees: null });
+  const field = choosePrices(labeledPrices({ retailPrice: '$24,000', price: 'Call for Price' }));
+  assert.deepEqual(field, none(why('price', 'Call for Price')), 'a field named just "price"');
+  // what is not the price's amount still never blocks it: a payment, a note, a sale event, a flag
+  assert.deepEqual(P([{ label: 'Price', value: '$24,000' }, { label: 'Payment', value: 'From $399/mo' }, { label: 'Price Note', value: 'Plus tax' }, { label: 'Sale Event', value: 'See dealer' }, { label: 'Doc Fee', value: 'Varies' }]), { price: 24000, priceLabel: 'Price', priceBeforeFees: null });
+  assert.deepEqual(choosePrices(labeledPrices({ price: 24000, callForPrice: 'Y', callPrice: 'Call for price' })), { price: 24000, priceLabel: 'price', priceBeforeFees: null });
+});
+

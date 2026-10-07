@@ -266,6 +266,8 @@ const SELLING_WORDS = new RegExp(String.raw`${SELLER_WORDS.source}|\bour\b|\byou
 const OFFER_END = /\boffers?\s*[:.]?\s*$/i;
 const isOfferForTheCar = (label) => OFFER_END.test(labelWords(label)) && !SELLER_WORDS.test(labelWords(label));
 const GENERIC_PRICE = /^\s*(?:the\s+)?price\s*:?\s*$/i;
+// A name that says its figure is a price: "...Price", "Internet Special".
+const PRICE_NAME = /price|\bspecials?\b/i;
 const NAMED_PRICE = /^\s*[A-Za-z][\w.&'’ -]{0,40}\s+price\s*:?\s*$/i;
 
 // "finalPrice" -> "final Price", "VehicleInternetPrice" -> "Vehicle Internet Price".
@@ -295,20 +297,32 @@ function amount(value) {
  * unreadable entry ({ value: null, text }): the price the platform marks
  * final (an entry with isFinalPrice or isFinal, a finalPrice field, or what
  * a finalPrice field holds), and a field or entry whose name says it is the
- * selling price ("VehicleInternetPrice", "Sale Price") holding text that is
- * not an amount. choosePrices then gives the car no price and quotes it,
- * instead of taking the plain, base or starting price beside it.
+ * website's price holding text that is not an amount: a selling price
+ * ("VehicleInternetPrice", "Sale Price", "Internet Special"), a plain
+ * "Price", and, in a list of labelled prices, a "<Something> Price" (the
+ * dealer's own, "Sample Price", which only choosePrices can tell, from the
+ * dealership's name). choosePrices then gives the car no price and quotes
+ * it, instead of taking the plain, base or starting price beside it.
  * @param {object} record
  * @returns {{ value: number|null, text?: string, label: string, key: string, final: boolean }[]}
  */
 export function labeledPrices(record) {
   const out = [];
   // an amount that can't be read: kept when it is the final price, or when
-  // it holds some text and its name says it is the selling price ("Internet
-  // Price", "Sale Price"; never a "Sale Event" or a payment)
-  const unreadable = (entry, raw) => {
+  // it holds some text and its name says it is the website's price: a
+  // selling price ("Internet Price", "Sale Price", "Internet Special"; never
+  // a "Sale Event", a payment or a fee), a plain "Price", or, from a label,
+  // a "<Something> Price" (priceKind 'named' without the dealership's name;
+  // choosePrices reads it with the name)
+  const unreadable = (entry, raw, labelled = false) => {
     const text = typeof raw === 'string' || typeof raw === 'number';
-    if (entry.final || (text && entry.text && /price/i.test(entry.label) && priceKind(entry) === 'selling')) out.push(entry);
+    if (entry.final) {
+      out.push(entry);
+      return;
+    }
+    if (!text || !entry.text || !PRICE_NAME.test(labelWords(entry.label))) return;
+    const kind = priceKind(entry);
+    if (kind === 'selling' || kind === 'plain' || (labelled && kind === 'named')) out.push(entry);
   };
   // a field that says something about a price ("isFinalPrice", "showInternetPrice"), not one
   const FLAG = /^(?:is|has|show|hide|display|use|enable|allow|include)[a-z]/;
@@ -330,7 +344,7 @@ export function labeledPrices(record) {
     }
     if (depth > 0 && (final || name)) {
       const before = out.length;
-      unreadable({ value: null, text: textOf(raw).slice(0, 60), label: name, key: `${key}.${kind}`, final }, raw);
+      unreadable({ value: null, text: textOf(raw).slice(0, 60), label: name, key: `${key}.${kind}`, final }, raw, true);
       if (out.length > before || final) return;
     }
     for (const [k, v] of Object.entries(x)) {
@@ -500,12 +514,17 @@ export function choosePrices(entries, { dealer = '', label = null } = {}) {
   const kinds = all.filter((e) => e.value !== null && e.value !== undefined);
   // The website's own price written in a way that is not a plain amount
   // ("$40,590*", "Call for Price", nothing at all; labeledPrices keeps it):
-  // the final price, or a selling price when no final price reads. The
+  // the final price, or a selling price ("<Dealer> Price" too, read with the
+  // dealership's name) when no final price reads, or a plain "Price" or a
+  // "<Something> Price" the name does not explain when no selling price
+  // reads either (one that reads would be the price, or two prices). The
   // website's price is that figure, so no plain, base or starting price is
   // taken in its place: no price, and what the list says is quoted. A final
-  // price that reads still stands beside another final mark that doesn't.
+  // price that reads still stands beside another final mark that doesn't,
+  // and a selling price that reads beside a plain or named one that doesn't.
   const finalReads = kinds.some((e) => e.final && e.kind === 'selling');
-  const unread = finalReads ? [] : all.filter((e) => (e.value === null || e.value === undefined) && (e.final || e.kind === 'selling'));
+  const sellingReads = kinds.some((e) => e.kind === 'selling');
+  const unread = finalReads ? [] : all.filter((e) => (e.value === null || e.value === undefined) && (e.final || e.kind === 'selling' || (!sellingReads && (e.kind === 'plain' || e.kind === 'named'))));
   if (unread.length) return NO_PRICE(unreadablePrice(unread.find((e) => e.final) || unread[0]));
   const of = (kind) => kinds.filter((e) => e.kind === kind);
   const selling = of('selling');
