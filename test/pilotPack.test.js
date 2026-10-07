@@ -223,3 +223,12 @@ test('the check loads the rewritten module and refuses anything but accounts off
   ];
   for (const [text, re] of broken) assert.match((await accountsOffProblems(text)).join('\n'), re);
 });
+
+test('CI packs the pilot zip too, before store-check, so every push checks it', () => {
+  const ci = read('.github/workflows/ci.yml');
+  const job = ci.slice(ci.indexOf('\n  pack:\n'), ci.indexOf('\n  # ', ci.indexOf('\n  pack:\n')));
+  const at = (line) => job.indexOf(`\n      - run: ${line}\n`);
+  assert.ok(at('npm run pack') > 0, 'the pack job packs');
+  assert.ok(at('npm run pack -- --pilot') > at('npm run pack'), 'then the pilot zip');
+  assert.ok(at('npm run store-check') > at('npm run pack -- --pilot'), 'then checks both');
+});
