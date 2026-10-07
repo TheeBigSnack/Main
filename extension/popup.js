@@ -1017,7 +1017,7 @@ function viewSettings() {
       ${settingWarning('salespersonName', s.salesperson.name, s.dealer)}
       ${field('Your role', 'salespersonTitle', s.salesperson.title, 'type="text" aria-describedby="salespersonTitleWarn"')}
       ${settingWarning('salespersonTitle', s.salesperson.title, s.dealer)}
-      <p class="hint">Every description ends with "I'm [name], [role] at [dealership]". Posing as a private seller isn't allowed.</p>
+      <p class="hint">Every description is signed "I'm [name], [role] at [dealership]". Posing as a private seller isn't allowed.</p>
       ${field('Your closing line (optional)', 'closingLine', s.salesperson.closingLine, `type="text" maxlength="300" aria-describedby="closingLineHint" placeholder="e.g. Ask for me by name when you come in."`)}
       <p class="hint" id="closingLineHint">Added after that sign-off on every description, in place of "Message me to set up a test drive or ask a question." About you, not the car: no prices or numbers (a phone number is fine), up to ${CLOSING_LINE_MAX_WORDS} words. Follows you to any computer you sign in to Chrome on.</p>
     </fieldset>

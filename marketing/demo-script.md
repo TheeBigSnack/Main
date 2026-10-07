@@ -37,7 +37,7 @@ Say: "Lot Current never clicks Publish. There's no code for it, and a test that 
 
 ## 5:00 Several at once
 
-Ready to post: tick three cars. Show **Select the next N** and the daily cap in the toolbar ("a safety setting; your dealership picks the number and each salesperson enters it in Settings; 10 by default"). Click **Post 3 cars** and show the queue bar in the side panel, then **Stop queue**. Don't run it in the demo: the demo publishes nothing.
+Ready to post: tick three cars. Show **Select the next N** and the daily cap in the toolbar ("a safety setting; your dealership picks the number and each salesperson enters it in Settings; 10 by default"). Click **Post 3 cars** and show the queue bar in the side panel, then **Stop queue**. Don't run it in the demo: the demo publishes nothing. If the first car passes every check, its Marketplace form opens and fills by itself: after **Stop queue**, close that Facebook tab without publishing and click **It didn't post**.
 
 ## 6:00 When a car sells
 

@@ -304,7 +304,7 @@ export function wizardHtml() {
         ${warningRegion('wizName', s.salesperson.name)}
         <label class="block">Your role <input type="text" id="wizTitle" value="${esc(s.salesperson.title)}" aria-describedby="wizTitleWarn" /></label>
         ${warningRegion('wizTitle', s.salesperson.title)}
-        <p class="hint">Every description ends with "I'm [name], [role] at [dealership]". Posing as a private seller isn't allowed.</p>
+        <p class="hint">Every description is signed "I'm [name], [role] at [dealership]". Posing as a private seller isn't allowed.</p>
         ${nav()}`;
     case 'account': {
       // Settings' Account section in the wizard; Next ("Skip for now" until

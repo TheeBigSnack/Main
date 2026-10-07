@@ -341,7 +341,7 @@ export function offTargetNote(id, seen, namesakes = 0) {
   if (namesakes !== 0 && seen && seen.matchesName && seen.matchesPrice && !seen.matchesVin) {
     const why = namesakes === null ? `Lot Current couldn't read your posted cars to check whether another one is also a ${up.name}` : `Another car you posted or took down has a name like ${up.name}`;
     // what the reader saw is the page's text so far: the VIN line ends the description, which the page may cut short
-    return `${why}, so a listing counts as this car's only when its page shows this car's VIN, ${up.vin}, and Lot Current couldn't find it in this page's text. Open this car's own listing (its description carries the VIN at the end; if the description is cut short with See more, click it); if Lot Current still doesn't continue, do it on Facebook, then click ${done}.`;
+    return `${why}, so a listing counts as this car's only when its page shows this car's VIN, ${up.vin}, and Lot Current couldn't find it in this page's text. Open this car's own listing (its description carries the VIN near the end, before the price note and the sign-off; if the description is cut short with See more, click it); if Lot Current still doesn't continue, do it on Facebook, then click ${done}.`;
   }
   const looksFor = namesakes !== 0 ? `its full name, ${money(up.listedPrice)} and its VIN, ${up.vin}` : `its full name and ${money(up.listedPrice)}`;
   return `This tab isn't showing the listing for ${up.name}. Open its own listing page (Lot Current looks for ${looksFor}) and Lot Current continues; if it doesn't, click ${done} when you are done.`;
