@@ -99,8 +99,8 @@ const youWarningHtml = (list) => list.map((text) => `<div class="banner warn">${
 const youWarningRegion = (typed) => `<div id="wizYouWarn">${youWarningHtml(youWarnings(typed))}</div><div id="wizYouSay" class="sr" aria-live="polite">${esc(youWarnings(typed).join(' '))}</div>`;
 // A price note that says "not the dealer" may say only where the fees go and
 // what the price includes (src/rewriteTemplate.js priceNoteWarning): the
-// price step says so under the note, read with the dealership's name, city
-// and state as set-up holds them, as it is typed; Next still keeps the note.
+// price step says so under the note, read with the dealership's name and
+// city as set-up holds them, as it is typed; Next still keeps the note.
 // Its live region (wizPriceNoteSay) leaves out the quoted words, so it is
 // spoken once, when the warning comes or goes. Settings says the same (popup.js).
 const noteWarningHtml = (note) => {

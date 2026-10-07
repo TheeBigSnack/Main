@@ -6,15 +6,21 @@
 // fees go to the state, not the dealer. Text Sam at 555-123-4567."). A note
 // that says "not the dealer", "not the dealership" or their plurals now
 // passes only when every word of it is price and fee wording
-// (PRICE_NOTE_WORDS) or a word of the dealership's own name, city or state,
-// and its only digits are dollar amounts and percentages. A note without
-// those phrases is read as before. Set-up and Settings show the same reason
-// under the price note while it is typed.
+// (PRICE_NOTE_WORDS) or a word of the dealership's own name or city (not
+// its state: the rewrite service is not sent it, and a state code can read
+// as a pronoun or a name, "ME", "AL"), its only digits are dollar amounts
+// and percentages, and an invisible character never hides a word
+// ("A\u200Bbe" reads as "Abe") nor turns one round (a direction mark is
+// refused). A note without those phrases is read as before. Set-up and
+// Settings show the same reason under the price note while it is typed.
+// Every check here runs the hosted checker
+// (supabase/functions/_shared/guardrails.ts) as well.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildTemplateDescription, runGuardrails, checkClosingLine, usableClosingLine, PRICE_NOTE_WORDS, priceNoteWarning, priceNoteNotice } from '../extension/src/rewriteTemplate.js';
-import { PRICE_NOTE_WORDS as TS_WORDS } from '../supabase/functions/_shared/guardrails.ts';
+import { PRICE_NOTE_WORDS as TS_WORDS, runGuardrails as hostedGuardrails } from '../supabase/functions/_shared/guardrails.ts';
+import { rewriteFacts } from '../extension/src/rewriter.js';
 import { vehicle } from './helpers.js';
 
 const FEATURES = ['Power Windows', 'Cruise Control', 'Backup Camera', 'Bluetooth', 'Keyless Entry', 'Tow Package', 'Navigation System', 'Heated Seats', 'Apple CarPlay'];
@@ -26,7 +32,13 @@ const withNote = (priceNote, dealer = EXAMPLE) => {
   const v = ONE_PRICE();
   return { vehicle: v, dealer, salesperson: SAM, priceNote, price: v.price };
 };
-const problems = (c) => runGuardrails(buildTemplateDescription(c), c).problems;
+// the problems the extension's checks find, after the hosted checker found the same
+const guard = (text, c) => {
+  const { problems: found } = runGuardrails(text, c);
+  assert.deepEqual(JSON.parse(JSON.stringify(hostedGuardrails(text, c).problems)), JSON.parse(JSON.stringify(found)), 'the hosted checker says the same');
+  return found;
+};
+const problems = (c) => guard(buildTemplateDescription(c), c);
 const REASON = (out, phrase = 'not the dealer') => `Your price note says "${phrase}", so it may only say where the fees go and what the price includes; take out ${out}, or take out "${phrase}". Change the note in Settings.`;
 const PLACE_REASON = (phrase = 'not the dealer') => `Your dealership's price note says "${phrase}"; change the note in Settings`;
 const FEES = 'Tax, title and fees go to the state, not the dealer.';
@@ -37,10 +49,9 @@ test('realistic price notes that say "not the dealer" pass, and the template car
     'Price excludes tax, title and a $499 documentation fee. Tax and title fees go to the state, not the dealer.',
     'All prices plus tax, title and tags. Tax, title and tag fees go to the state, not the dealer.',
     'Price excludes tax, title and registration, which go to the state, not the dealer. Doc fee of $399 goes to the dealer.',
-    // the dealership's own name, city and state, as set
+    // the dealership's own name and city, as set
     'Example Motors prices plus tax, title and tags. Tax, title and tag fees go to the state, not the dealer.',
     'All Example Motors prices plus tax, title and registration. Tax and registration fees are paid to the state, not the dealership.',
-    'Price excludes OH sales tax. Tax and title fees go to the state, not the dealer.',
     'Price excludes Springfield city tax and county fees. Tax and fees go to the city and county, not the dealer.',
     // the suggested wording, with where the fees go after it
     'Price is before the $490 doc fee. Tax and tags go to the state, not the dealer.',
@@ -58,7 +69,7 @@ test('realistic price notes that say "not the dealer" pass, and the template car
     const c = withNote(note);
     const text = buildTemplateDescription(c);
     assert.ok(text.includes(note), note);
-    assert.deepEqual(runGuardrails(text, c).problems, [], note);
+    assert.deepEqual(guard(text, c), [], note);
     assert.equal(priceNoteWarning(note, EXAMPLE), '', `no warning: ${note}`);
   }
 });
@@ -73,6 +84,8 @@ test('a "not the dealer" note with any word that is not price and fee wording is
     ['Price is better in private.', '"better" and "private"'], ['Cash price available privately.', '"available" and "privately"'],
     ['Payment via Venmo.', '"Payment", "via" and "Venmo"'], ['Price by Zelle or Venmo.', '"Zelle" and "Venmo"'], ['Cash App or PayPal accepted.', '"App", "PayPal" and "accepted"'],
     ["Pay at Sam's office.", '"Pay" and "Sam\'s"'],
+    // "your" is a pronoun, so it is not on the list
+    ['Your price includes the doc fee.', '"Your"'], ['Cash price for your salesperson.', '"your" and "salesperson"'],
     // the first person, the salesperson by any title, a way to get in touch, a deal made past the dealership
     ['Ask for me.', '"Ask" and "me"'], ['We handle the paperwork.', '"We", "handle" and "paperwork"'], ['Text us.', '"Text" and "us"'],
     ['Deal direct with the salesperson.', '"Deal", "direct" and "salesperson"'], ['Message the poster.', '"Message" and "poster"'],
@@ -91,7 +104,7 @@ test('a "not the dealer" note with any word that is not price and fee wording is
     const c = withNote(note);
     const text = buildTemplateDescription(c);
     assert.ok(text.includes(note), extra);
-    assert.deepEqual(runGuardrails(text, c).problems, [{ code: 'banned-phrase', text: REASON(out) }], extra);
+    assert.deepEqual(guard(text, c), [{ code: 'banned-phrase', text: REASON(out) }], extra);
   }
 });
 
@@ -110,19 +123,79 @@ test('before the fee sentence, inside it or after ";" the same: every word of th
   }
 });
 
-test('the dealership\'s own name, city and state pass only for that dealership', () => {
-  const note = 'Example Motors prices plus tax and tags. Tax and tags go to the Springfield county tax office, not the dealer. OH sales tax applies.';
+test('the dealership\'s own name and city pass only for that dealership', () => {
+  const note = 'Example Motors prices plus tax and tags. Tax and tags go to the Springfield county tax office, not the dealer. Springfield sales tax applies.';
   const sample = { name: 'Sample Auto', city: 'Shelbyville', state: 'IL', zip: '62565' };
   // (the Springfield county tax office is no fee place the sentence rule knows, so the place is said in a sentence of its own)
-  const own = 'Example Motors prices plus tax and tags. Tax and tags go to the county, not the dealer. Springfield and OH sales tax apply.';
+  const own = 'Example Motors prices plus tax and tags. Tax and tags go to the county, not the dealer. Springfield sales tax applies.';
   assert.deepEqual(problems(withNote(own)), []);
-  assert.deepEqual(problems(withNote(own, sample)), [{ code: 'banned-phrase', text: REASON('"Example", "Motors", "Springfield" and "OH"') }]);
+  assert.deepEqual(problems(withNote(own, sample)), [{ code: 'banned-phrase', text: REASON('"Example", "Motors" and "Springfield"') }]);
   // with no dealership set, none of them pass
-  assert.equal(priceNoteWarning(own, {}), REASON('"Example", "Motors", "Springfield" and "OH"'));
-  assert.equal(priceNoteWarning(own), REASON('"Example", "Motors", "Springfield" and "OH"'));
+  assert.equal(priceNoteWarning(own, {}), REASON('"Example", "Motors" and "Springfield"'));
+  assert.equal(priceNoteWarning(own), REASON('"Example", "Motors" and "Springfield"'));
   assert.equal(priceNoteWarning(own, EXAMPLE), '');
   // the sentence rule still decides where the fees may go: a place it does not know is refused as before
   assert.deepEqual(problems(withNote(note)), [{ code: 'banned-phrase', text: PLACE_REASON() }]);
+});
+
+test('the dealership\'s state is not one of its own words: the rewrite service is not sent it, and a state code can be a pronoun or a name', () => {
+  assert.deepEqual(problems(withNote('Price excludes OH sales tax. Tax and title fees go to the state, not the dealer.')), [{ code: 'banned-phrase', text: REASON('"OH"') }]);
+  const maine = { name: 'Example Motors', city: 'Portland', state: 'ME', zip: '04101' };
+  assert.deepEqual(problems(withNote(`${FEES} Cash price paid to me.`, maine)), [{ code: 'banned-phrase', text: REASON('"me"') }]);
+  assert.deepEqual(problems(withNote(`${FEES} Cash price paid to ME.`, maine)), [{ code: 'banned-phrase', text: REASON('"ME"') }]);
+  assert.equal(priceNoteWarning(`${FEES} Cash price paid to me.`, maine), REASON('"me"'));
+  const alabama = { name: 'Example Motors', city: 'Mobile', state: 'AL', zip: '36602' };
+  assert.deepEqual(problems(withNote(`${FEES} Cash price paid to Al.`, alabama)), [{ code: 'banned-phrase', text: REASON('"Al"') }]);
+});
+
+test('a note the extension\'s checks pass, the rewrite service\'s pass too: they read it with the dealership as rewriteFacts sends it', () => {
+  const sample = { name: 'Sample Auto', city: 'Shelbyville', state: 'IL', zip: '62565' };
+  for (const dealer of [EXAMPLE, sample, { name: 'Example Motors', city: 'Portland', state: 'ME' }]) {
+    for (const note of [
+      'Example Motors prices plus tax and tags. Tax and tags go to the county, not the dealer. Springfield sales tax applies.',
+      'Price excludes OH sales tax. Tax and title fees go to the state, not the dealer.', `${FEES} Cash price paid to me.`,
+      'Price excludes IL sales tax. Tax and title fees go to the state, not the dealers.', 'Sample Auto prices plus tax. Tax and fees go to the Shelbyville city clerk, not the dealership.',
+      'Plus tax, title and registration, which go to the state, not the dealer.', `${FEES} Text Sam.`,
+    ]) {
+      const c = withNote(note, dealer);
+      const facts = rewriteFacts({ vehicle: c.vehicle, dealer, salesperson: SAM, priceNote: note });
+      // the service builds its checks' dealership from the facts (backend/server.js, supabase/functions/rewrite/index.ts)
+      const service = { ...c, dealer: facts.dealer };
+      const text = buildTemplateDescription(c);
+      const ofNote = (list) => list.filter((p) => /price note/.test(p.text)).map((p) => p.text);
+      assert.deepEqual(ofNote(hostedGuardrails(text, service).problems), ofNote(runGuardrails(text, c).problems), `${dealer.name}: ${note}`);
+      assert.deepEqual(ofNote(runGuardrails(text, service).problems), ofNote(runGuardrails(text, c).problems), `${dealer.name}: ${note}`);
+      assert.equal(priceNoteWarning(note, dealer), ofNote(hostedGuardrails(text, service).problems).join(' '), `the warning in Settings: ${note}`);
+    }
+  }
+});
+
+test('an invisible character never hides a word, and a mark that turns the text round is refused', () => {
+  for (const [extra, out] of [
+    // a zero-width space, a soft hyphen, a combining grapheme joiner, a word joiner or a byte order mark is read as nothing: the word it splits is read whole
+    ['Cash price paid to A\u200Bbe.', '"Abe"'], ['Cash price paid to A\u00ADna.', '"Ana"'], ['Cash price paid to A\u034Fbe.', '"Abe"'], ['Cash price paid to A\u2060be.', '"Abe"'],
+    ['Cash price paid to S\uFEFFam.', '"Sam"'],
+    // a mark that changes the direction of the text ("\u202Eper\u202C" shows as "rep")
+    ['Cash price from the \u202Eper\u202C.', 'an invisible direction mark'], ['Cash price from the \u2067per\u2069.', 'an invisible direction mark'],
+    ['Text \u200ESam.', '"Text", an invisible direction mark and "Sam"'],
+    // an accent that does not join its letter makes a word that is not on the list
+    ['Cash price paid to the\u0336.', '"the\u0336"'],
+  ]) {
+    const note = `${FEES} ${extra}`;
+    assert.deepEqual(problems(withNote(note)), [{ code: 'banned-phrase', text: REASON(out) }], JSON.stringify(extra));
+    assert.equal(priceNoteWarning(note, EXAMPLE), REASON(out), JSON.stringify(extra));
+  }
+  // an invisible character that hides nothing changes nothing
+  for (const note of [`Price excludes t\u00ADhe doc fee. ${FEES}`, `${FEES}\u200B`, `\uFEFF${FEES}`, `Price\uFE0F excludes the doc fee. ${FEES}`]) {
+    assert.deepEqual(problems(withNote(note)), [], JSON.stringify(note));
+  }
+});
+
+test('known gap, for the owner to decide: a steer said only in listed words still passes', () => {
+  // every word here is one that plain price and fee wording needs (cash, price, paid, not, no, dealer, fees), so the word list cannot tell these from a plain note
+  for (const extra of ['No dealer or fees.', 'No Example Motors or fees.', 'Price without the dealer or fees.', 'Cash price and fees are not paid to the dealer.', 'Fees are not paid to the dealer.', 'No dealer and no fees.', 'Cash price is not paid to the dealership.']) {
+    assert.deepEqual(problems(withNote(`${FEES} ${extra}`)), [], extra);
+  }
 });
 
 test('dollar amounts and percentages pass; any other digits are refused', () => {
@@ -147,7 +220,7 @@ test('"not the dealers" and "not the dealerships" are banned like "not the deale
   const plain = withNote('');
   const template = buildTemplateDescription(plain);
   for (const [line, phrase] of [['Buy from me, not the dealers.', 'not the dealers'], ['Text me, not the dealerships.', 'not the dealerships']]) {
-    assert.deepEqual(runGuardrails(`${template}\n${line}`, plain).problems.map((p) => p.text), [`Says "${phrase}"`], line);
+    assert.deepEqual(guard(`${template}\n${line}`, plain).map((p) => p.text), [`Says "${phrase}"`], line);
     assert.deepEqual(checkClosingLine(line).problems.filter((p) => p.code === 'closing-banned'), [{ code: 'closing-banned', text: `The closing line says "${phrase}"` }], line);
     assert.equal(usableClosingLine(line), '', line);
     // as the whole price note: no sentence about where the fees go before it
@@ -157,7 +230,7 @@ test('"not the dealers" and "not the dealerships" are banned like "not the deale
   assert.deepEqual(problems(withNote('Tax, title and fees go to the state, not the dealerships.')), []);
   // beside the note, the description's own words are refused as before
   const c = withNote('Tax, title and fees go to the state, not the dealers.');
-  assert.deepEqual(runGuardrails(`${buildTemplateDescription(c)}\nTaxes go to the state, not the dealers.`, c).problems.map((p) => p.text), ['Says "not the dealers"']);
+  assert.deepEqual(guard(`${buildTemplateDescription(c)}\nTaxes go to the state, not the dealers.`, c).map((p) => p.text), ['Says "not the dealers"']);
 });
 
 test('a price note without "not the dealer" is read as before: ordinary disclaimers pass and its words are not held to the list', () => {
@@ -176,7 +249,7 @@ test('the list is closed: no pronoun, person, role, way to get in touch, payment
   assert.deepEqual([...TS_WORDS], [...PRICE_NOTE_WORDS], 'the hosted checker lists the same words');
   assert.equal(new Set(PRICE_NOTE_WORDS).size, PRICE_NOTE_WORDS.length, 'each word once');
   for (const w of PRICE_NOTE_WORDS) assert.match(w, /^\p{Ll}+$/u, w);
-  for (const w of ['i', 'me', 'my', 'we', 'us', 'you', 'he', 'she', 'him', 'her', 'they', 'them', 'it', 'sam', 'salesperson', 'seller', 'owner', 'manager', 'advisor', 'text', 'call', 'email', 'message', 'contact', 'phone', 'dm', 'venmo', 'zelle', 'paypal', 'person', 'private', 'privately', 'face', 'negotiable', 'deal', 'best', 'direct', 'buy', 'save', 'offer', 'lot', 'store', 'home', 'via', 's', 't']) {
+  for (const w of ['i', 'me', 'my', 'we', 'us', 'you', 'your', 'requires', 'he', 'she', 'him', 'her', 'they', 'them', 'it', 'sam', 'salesperson', 'seller', 'owner', 'manager', 'advisor', 'text', 'call', 'email', 'message', 'contact', 'phone', 'dm', 'venmo', 'zelle', 'paypal', 'person', 'private', 'privately', 'face', 'negotiable', 'deal', 'best', 'direct', 'buy', 'save', 'offer', 'lot', 'store', 'home', 'via', 's', 't']) {
     assert.ok(!PRICE_NOTE_WORDS.includes(w), `"${w}" is not on the list`);
   }
   for (const w of ['price', 'tax', 'title', 'registration', 'fees', 'go', 'to', 'the', 'state', 'not', 'dealer', 'dealership', 'dealers', 'dealerships', 'dmv', 'secretary', 'before', 'exclude']) {

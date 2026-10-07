@@ -184,6 +184,11 @@ const contexts = [
   { vehicle, dealer, priceNote: 'Price includes the $490 doc fee and 6.25 % tax. Tax and tags go to the state, not the dealerships. Call \uff15\uff15\uff15-0100 or email sales@carmail.com \u{1F4DE}', price: 28995 },
   { vehicle, dealer, priceNote: "Ask for Sam, not the dealer's front desk. T\u0435xt us; prices valid through 2026, $5551234567.", price: 28995 },
   { vehicle, dealer, priceNote: 'Text Sam, not the dealers.', price: 28995 },
+  // the state is not one of the dealership's own words (the service is not sent it), "your" is not on the list, invisible characters
+  { vehicle, dealer: { name: 'Example Motors', city: 'Portland', state: 'ME' }, priceNote: 'Tax, title and fees go to the state, not the dealer. Cash price paid to me. Price excludes ME sales tax.', price: 28995 },
+  { vehicle, dealer, priceNote: 'Tax and fees go to your state, not the dealer. Your price requires financing.', price: 28995 },
+  { vehicle, dealer, priceNote: 'Tax, title and fees go to the state, not the dealer. Cash price paid to A\u200Bbe, A\u00ADna or S\uFEFFam from the \u202Eper\u202C; t\u00ADhe doc fee and the\u0336 tax.', price: 28995 },
+  { vehicle, dealer, priceNote: 'Price excludes t\u00ADhe doc fee\u200B. Tax, title and fees go to the state, not the dealer.', price: 28995 },
   { vehicle: { ...vehicle, features: [...vehicle.features, 'New Tires/Brakes', 'New Brake Pads & Rotors', 'Brake Assist', 'Battery Saver', 'Wipers - Rain Sensing', 'Rear Wiper/Washer'], descriptionRaw: 'Recent service: new tires, brakes and rotors, plus new shocks.' }, dealer, priceNote: '', price: 28995 },
   {},
 ];

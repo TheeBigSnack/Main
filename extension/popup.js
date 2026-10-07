@@ -872,7 +872,7 @@ const field = (label, name, value, attrs = 'type="text"') =>
 // passes (the number check reads them as facts), so their warnings follow
 // those fields too: `dealer` is the dealership as the form holds it now.
 const WARNED_FIELDS = Object.freeze({ salespersonName: 'name', salespersonTitle: 'role', dealerName: 'dealer' });
-const DEALER_FIELDS = Object.freeze({ dealerName: 'name', dealerCity: 'city', dealerState: 'state', dealerZip: 'zip' });
+const DEALER_FIELDS = Object.freeze({ dealerName: 'name', dealerCity: 'city', dealerZip: 'zip' });
 function settingWarningHtml(name, value, dealer) {
   const text = settingNumberWarning(WARNED_FIELDS[name], value, dealer);
   return text ? `<div class="banner warn">${esc(text)}</div>` : '';
@@ -881,25 +881,24 @@ const settingNotice = (name, value, dealer) => settingNumberNotice(WARNED_FIELDS
 const settingWarning = (name, value, dealer) => `<div id="${name}Warn">${settingWarningHtml(name, value, dealer)}</div><div id="${name}Say" class="sr" aria-live="polite">${esc(settingNotice(name, value, dealer))}</div>`;
 // A price note that says "not the dealer" may say only where the fees go and
 // what the price includes (src/rewriteTemplate.js priceNoteWarning): Settings
-// says so under the note, read with the dealership's name, city and state as
-// the form holds them, when the form is drawn and as the note or the
-// dealership is typed; Save still saves it. Its live region (priceNoteSay)
-// leaves out the quoted words, so it is spoken once, when the warning comes
-// or goes. Set-up's price step says the same (wizard.js).
+// says so under the note, read with the dealership's name and city as the
+// form holds them, when the form is drawn and as the note or the dealership
+// is typed; Save still saves it. Its live region (priceNoteSay) leaves out
+// the quoted words, so it is spoken once, when the warning comes or goes.
+// Set-up's price step says the same (wizard.js).
 const noteWarningHtml = (note, dealer) => {
   const text = priceNoteWarning(note, dealer);
   return text ? `<div class="banner warn">${esc(text)}</div>` : '';
 };
 const noteWarning = (note, dealer) => `<div id="priceNoteWarn">${noteWarningHtml(note, dealer)}</div><div id="priceNoteSay" class="sr" aria-live="polite">${esc(priceNoteNotice(note, dealer))}</div>`;
-// Typing in one of these fields (or the price note, or the dealership's
-// state): each warning brought up to date from what the
-// form holds now (the saved Settings for a box it can't read). The warning
-// under a field follows every key; its live region is written only when what
-// it says changes, that is when the warning comes or goes, since a screen
-// reader speaks every write.
+// Typing in one of these fields (or the price note): each warning brought up
+// to date from what the form holds now (the saved Settings for a box it
+// can't read). The warning under a field follows every key; its live region
+// is written only when what it says changes, that is when the warning comes
+// or goes, since a screen reader speaks every write.
 function refreshSettingWarnings(target) {
   const saved = withDefaults(state.settings || {}, knownSite());
-  const savedValues = { salespersonName: saved.salesperson.name, salespersonTitle: saved.salesperson.title, dealerName: saved.dealer.name, dealerCity: saved.dealer.city, dealerState: saved.dealer.state, dealerZip: saved.dealer.zip, priceNote: saved.priceNote };
+  const savedValues = { salespersonName: saved.salesperson.name, salespersonTitle: saved.salesperson.title, dealerName: saved.dealer.name, dealerCity: saved.dealer.city, dealerZip: saved.dealer.zip, priceNote: saved.priceNote };
   const box = (name) => (target.form && target.form.elements && typeof target.form.elements.namedItem === 'function' ? target.form.elements.namedItem(name) : null);
   const now = (name) => (name === target.name ? target.value : (box(name) || { value: savedValues[name] }).value);
   const dealer = Object.fromEntries(Object.entries(DEALER_FIELDS).map(([name, key]) => [key, now(name)]));

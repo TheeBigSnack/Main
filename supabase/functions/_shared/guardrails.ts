@@ -59,7 +59,6 @@ export interface GuardrailVehicle {
 export interface GuardrailDealer {
   name?: unknown;
   city?: unknown;
-  state?: unknown; // its words pass in a price note that says "not the dealer"
   zip?: unknown;
 }
 
@@ -175,18 +174,20 @@ export const PRICE_NOTE_UNLESS: Readonly<Record<string, Readonly<{ before?: stri
 
 // A price note that says one of those phrases passes only when, besides that
 // rule, every word of the whole note is on this closed list or a word of the
-// dealership's own name, city or state: runs of letters after NFKC, in lower
-// case, an apostrophe or a hyphen splitting a word into its parts; its only
-// digits are dollar amounts and percentages, its only other marks the
-// punctuation between words. The reason quotes anything else. A note without
-// those phrases is read as before. The same words as the extension's list.
+// dealership's own name or city (the facts this service gets name no state):
+// runs of letters after NFKC, in lower case, an apostrophe or a hyphen
+// splitting a word into its parts, an invisible character read as nothing
+// (one that changes the direction of the text is refused); its only digits
+// are dollar amounts and percentages, its only other marks the punctuation
+// between words. The reason quotes anything else. A note without those
+// phrases is read as before. The same words as the extension's list.
 export const PRICE_NOTE_WORDS: readonly string[] = Object.freeze([
   // articles, determiners, conjunctions and prepositions
-  'a', 'an', 'the', 'all', 'any', 'no', 'only', 'our', 'your', 'these', 'those', 'that', 'which',
+  'a', 'an', 'the', 'all', 'any', 'no', 'only', 'our', 'these', 'those', 'that', 'which',
   'and', 'or', 'nor', 'but', 'as', 'if', 'where',
   'of', 'to', 'for', 'from', 'in', 'on', 'at', 'by', 'with', 'without', 'per', 'before', 'after', 'through', 'upon',
   // verbs that say what the price includes and where the fees go
-  'is', 'are', 'be', 'does', 'do', 'not', 'may', 'vary', 'apply', 'applies', 'requires',
+  'is', 'are', 'be', 'does', 'do', 'not', 'may', 'vary', 'apply', 'applies',
   'include', 'includes', 'included', 'including', 'exclude', 'excludes', 'excluded', 'excluding',
   'go', 'goes', 'paid', 'payable', 'collected', 'due', 'sent', 'remitted', 'directly',
   // the price
@@ -437,40 +438,50 @@ const NOTE_WORD_SET: ReadonlySet<string> = new Set(PRICE_NOTE_WORDS);
 // a dollar amount or a percentage standing on its own
 const NOTE_AMOUNT = /(?<![\p{L}\p{N}])(?:\$\s?(?:\d{1,3}(?:,\d{3})+|\d{1,6})(?:\.\d{1,2})?|\d{1,3}(?:\.\d{1,3})?\s?%)(?![\p{L}\p{N}]|[.,]\p{N})/gu;
 // the marks a note may have between its words
-const NOTE_MARKS = /^[\s.,;:!?'"\u2018\u2019\u201c\u201d()[\]\-\u2010-\u2015/&*+\p{M}\p{Cf}]$/u;
+const NOTE_MARKS = /^[\s.,;:!?'"\u2018\u2019\u201c\u201d()[\]\-\u2010-\u2015/&*+]$/u;
 const NOTE_EDGE_MARKS = /^[.,;:!?'"\u2018\u2019\u201c\u201d()[\]\-\u2010-\u2015/&*+]+|[.,;:!?'"\u2018\u2019\u201c\u201d()[\]\-\u2010-\u2015/&*+]+$/gu;
 const NOTE_NUMBER = /\S*\p{N}\S*/gu;
-const NOTE_WORD = /\p{L}+(?:['\u2019\u2010-]\p{L}+)*/gu;
-const lettersOf = (s: unknown): string[] => String(s ?? '').normalize('NFKC').toLowerCase().match(/\p{L}+/gu) || [];
+const NOTE_WORD = /\p{L}[\p{L}\p{M}]*(?:['\u2019\u2010-]\p{L}[\p{L}\p{M}]*)*/gu;
+// an invisible character: read as nothing, unless it changes the direction of the text
+const NOTE_HIDDEN = /\p{Default_Ignorable_Code_Point}/gu;
+const NOTE_DIRECTION = /\p{Bidi_Control}/u;
+const lettersOf = (s: unknown): string[] => String(s ?? '').normalize('NFKC').replace(NOTE_HIDDEN, '').toLowerCase().match(/\p{L}[\p{L}\p{M}]*/gu) || [];
 const blank = (s: string): string => ' '.repeat(s.length);
-// What a price note says that is not price and fee wording, in order, each once.
-function noteSteerWords(note: string, dealer: GuardrailDealer | null | undefined): string[] {
+// What a price note says that is not price and fee wording, in order, each once, quoted as it shows.
+function noteSteerWords(note: unknown, dealer: GuardrailDealer | null | undefined): string[] {
   const d = dealer || {};
-  const own = new Set([d.name, d.city, d.state].flatMap(lettersOf));
+  const own = new Set([d.name, d.city].flatMap(lettersOf));
   const found: { at: number; text: string }[] = [];
-  let rest = String(note ?? '').normalize('NFKC').replace(NOTE_AMOUNT, blank);
+  let gone = 0;
+  let rest = String(note ?? '').normalize('NFKC').replace(NOTE_HIDDEN, (c: string, at: number) => {
+    if (!NOTE_DIRECTION.test(c)) {
+      gone += c.length;
+      return '';
+    }
+    found.push({ at: at - gone, text: 'an invisible direction mark' });
+    return ' ';
+  });
+  rest = rest.replace(NOTE_AMOUNT, blank);
   rest = rest.replace(NOTE_NUMBER, (said: string, at: number) => {
-    found.push({ at, text: said.replace(NOTE_EDGE_MARKS, '') });
+    found.push({ at, text: `"${said.replace(NOTE_EDGE_MARKS, '')}"` });
     return blank(said);
   });
   rest = rest.replace(NOTE_WORD, (said: string, at: number) => {
-    if (!lettersOf(said).every((w) => NOTE_WORD_SET.has(w) || own.has(w))) found.push({ at, text: said });
+    if (!lettersOf(said).every((w) => NOTE_WORD_SET.has(w) || own.has(w))) found.push({ at, text: `"${said}"` });
     return blank(said);
   });
-  for (const m of rest.matchAll(/\S/gu)) if (!NOTE_MARKS.test(m[0])) found.push({ at: m.index as number, text: m[0] });
+  for (const m of rest.matchAll(/\S/gu)) if (!NOTE_MARKS.test(m[0])) found.push({ at: m.index as number, text: `"${m[0]}"` });
   const seen = new Set<string>();
   return found.sort((a, b) => a.at - b.at).map((f) => f.text).filter((t) => !seen.has(t.toLowerCase()) && Boolean(seen.add(t.toLowerCase())));
 }
-const quoteList = (list: string[]): string => {
-  const q = list.map((w) => `"${w}"`);
-  return q.length > 1 ? `${q.slice(0, -1).join(', ')} and ${q[q.length - 1]}` : q[0];
-};
-// The reason a note that says one of those phrases is refused for its words ('' when it is not).
-function noteSteer(phrase: string, noteSaid: string, dealer: GuardrailDealer | null | undefined): string {
+const listOf = (list: string[]): string => (list.length > 1 ? `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}` : list[0]);
+// The reason a note that says one of those phrases is refused for its words ('' when it is not):
+// the phrase looked for in the note on one line, its words read in the note as written.
+function noteSteer(phrase: string, noteSaid: string, dealer: GuardrailDealer | null | undefined, note: unknown = noteSaid): string {
   const said = NOTE_STEER_SAID.get(phrase);
   if (!said || !said.test(noteSaid)) return '';
-  const words = noteSteerWords(noteSaid, dealer);
-  return words.length ? `Your price note says "${phrase}", so it may only say where the fees go and what the price includes; take out ${quoteList(words)}, or take out "${phrase}". Change the note in Settings.` : '';
+  const words = noteSteerWords(note, dealer);
+  return words.length ? `Your price note says "${phrase}", so it may only say where the fees go and what the price includes; take out ${listOf(words)}, or take out "${phrase}". Change the note in Settings.` : '';
 }
 const noteBanned = (phrase: string): string => `Your dealership's price note says "${phrase}"; change the note in Settings`;
 // "one owner", "1-owner", "single-owner", "one careful owner", "one
@@ -1101,7 +1112,7 @@ export function runGuardrails(text: unknown, { vehicle = {}, dealer = {}, salesp
   for (const [phrase, re] of BANNED_RE) {
     if (re.test(besideNote)) problems.push({ code: 'banned-phrase', text: `Says "${phrase}"` });
     else if (noteSaid && (NOTE_BANNED_RE.get(phrase) as RegExp).test(noteSaid)) problems.push({ code: 'banned-phrase', text: noteBanned(phrase) });
-    else if (noteSaid && noteSteer(phrase, noteSaid, dealer)) problems.push({ code: 'banned-phrase', text: noteSteer(phrase, noteSaid, dealer) });
+    else if (noteSaid && noteSteer(phrase, noteSaid, dealer, priceNote)) problems.push({ code: 'banned-phrase', text: noteSteer(phrase, noteSaid, dealer, priceNote) });
     else if (!re.test(t)) continue;
     else if (!(noteSaid && re.test(noteSaid))) problems.push({ code: 'banned-phrase', text: `Says "${phrase}"` });
     else if (re.test(besideOwnNote)) problems.push({ code: 'banned-phrase', text: `Says "${phrase}" with words joined to your price note's sentence; keep the note as a sentence of its own: end the sentence before it, and start the one after it with a capital letter` });
