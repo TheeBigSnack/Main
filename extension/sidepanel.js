@@ -25,7 +25,7 @@ import { buildListingData, listingChanges, normalizeColor, COLORS } from './src/
 import { capStatus, capCount, logPost } from './src/cap.js';
 import { withDefaults, loadProfile, settingsFromProfile } from './src/settings.js';
 import { createQueue, currentVin, advance, pause as pauseQueue, resume as resumeQueue, describe as describeQueue } from './src/queue.js';
-import { wiz, startWizard, resumeWizard, wizardHtml, handleWizardClick, handleWizardChange } from './wizard.js';
+import { wiz, startWizard, resumeWizard, wizardHtml, handleWizardClick, handleWizardChange, handleWizardInput } from './wizard.js';
 import { up, startUpkeep, endUpkeep, upkeepHtml, handleUpkeepClick, namesakesOf } from './upkeep.js';
 import { localVinCheck, decodeVinOnline, compareVin, compareSummary, NHTSA_ORIGIN } from './src/vin.js';
 import { neededPatterns, patternCovers, patternHost, hostList, isFacebookServer } from './src/photoHosts.js';
@@ -292,6 +292,14 @@ const ctx = () => ({ vehicle: state.vehicle, dealer: state.settings.dealer, sale
 const dealerNamed = () => Boolean(String((state.settings && state.settings.dealer && state.settings.dealer.name) || '').trim());
 const NO_DEALER_TEXT = "Add your dealership's name in Settings first (Dealership name): every description names the dealership.";
 
+// What fixes the description's stops when every one of them is a number in
+// Settings (rewriteTemplate.js settingNumberProblems): the description must
+// keep naming the role, the name and the dealership, so the fix is in
+// Settings, and a Settings save writes the template again
+// (reviewAfterSettings). '' when the description itself needs fixing. The
+// status line (fillBlocker, carStillCurrent) and the checks line say it.
+const settingsFix = (stops) => (stops.length && stops.every((p) => p.code === 'setting-number') ? 'After you save Settings, the template writes the description again; if you edited it, click Reset to template.' : '');
+
 // Why a description can't be typed into the form, or '' when it can. Every
 // way of opening or filling the form goes through this (Open the
 // Marketplace form, Open the form and check fields only, Fill it in now
@@ -301,6 +309,9 @@ const NO_DEALER_TEXT = "Add your dealership's name in Settings first (Dealership
 // that breaks any other posting rule (rewriteTemplate.js ruleProblems): a
 // number, price, mileage or claim the website doesn't make, a banned phrase,
 // a missing role, VIN or price note. Length, capitals and emoji only warn.
+// When the only problems are numbers in Settings (a role such as "2nd shift
+// sales": rewriteTemplate.js settingNumberProblems), the fix is there, not in
+// the description: a Settings save writes the template again (reviewAfterSettings).
 function fillBlocker(description) {
   if (!dealerNamed()) return NO_DEALER_TEXT;
   const name = String(state.settings.dealer.name).trim();
@@ -309,7 +320,8 @@ function fillBlocker(description) {
   }
   const stops = ruleProblems(runGuardrails(description, ctx()));
   if (!stops.length) return '';
-  return `The description fails ${stops.length === 1 ? 'a check' : `${stops.length} checks`} that must pass before the form is filled: ${stops.map((p) => p.text).join('; ')}. Fix the description (or use Reset to template) first.`;
+  const fix = settingsFix(stops) || 'Fix the description (or use Reset to template) first.';
+  return `The description fails ${stops.length === 1 ? 'a check' : `${stops.length} checks`} that must pass before the form is filled: ${stops.map((p) => p.text).join('; ')}. ${fix}`;
 }
 
 // The description's checks, run again on the text that would be filled (the
@@ -558,9 +570,9 @@ async function carStillCurrent(waiting = 'the form opens') {
   const reopen = was === 'publish' || was === 'probe'
     ? 'click Open the Marketplace form for a new form, and close the form opened before without publishing it'
     : 'click Open the Marketplace form again';
-  const next = stops.length
-    ? ` The description no longer matches it: ${stops.map((p) => p.text).join('; ')}. Fix the description, then ${reopen}.`
-    : ` Check the review, then ${reopen}.`;
+  const fix = settingsFix(stops);
+  const next = !stops.length ? ` Check the review, then ${reopen}.`
+    : ` The description no longer matches it: ${stops.map((p) => p.text).join('; ')}. ${fix ? `${fix} Then` : 'Fix the description, then'} ${reopen}.`;
   setStatus(`The website changed this car since it was read${what}.${next}`, 'error');
   await saveFlow();
   return false;
@@ -1517,14 +1529,17 @@ async function downloadPhotos() {
 // ---------- rendering ----------
 
 // The problems that keep the form from being filled (fillBlocker), then the
-// ones that only warn (length and tone).
+// ones that only warn (length and tone). When only numbers in Settings stop
+// it, the line says the fix is there (settingsFix): Open the Marketplace form
+// and Check fields are off meanwhile, so the status line's reason rarely shows.
 function checksHtml(g) {
   if (!g) return '';
   if (g.ok) return `<div class="checks ok" id="checks">All checks passed: ${g.words} words; every number the checks found is in the website's data, price and mileage included; no banned phrases or flagged claims; dealership and your role named${noteFor() ? '; price note included' : ''}. The checks look for set words and numbers, so read it through before you publish.</div>`;
   const stops = ruleProblems(g);
   const warns = g.problems.filter((p) => !stops.includes(p));
   const list = (ps) => `<ul>${ps.map((p) => `<li>${esc(p.text)}</li>`).join('')}</ul>`;
-  return `<div class="checks ${stops.length ? 'bad' : 'warn'}" id="checks">${stops.length ? `Fix before the form can be filled:${list(stops)}` : ''}${warns.length ? `Worth fixing (the form can still be filled):${list(warns)}` : ''}</div>`;
+  const fix = settingsFix(stops);
+  return `<div class="checks ${stops.length ? 'bad' : 'warn'}" id="checks">${stops.length ? `Fix before the form can be filled:${list(stops)}${fix ? `<p>${esc(fix)}</p>` : ''}` : ''}${warns.length ? `Worth fixing (the form can still be filled):${list(warns)}` : ''}</div>`;
 }
 
 function sourcePill() {
@@ -2504,6 +2519,10 @@ async function onPickChange(target) {
 
 let inputTimer = null;
 function onInput(ev) {
+  if (state.step === 'wizard') {
+    handleWizardInput(ev.target); // set-up's warning under the name, role or dealership name follows the typing
+    return;
+  }
   if (ev.target.id === 'panelSearch') {
     state.listFilter = ev.target.value;
     renderList();

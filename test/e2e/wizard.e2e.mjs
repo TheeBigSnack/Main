@@ -135,6 +135,25 @@ try {
   await panel.click('#wizNext'); // -> you
   await panel.fill('#wizName', 'Roger');
   assert.match(await panel.textContent('#panel'), stepOf('you'));
+  // a number in the role keeps the Marketplace form shut for nearly every car: the step says so as it is typed, and stops once it is gone
+  assert.equal(await panel.getAttribute('#wizTitle', 'aria-describedby'), 'wizTitleWarn');
+  assert.equal(await panel.getAttribute('#wizTitleWarn', 'aria-live'), null, 'the warning under the field changes on every key, so it is not spoken on each');
+  assert.equal(await panel.getAttribute('#wizTitleSay', 'aria-live'), 'polite', 'a screen reader hears the warning from the live region beside it');
+  assert.equal((await panel.textContent('#wizTitleWarn')).trim(), '', 'no warning for the default role');
+  assert.equal((await panel.textContent('#wizTitleSay')).trim(), '');
+  // typed key by key: the warning follows every key, the live region changes once, when the warning comes
+  await panel.evaluate(() => {
+    window.__sayWrites = 0;
+    new MutationObserver((list) => { window.__sayWrites += list.length; }).observe(document.querySelector('#wizTitleSay'), { childList: true, characterData: true, subtree: true });
+  });
+  await panel.fill('#wizTitle', '');
+  await panel.locator('#wizTitle').pressSequentially('2nd shift sales');
+  await panel.waitForFunction(() => /"Second shift sales"/.test(document.querySelector('#wizTitleWarn').textContent));
+  assert.match(await panel.textContent('#wizTitleWarn'), /^A number in your role \("2nd"\) keeps the Marketplace form shut for nearly every car: every number in a description must match the website's data for the car\. Write the number as a word or leave it out, for example "Second shift sales"\.$/);
+  assert.equal((await panel.textContent('#wizTitleSay')).trim(), "A number in your role keeps the Marketplace form shut for nearly every car: every number in a description must match the website's data for the car. Write the number as a word or leave it out.");
+  assert.equal(await panel.evaluate(() => window.__sayWrites), 1, 'the live region was written once over 15 keys');
+  await panel.fill('#wizTitle', 'sales consultant');
+  await panel.waitForFunction(() => document.querySelector('#wizTitleWarn').textContent.trim() === '' && document.querySelector('#wizTitleSay').textContent.trim() === '');
   await panel.click('#wizNext'); // -> account (when configured), then address
   if (STEPS.includes('account')) {
     await panel.waitForSelector('#wizEmail');
@@ -151,6 +170,13 @@ try {
   assert.match(await panel.textContent('#wizAddressHint'), /^Read from the website \(structured data\)\. Marketplace asks/, 'the step says where the address came from');
   assert.equal(await panel.inputValue('#wizState'), 'PA');
   assert.equal(await panel.inputValue('#wizZip'), '15370', "from the website's structured data");
+  // a dealership typed here that no longer has the number in the role or the name brings that warning up here; this role and name have none
+  assert.equal(await panel.getAttribute('#wizZip', 'aria-describedby'), 'wizYouWarn');
+  assert.equal(await panel.getAttribute('#wizDealer', 'aria-describedby'), 'wizDealerWarn wizYouWarn');
+  assert.equal(await panel.getAttribute('#wizYouSay', 'aria-live'), 'polite');
+  await panel.locator('#wizZip').pressSequentially('0');
+  await panel.fill('#wizZip', '15370');
+  assert.equal((await panel.textContent('#wizYouWarn')).trim(), '', 'no number in the role or the name: nothing to say');
   await panel.click('#wizNext'); // -> price
   await panel.waitForSelector('#wizPriceNote');
   assert.match(await panel.textContent('h3'), /^The price to post$/);

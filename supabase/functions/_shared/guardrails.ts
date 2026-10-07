@@ -13,6 +13,8 @@
 //     mileage must be the website's, and no price change is claimed
 //   - the VIN and the dealership's name must be present (and a name must be set)
 //   - the salesperson's role (their title, or the default one) must be present
+//   - a number problem that comes only from the role, the salesperson's name
+//     or the dealership's name is one problem naming that setting
 //   - banned phrases (claims the data can't support, posing as a private
 //     seller, protected characteristics), "one owner" only with the flag,
 //     no ALL CAPS shouting, no walls of emoji
@@ -780,6 +782,125 @@ export function spelledQuantities(text: unknown): Spelled[] {
 }
 const saysWords = (text: unknown, words: string): boolean => new RegExp(`\\b${escapeRe(oneLine(words)).replace(/[\s-]+/g, '[\\s-]+')}\\b`, 'i').test(String(text || ''));
 
+// ---------- numbers typed into Settings ----------
+// A number in the role or the salesperson's name, or a dealership name that
+// reads as a price or a mileage, is in every description and fails the
+// number, price or mileage check for nearly every car. The description still
+// fails; the reason names the setting, what it says and a way to write it.
+// (The extension's set-up and Settings warning, settingNumberWarning, is not
+// ported: no draft needs it.)
+const SMALL_NUMBERS: readonly string[] = Object.freeze(['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty']);
+const ORDINAL_WORDS: readonly string[] = Object.freeze(['', 'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth', 'eleventh', 'twelfth', 'thirteenth', 'fourteenth', 'fifteenth', 'sixteenth', 'seventeenth', 'eighteenth', 'nineteenth', 'twentieth']);
+const capitalize = (s: string): string => (s ? s[0].toUpperCase() + s.slice(1) : s);
+// The value with each number up to twenty, or "1st" to "20th", standing as
+// a word of its own, written as a word ("2nd shift sales" is "Second shift
+// sales"), with a capital at the start, where the word after it has one or,
+// with none after it, where the word before it has one; '' when a number is
+// left that no word stands in for ("24/7", "Route19", "#1", "$0", "0%", "2.0").
+const NUMBER_ALONE = /(?<=^|[\s(\[{"'\u2018\u201c])(\d{1,2})(st|nd|rd|th)?(?=$|[\s)\]}"'\u2019\u201d,;!?]|[.:](?:\s|$))/gi;
+const startsUpper = (c: string | undefined | null): boolean => Boolean(c) && c !== String(c).toLowerCase();
+export function numbersAsWords(value: unknown): string {
+  const v = oneLine(value);
+  const out = v.replace(NUMBER_ALONE, (said: string, n: string, nth: string | undefined, at: number) => {
+    const word = (nth ? ORDINAL_WORDS : SMALL_NUMBERS)[Number(n)];
+    if (!word) return said;
+    const before = v.slice(0, at);
+    if (!/[\p{L}\p{N}]/u.test(before)) return capitalize(word);
+    const next = /^[^\p{L}\p{N}]*(\p{L})/u.exec(v.slice(at + said.length));
+    const prev = /(\p{L})\p{L}*[^\p{L}\p{N}]*$/u.exec(before);
+    return startsUpper(next ? next[1] : prev && prev[1]) ? capitalize(word) : word;
+  });
+  return /\d/.test(out) ? '' : out;
+}
+// The name without its number, only where taking the number out leaves the
+// rest of the name as typed: digits after a letter in a word ("J2 Smith" is
+// "J Smith"), a number that is a word of its own at the end ("Sam 2"), or
+// one in brackets or quotes of its own ("Sam (2)"); '' for any other number
+// ("Sam 2nd shift", "Sam (Store 2)", "Sam-2"), for what has no letter, and
+// for brackets or quotes left unpaired.
+const NTH = '\\d+(?:st|nd|rd|th)?';
+const BARE_NUMBER = new RegExp(`^${NTH}$`, 'i');
+const OWN_BRACKETS = new RegExp(`^(?:\\(${NTH}\\)|\\[${NTH}\\]|\\{${NTH}\\}|"${NTH}"|'${NTH}'|\u2018${NTH}\u2019|\u201c${NTH}\u201d)$`, 'i');
+const AFTER_A_LETTER = /(?<=\p{L})\d+(?:(?:st|nd|rd|th)(?!\p{L}))?/giu;
+const timesIn = (text: string, c: string): number => text.split(c).length - 1;
+const paired = (text: string): boolean => [['(', ')'], ['[', ']'], ['{', '}'], ['\u201c', '\u201d']].every(([a, b]) => timesIn(text, a) === timesIn(text, b)) && timesIn(text, '"') % 2 === 0;
+export function nameWithoutNumber(value: unknown): string {
+  const words = oneLine(value).split(' ');
+  const kept: string[] = [];
+  for (const [i, word] of words.entries()) {
+    if (!/\d/.test(word)) kept.push(word);
+    else if (OWN_BRACKETS.test(word) || (BARE_NUMBER.test(word) && i === words.length - 1)) continue;
+    else {
+      const left = word.replace(AFTER_A_LETTER, '');
+      if (/\d/.test(left)) return '';
+      kept.push(left);
+    }
+  }
+  const out = kept.join(' ');
+  return /\p{L}/u.test(out) && paired(out) && /[\p{L}.)\]}"'\u2019\u201d]$/u.test(out) ? out : '';
+}
+type Setting = 'role' | 'name' | 'dealer';
+const SETTING_WORDS: Readonly<Record<Setting, Readonly<{ your: string; field: string; example: (value: unknown) => string; otherwise: string }>>> = Object.freeze({
+  role: Object.freeze({ your: 'Your role', field: 'Your role', example: numbersAsWords, otherwise: 'write the number as a word or leave it out' }),
+  name: Object.freeze({ your: 'Your name', field: 'Your name', example: nameWithoutNumber, otherwise: 'leave the number out' }),
+  dealer: Object.freeze({ your: "Your dealership's name", field: 'Dealership name', example: numbersAsWords, otherwise: 'write the number as a word' }),
+});
+// The example is offered only when the sign-off written with it gives the
+// checks no problem the sign-off with the plain role gives none of; it holds
+// no digit, so checking it never comes back here.
+const EXAMPLE_SLOT: Readonly<Record<Setting, 'title' | 'person' | 'dealerName'>> = Object.freeze({ role: 'title', name: 'person', dealer: 'dealerName' });
+function signOffCodes(slot: Partial<Record<'title' | 'person' | 'dealerName', string>>): Set<string> {
+  const s = { person: '', title: DEFAULT_SALESPERSON_TITLE, dealerName: '', ...slot };
+  const g = runGuardrails(signOffLine(s.person, s.title, s.dealerName), { salesperson: { name: s.person, title: s.title }, dealer: { name: s.dealerName } });
+  return new Set(g.problems.map((p) => p.code));
+}
+function exampleOf(setting: Setting, value: unknown): string {
+  const v = oneLine(value);
+  const example = SETTING_WORDS[setting].example(v);
+  if (!example || example === v) return '';
+  const plain = signOffCodes({});
+  return [...signOffCodes({ [EXAMPLE_SLOT[setting]]: example })].every((code) => plain.has(code)) ? example : '';
+}
+function settingNumberText(setting: Setting, value: string): string {
+  const w = SETTING_WORDS[setting];
+  const example = exampleOf(setting, value);
+  const how = example ? `, for example to "${example}"` : `: ${w.otherwise}`;
+  const why = setting === 'dealer'
+    ? 'reads as a price or a mileage, and every price and mileage in a description must match the listing'
+    : "has a number in it, and every number in a description must match the website's data for the car";
+  return `${w.your} "${value}" ${why}; change it in Settings (${w.field})${how}`;
+}
+// The text with each value set aside where it stands as words of its own:
+// "Sam 2" in "I'm Sam 2, ...", never the "2" of "12,000", "2,000" or "2.5".
+// A value with no letter ("2") can't be told from the description's own
+// numbers, so it is set aside only where the text says it once (the
+// sign-off), after the values with letters; said again, it stays.
+const asWords = (value: string): RegExp => new RegExp(`(?<![\\p{L}\\p{N}]|\\p{N}[.,])${escapeRe(value).replace(/ /g, '\\s+')}(?![\\p{L}\\p{N}]|[.,]\\p{N})`, 'giu');
+const hasLetter = (value: string): boolean => /\p{L}/u.test(value);
+const setAside = (text: string, values: string[]): string => [...values].sort((a, b) => Number(hasLetter(b)) - Number(hasLetter(a))).reduce((out, value) => {
+  const re = asWords(value);
+  return !hasLetter(value) && (out.match(re) || []).length > 1 ? out : out.replace(re, ' ');
+}, text);
+// The problems the text no longer gives with every such setting set aside
+// (gone), and one problem for each setting that, with the others set aside,
+// still gives one of those; nothing is set aside when no setting is to blame.
+function settingNumberProblems(prose: string, check: (text: string) => GuardrailProblem[], { role, name, dealerName }: { role: unknown; name: unknown; dealerName: unknown }): { problems: GuardrailProblem[]; gone: Set<string> } {
+  const none = { problems: [] as GuardrailProblem[], gone: new Set<string>() };
+  const settings = ([['role', oneLine(role)], ['name', oneLine(name)], ['dealer', oneLine(dealerName)]] as [Setting, string][]).filter(([, value]) => /\d/.test(value));
+  if (!settings.length) return none;
+  const said = (text: string) => new Set(check(text).map((p) => p.text));
+  const aside = (list: [Setting, string][]) => said(setAside(prose, list.map(([, value]) => value)));
+  const rest = aside(settings);
+  const gone = new Set([...said(prose)].filter((t) => !rest.has(t)));
+  if (!gone.size) return none;
+  const blamed = settings.filter((s) => {
+    const alone = aside(settings.filter((o) => o !== s));
+    return [...gone].some((t) => alone.has(t));
+  });
+  if (!blamed.length) return none;
+  return { problems: blamed.map(([setting, value]) => ({ code: 'setting-number', text: settingNumberText(setting, value) })), gone };
+}
+
 /**
  * Checks a description against the source data. Returns { ok, problems, words }.
  * Every problem has a code and a short plain-English text.
@@ -793,11 +914,14 @@ export function runGuardrails(text: unknown, { vehicle = {}, dealer = {}, salesp
   if (words > WORD_LIMITS.max) problems.push({ code: 'too-long', text: `${words} words; the limit is ${WORD_LIMITS.max}` });
 
   const src = sourceNumbers({ vehicle, dealer, priceNote, price });
-  for (const n of numbersIn(prose)) {
-    if (!src.has(n)) problems.push({ code: 'unknown-number', text: `"${n}" isn't in the website's data for this car` });
-  }
-  // the car's own words: without the dealership's name, its city, the store the website lists the car at and the role, which are not claims about it
+  const unknownNumbers = (text: string): GuardrailProblem[] => [...numbersIn(text)].filter((n) => !src.has(n)).map((n) => ({ code: 'unknown-number', text: `"${n}" isn't in the website's data for this car` }));
+  const amountProblems = (text: string): GuardrailProblem[] => [...priceAndMileageProblems(text, { vehicle, priceNote, price }), ...bareAmountProblems(text, { vehicle, dealer, priceNote, price }, src)];
   const role = roleOf(salesperson);
+  // a number problem that comes only from the role, the name or the dealership's name is said as one reason naming that setting
+  const fromSettings = settingNumberProblems(prose, (text) => [...unknownNumbers(text), ...amountProblems(text)], { role, name: salesperson && salesperson.name, dealerName: dealer.name });
+  const notFromSettings = (p: GuardrailProblem) => !fromSettings.gone.has(p.text);
+  problems.push(...fromSettings.problems, ...unknownNumbers(prose).filter(notFromSettings));
+  // the car's own words: without the dealership's name, its city, the store the website lists the car at and the role, which are not claims about it
   // with each run of spaces read as one, so "Driven  by" is read like "Driven by"
   const aboutCar = without(prose, [dealer.name, dealer.city, vehicle.location, role]).replace(/[^\S\n]+/g, ' ');
   const sourceWords = claimSource({ vehicle, priceNote });
@@ -808,8 +932,7 @@ export function runGuardrails(text: unknown, { vehicle = {}, dealer = {}, salesp
     spelled.add(words);
     problems.push({ code: 'unknown-number', text: `"${oneLine(q.words)}" isn't in the website's data for this car` });
   }
-  problems.push(...priceAndMileageProblems(prose, { vehicle, priceNote, price }));
-  problems.push(...bareAmountProblems(prose, { vehicle, dealer, priceNote, price }, src));
+  problems.push(...amountProblems(prose).filter(notFromSettings));
   // The price note is the dealer's wording. When it quotes a dollar amount and
   // the website shows two prices for this car, the amount must be their
   // difference; a note written for one fee must not ride on a car with another.
