@@ -511,8 +511,9 @@ test('no copy says new, demo or loaner cars can never get through, and the gate 
 // certified used whatever its inventory type said (inventoryJson.js normalizeInventoryRecord), so a certified
 // loaner passed. The copy says the cars the website marks as pre-owned, and says a demo or loaner label Lot Current
 // misses can get through wherever it says a wrong label can. README and How it works named that reader gap while
-// the reader had it; PR #9 closed it (a certified loaner or demo now goes to Needs a look), so the gap sentence
-// must be gone from every text a person reads, and the reader must keep it closed.
+// the reader had it; PR #9 closed it (a certified loaner or demo is never Ready and never read as certified used:
+// Needs a look, or skipped as sold as new when the website also calls it new), so the gap sentence must be gone
+// from every text a person reads, and the reader must keep it closed.
 test('no copy says only pre-owned cars get through as a plain fact, and no copy names the closed reader gap for certified loaners', () => {
   const UNQUALIFIED = /\b(?:only (?:lets |let |shows |lists |posts )?(?:through )?pre-owned (?:cars|vehicles)|lets only pre-owned|(?:cars|vehicles)(?: at your store)? that are pre-owned|(?:every|each) car is (?:really |truly )?pre-owned|(?:demo|loaner) flag means no)\b/i;
   for (const said of ['It only lets pre-owned cars at your store through.', 'It reads the inventory, lets only pre-owned cars through.', 'Only pre-owned cars at your store are ready to post.', 'It shows the cars at your store that are pre-owned.', 'It checks every car is really pre-owned.', 'A demo or loaner flag means no.']) {
@@ -551,9 +552,20 @@ test('no copy says only pre-owned cars get through as a plain fact, and no copy 
   for (const condition of ['Loaner', 'Demo', 'Service Loaner', 'Demonstrator', 'Courtesy Vehicle', 'SERVICE_LOANER', 'ServiceLoaner', 'CourtesyVehicle', 'DEMO_UNIT']) {
     assert.equal(verdict(condition), 'review', `a certified ${condition} card goes to Needs a look on DealerOn and Dealer.com`);
   }
-  const GAP = /(?:known gap|DealerOn and Dealer\.com)[^.]*\bcertified\b[^.]*\b(?:demo|loaner)\b|\bcertified\b[^.]*\bread as certified used\b/i;
-  assert.match('One known gap: on DealerOn and Dealer.com websites, a car the website marks certified is read as certified used even when its inventory type says demo or loaner.', GAP);
-  assert.doesNotMatch('A demo or loaner flag means "sold as new".', GAP);
+  // the gap's claim, not any sentence naming the platforms, certified and loaner: a sentence saying how the check
+  // works now ("a certified loaner goes to Needs a look") stays free to say so
+  const GAP = /\bknown gap\b[^.]*\b(?:certified|demo|loaner)\b|\bread as certified used\b[^.]*\b(?:demo|loaner)\b|\b(?:demo|loaner)\b[^.]*\bread as certified used\b|\bcertified\b[^.]*\b(?:demo|loaner)s?\b[^.]*\bcan (?:pass|get through|reach ready)\b/i;
+  for (const said of [
+    'One known gap: on DealerOn and Dealer.com websites, a car the website marks certified is read as certified used even when its inventory type says demo or loaner, so it can pass when its title and page address do not say demo or loaner.',
+    'On DealerOn and Dealer.com, a certified loaner is read as certified used.',
+    'A demo the website marks certified is read as certified used.',
+    'A certified loaner can pass when its title does not say loaner.',
+  ]) assert.match(said, GAP, said);
+  for (const said of [
+    'A demo or loaner flag means "sold as new".',
+    'On DealerOn and Dealer.com websites, a certified loaner or demo goes to Needs a look.',
+    'DealerOn and Dealer.com: a car marked certified whose type says loaner waits on Needs a look.',
+  ]) assert.doesNotMatch(said, GAP, said);
   const how = stripTags((howPage.match(/<section aria-labelledby="preowned-h">[\s\S]*?<\/section>/) || [''])[0]);
   const readme = (read('../README.md').match(/## How the pre-owned check works\n[\s\S]*?(?=\n## )/) || [''])[0];
   for (const [name, said] of [["How it works' pre-owned check", how], ["README.md's pre-owned check", readme]]) {
