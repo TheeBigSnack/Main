@@ -992,6 +992,95 @@ export function spelledQuantities(text) {
 // The words, said the same way, somewhere in the text (a hyphen or a space between words).
 const saysWords = (text, words) => new RegExp(`\\b${escapeRe(oneLine(words)).replace(/[\s-]+/g, '[\\s-]+')}\\b`, 'i').test(String(text || ''));
 
+// ---------- numbers typed into Settings ----------
+// The sign-off says the salesperson's role and name, and every description
+// names the dealership, so a number typed into one of them is in every
+// description, and the checks hold every number, price and mileage in it to
+// the website's data for the car. A digit in the role or the name ("2nd
+// shift sales") is in nearly no car's data, and a dealership name that reads
+// as a price or a mileage ("8 Mile Auto") is nearly never the listing's:
+// either keeps the Marketplace form shut. The description still fails; the
+// reason names the setting, what it says and a way to write it
+// (settingNumberProblems in runGuardrails), and set-up and Settings warn as
+// soon as the field holds such a number (settingNumberWarning). The digits of
+// a dealership's name alone ("Route 19 Motors") pass: the name is among the
+// facts the number check reads (sourceNumbers).
+const SMALL_NUMBERS = Object.freeze(['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty']);
+const ORDINAL_WORDS = Object.freeze(['', 'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth', 'eleventh', 'twelfth', 'thirteenth', 'fourteenth', 'fifteenth', 'sixteenth', 'seventeenth', 'eighteenth', 'nineteenth', 'twentieth']);
+// The value with each number up to twenty, or "1st" to "20th", written as a
+// word: "2nd shift sales" is "Second shift sales", "Team 3 Sales" is "Team
+// Three Sales" (a capital at the start, or where the word after it has one).
+// '' when a number is left that no word stands in for ("24/7", "Route19").
+export function numbersAsWords(value) {
+  const v = oneLine(value);
+  const out = v.replace(/\b(\d{1,2})(st|nd|rd|th)?\b/gi, (said, n, nth, at) => {
+    const word = (nth ? ORDINAL_WORDS : SMALL_NUMBERS)[Number(n)];
+    if (!word) return said;
+    const next = /^\s+(\S)/.exec(v.slice(at + said.length));
+    return at === 0 || (next && next[1] !== next[1].toLowerCase()) ? capitalize(word) : word;
+  });
+  return /\d/.test(out) ? '' : out;
+}
+// The value without its words that hold a number ("Sam 2" is "Sam").
+const withoutNumberWords = (value) => oneLine(value).split(' ').filter((w) => !/\d/.test(w)).join(' ');
+const SETTING_WORDS = Object.freeze({
+  role: Object.freeze({ your: 'Your role', field: 'Your role', example: numbersAsWords, otherwise: 'write the number as a word or leave it out' }),
+  name: Object.freeze({ your: 'Your name', field: 'Your name', example: withoutNumberWords, otherwise: 'leave the number out' }),
+  dealer: Object.freeze({ your: "Your dealership's name", field: 'Dealership name', example: numbersAsWords, otherwise: 'write the number as a word' }),
+});
+// The reason a description fails because of a number in one of these settings.
+function settingNumberText(setting, value) {
+  const w = SETTING_WORDS[setting];
+  const example = w.example(value);
+  const how = example && example !== value ? `, for example to "${example}"` : `: ${w.otherwise}`;
+  const why = setting === 'dealer'
+    ? 'reads as a price or a mileage, and every price and mileage in a description must match the listing'
+    : "has a number in it, and every number in a description must match the website's data for the car";
+  return `${w.your} "${value}" ${why}; change it in Settings (${w.field})${how}`;
+}
+// The settings a description says (the role, the salesperson's name, the
+// dealership's name) that hold a number, given the number checks (check):
+// the problems the text no longer gives with them all set aside (gone), and
+// one problem for each setting that, with the others set aside, still gives
+// one of those. Nothing is set aside when no setting is to blame, so a
+// problem never goes without a reason in its place.
+function settingNumberProblems(prose, check, { role, name, dealerName }) {
+  const none = { problems: [], gone: new Set() };
+  const settings = [['role', oneLine(role)], ['name', oneLine(name)], ['dealer', oneLine(dealerName)]].filter(([, value]) => /\d/.test(value));
+  if (!settings.length) return none;
+  const said = (text) => new Set(check(text).map((p) => p.text));
+  const aside = (list) => said(without(prose, list.map(([, value]) => value)));
+  const rest = aside(settings);
+  const gone = new Set([...said(prose)].filter((t) => !rest.has(t)));
+  if (!gone.size) return none;
+  const blamed = settings.filter((s) => {
+    const alone = aside(settings.filter((o) => o !== s));
+    return [...gone].some((t) => alone.has(t));
+  });
+  if (!blamed.length) return none;
+  return { problems: blamed.map(([setting, value]) => ({ code: 'setting-number', text: settingNumberText(setting, value) })), gone };
+}
+
+// The warning set-up and Settings show under the role, the name or the
+// dealership's name while it holds a number that keeps the form shut ('' for
+// none): any digit in the role or the name; a dealership name only when it
+// reads as a price or a mileage. Plain text.
+export function settingNumberWarning(setting, value) {
+  const v = oneLine(value);
+  const w = SETTING_WORDS[setting];
+  if (!w || !/\d/.test(v)) return '';
+  const example = w.example(v);
+  const like = example && example !== v ? `, for example "${example}"` : '';
+  if (setting === 'dealer') {
+    const said = [...mileageClaims(v), ...dollarAmounts(v)];
+    if (!said.length) return '';
+    return `The dealership's name reads as a price or a mileage ("${said[0].text}"), which keeps the Marketplace form shut for nearly every car: every price and mileage in a description must match the listing. Write the number as a word${like}.`;
+  }
+  const numbers = (v.match(/\S*\d\S*/g) || []).map((s) => s.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ''));
+  const advice = setting === 'role' ? 'Write the number as a word or leave it out' : 'Leave it out';
+  return `A number in your ${setting} (${numbers.map((n) => `"${n}"`).join(', ')}) keeps the Marketplace form shut for nearly every car: every number in a description must match the website's data for the car. ${advice}${like}.`;
+}
+
 // The problems a person may still post with: the length and the tone. Every
 // other problem (a number, price, mileage or claim the website doesn't make,
 // a banned phrase, one owner without the Carfax flag, a missing dealership,
@@ -1017,11 +1106,14 @@ export function runGuardrails(text, { vehicle = {}, dealer = {}, salesperson = {
   if (words > WORD_LIMITS.max) problems.push({ code: 'too-long', text: `${words} words; the limit is ${WORD_LIMITS.max}` });
 
   const src = sourceNumbers({ vehicle, dealer, priceNote, price });
-  for (const n of numbersIn(prose)) {
-    if (!src.has(n)) problems.push({ code: 'unknown-number', text: `"${n}" isn't in the website's data for this car` });
-  }
-  // the car's own words: without the dealership's name, its city, the store the website lists the car at and the role, which are not claims about it
+  const unknownNumbers = (text) => [...numbersIn(text)].filter((n) => !src.has(n)).map((n) => ({ code: 'unknown-number', text: `"${n}" isn't in the website's data for this car` }));
+  const amountProblems = (text) => [...priceAndMileageProblems(text, { vehicle, priceNote, price }), ...bareAmountProblems(text, { vehicle, dealer, priceNote, price }, src)];
   const role = roleOf(salesperson);
+  // a number problem that comes only from the role, the name or the dealership's name is said as one reason naming that setting
+  const fromSettings = settingNumberProblems(prose, (text) => [...unknownNumbers(text), ...amountProblems(text)], { role, name: salesperson && salesperson.name, dealerName: dealer.name });
+  const notFromSettings = (p) => !fromSettings.gone.has(p.text);
+  problems.push(...fromSettings.problems, ...unknownNumbers(prose).filter(notFromSettings));
+  // the car's own words: without the dealership's name, its city, the store the website lists the car at and the role, which are not claims about it
   // with each run of spaces read as one, so "Driven  by" is read like "Driven by"
   const aboutCar = without(prose, [dealer.name, dealer.city, vehicle.location, role]).replace(/[^\S\n]+/g, ' ');
   // the website's own words for the car, without the text its whole lot shares (boilerplate: the scan's lot-wide lines)
@@ -1033,8 +1125,7 @@ export function runGuardrails(text, { vehicle = {}, dealer = {}, salesperson = {
     spelled.add(words);
     problems.push({ code: 'unknown-number', text: `"${oneLine(q.words)}" isn't in the website's data for this car` });
   }
-  problems.push(...priceAndMileageProblems(prose, { vehicle, priceNote, price }));
-  problems.push(...bareAmountProblems(prose, { vehicle, dealer, priceNote, price }, src));
+  problems.push(...amountProblems(prose).filter(notFromSettings));
   // The price note is the dealer's wording. When it quotes a dollar amount and
   // the website shows two prices for this car, the amount must be their
   // difference; a note written for one fee must not ride on a car with another.
@@ -1102,14 +1193,15 @@ export function runGuardrails(text, { vehicle = {}, dealer = {}, salesperson = {
 // The problems that break a posting rule rather than a style preference:
 // the dealership or the salesperson's role not named (the dealership stays
 // identifiable); a number, price, mileage, price change, claim or one-owner
-// wording the website's data doesn't hold, or a missing VIN (facts only); a
-// banned phrase (a claim the data can't support, posing as a private
+// wording the website's data doesn't hold, the same from a number in the
+// role, the name or the dealership's name (setting-number), or a missing VIN
+// (facts only); a banned phrase (a claim the data can't support, posing as a private
 // seller, words about protected groups); the dealer's price note missing or
 // quoting the wrong fee (honest prices); and the same in the salesperson's
 // closing line. Every code runGuardrails and checkClosingLine give is one of
 // these or one of STYLE_PROBLEMS (test/rewriteTemplate.test.js checks it).
 export const RULE_PROBLEM_CODES = Object.freeze([
-  'no-dealer', 'no-role', 'unknown-number', 'price-mismatch', 'mileage-mismatch', 'price-change', 'unsupported-claim', 'one-owner', 'banned-phrase',
+  'no-dealer', 'no-role', 'unknown-number', 'setting-number', 'price-mismatch', 'mileage-mismatch', 'price-change', 'unsupported-claim', 'one-owner', 'banned-phrase',
   'price-note-amount', 'no-price-note', 'no-vin', 'closing-price', 'closing-number', 'closing-one-owner', 'closing-banned',
 ]);
 
