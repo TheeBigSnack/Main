@@ -2096,9 +2096,9 @@ function viewPublish() {
 }
 
 // A save of this panel's copy refused (notSavedHere): what happened and what
-// to do, the text typed here in read-only boxes to copy (nothing keeps it
-// once this panel closes or goes back to the list), and what else done here
-// was not saved. The panel holds no post meanwhile.
+// to do, the text from this panel in read-only boxes to copy (nothing keeps
+// it once this panel closes or shows anything else), and what else done here
+// was not saved. The panel holds no post meanwhile (clearFlow).
 function viewNotSaved() {
   const r = state.notSaved || { text: '', kept: [], keptText: '', notSavedText: '' };
   const boxes = r.kept.map((k) => `<section class="kept">
