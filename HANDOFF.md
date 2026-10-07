@@ -723,7 +723,7 @@ Text checks can still be beaten by deliberate obfuscation. Other new checks:
 - one honesty word list for every customer-facing text (`test/honesty.js`, `test/copyGuards.js`);
 - the manifest frozen as approved (`test/manifest.test.js`);
 - one gate for permission prompts (`test/askChrome.test.js`);
-- in `test/e2e/`, decoy action buttons on the mock form and a listing-action log that five flows check (panel, post, queue, standard, upkeep; not platforms);
+- in `test/e2e/`, decoy action buttons on the mock form and a listing-action log that six flows check (panel, platforms, post, queue, standard, upkeep; platforms since PR #9's merge onto this round, R-22);
 - every e2e flow blocking the real Facebook and failing if anything asks for it.
 
 The lead's last fixes widened the affiliation tripwire in `test/honesty.js`: Meta, Facebook or Marketplace backing, sponsoring or funding Lot Current or our product in any tense, after up to four helper words (modals included), in the passive, as a slogan behind a heading, bullet or number mark or as a whole bracket, and as a noun ("Meta's backing"); plain denials pass. It is still a word list, not a proof.
@@ -780,7 +780,6 @@ The privacy texts say a salesperson sees only their own post timings. That is tr
 - On standard-data websites, a changed disclaimer is learned only once 30% of the lot is re-read, and a line wrongly learned never expires.
 - If the included salespeople in `marketing/pricing.json` change, existing subscribers get the new number.
 - An install that already saved a guessed city keeps it.
-- The platforms e2e flow does not check the mock form's listing-action log yet (R-22).
 - The wizard and platforms flows each failed once in the round and passed on rerun; watch them.
 - Workflow actions and the Supabase CLI setup are pinned by tag, not commit SHA. Wrangler comes through npx, not the lockfile. A token narrower than an account-wide personal access token is unchecked.
 - Only `site/screenshots/02-side-panel.png` and `03-form-filled.png` were redrawn. The other pictures and the store images were not rerun (20.3 item 3).
