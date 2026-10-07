@@ -1,6 +1,6 @@
 # Lot Current (formerly Lot Sync): complete handoff (written 2026-09-27; rewritten 2026-10-01 at the end of the cloud session that ran 2026-09-28 to 2026-10-01; section 15 is that session; section 16 is the rename and website session of 2026-10-01; section 22 is the full review round of 2026-10-01 to 2026-10-06)
 
-**For the next Claude instance.** This file is meant to make you fully current without any other conversation history. Read it in this order: section 0 (where things stand), section 22 (the full review round of 2026-10-01 to 2026-10-06: what changed, the owner's steps before a release and what is still open), section 20 (the merge of pull requests #1, #2, #4, #3, #6 and #7 on 2026-10-01: what is on the default branch now and what is still open), section 16 (the rename and the website, and what is waiting on the owner), section 15 (the latest session: decisions, infrastructure, what is half-done and how this environment works), section 1 (the owner), section 2 (the product rules), then skim the rest as reference. Then read `CLAUDE.md` (the rules, authoritative), `CHANGELOG.md` "Unreleased", `README.md` and `docs/website.md`. Sections 12 to 14 are the earlier cloud sessions, kept because their decisions still hold.
+**For the next Claude instance.** This file is meant to make you fully current without any other conversation history. Read it in this order: section 0 (where things stand), section 23 (the pilot build round of 2026-10-07, pull request #12, stacked on #10: what it added and what is still open), section 22 (the full review round of 2026-10-01 to 2026-10-06: what changed, the owner's steps before a release and what is still open), section 20 (the merge of pull requests #1, #2, #4, #3, #6 and #7 on 2026-10-01: what is on the default branch now and what is still open), section 16 (the rename and the website, and what is waiting on the owner), section 15 (the latest session: decisions, infrastructure, what is half-done and how this environment works), section 1 (the owner), section 2 (the product rules), then skim the rest as reference. Then read `CLAUDE.md` (the rules, authoritative), `CHANGELOG.md` "Unreleased", `README.md` and `docs/website.md`. Sections 12 to 14 are the earlier cloud sessions, kept because their decisions still hold.
 
 The owner's first message will be something like "read HANDOFF.md and continue" or a specific task. If it is a task, still read sections 0 and 15 first: several things changed on 2026-10-01 (the business name, the domain, the hosting) that every piece of copy and config now has to follow.
 
@@ -752,7 +752,7 @@ The privacy texts say a salesperson sees only their own post timings. That is tr
 - Sign out and Clear everything for this website do not cancel a sync retry already scheduled.
 - Clear the numbers drops finished post attempts not yet synced.
 - With no store ticked, a scan that read only part of the lot, or a time when only one store has used cars, counts as a one-store website (R-34, partial).
-- My listings reads the basis of a listing that has none off the last scan without checking when that scan was taken (`viewMine` in `extension/popup.js`), so for a listing from an older version it can name the wrong price, and Updated there can record it, until the next scan.
+- Done in section 23: My listings and To do compare a listing only with a scan taken since it got its price. What is left is in 23.2.
 - A basis read off a scan now reaches every computer that syncs the listing, so a wrong reading would too. That happens when the website price moves by exactly the gap between its two prices between the post and the next scan.
 - On standard-data websites, a car carried over unread from the last scan gets the new scan's time (`res.unread` in `src/scanRunner.js`), so a reading from before the listing's price could pass `scanCar`.
 - After Use the new list, the manager page shows that read as held back until the next scan syncs.
@@ -760,9 +760,9 @@ The privacy texts say a salesperson sees only their own post timings. That is tr
 - A scan whose VIN links gave no car, or nearly none, says it is not complete, but the car links it left out are still not read (R-10, partial).
 - The site probe does not take a used-list link whose address names a town that shares a make's name ("/used-cars-lincoln/"), or that adds a view, page-size or tracking query.
 - Bare amounts under 1,000 are not checked. In a draft, a comma list after "new" checks only its first part. The price note itself may still carry a steer that uses no "I", "me" or "my".
-- A role with a digit ("2nd shift sales") makes the template fail its own number check, so that salesperson's forms stay shut until the role changes.
+- Done in section 23: a role with a digit ("2nd shift sales") still makes the template fail its own number check, by design, but the reason now names the role and set-up and Settings warn as it is typed. What is left is in 23.2.
 - The VIN check's Chevrolet City Express prefix (3N63M in `src/vin.js`) was written from memory and not checked against a decoder. A wrong prefix only fails to accept a real City Express, and never flags a correct record.
-- A save refused in a second window, because another window's post is newer, is not reported, and anything done there (typing, picks, a rewrite, a colour guess or VIN check) is lost. The help and the data inventory now say so; the side panel still does not.
+- Done in section 23: a save refused in a second window is said there, with its text kept to copy. What is left is in 23.2.
 - On Dealer Inspire, DealerOn and Dealer.com websites, a failed check of one missing car still holds back every missing car that scan.
 - On standard-data websites, a changed disclaimer is learned only once 30% of the lot is re-read, and a line wrongly learned never expires.
 - If the included salespeople in `marketing/pricing.json` change, existing subscribers get the new number.
@@ -855,6 +855,28 @@ Setup and records:
 - which company runs the inbox.
 
 ---
+
+## 23. The pilot build round (2026-10-07, pull request #12)
+
+A cloud session in the Lot Current project (the "Build the plan's Claude steps" thread) ran this round from the plan written after the review (`plans/next-five-steps.md` in the project folder) and the owner decisions file (`reviews/2026-10-06-owner-decisions.md`). PR #10 was not merged, so the work is on `claude/plan-build-g3z6aj`, branched from #10's head (`claude/project-thread-ijg7ld` at `a06d852`), and opened as draft PR #12 with #10's branch as its base. Merge #10 first, then #12 (GitHub retargets it to the default branch when #10's branch is deleted, or change its base by hand). Each item was built in its own worktree, reviewed adversarially and repaired until clean, then merged into the branch with a merge commit; the lead's small fixes after the merges are their own commits.
+
+### 23.1 What the round added (CHANGELOG "Unreleased", "Pilot build round" entries)
+
+- **The pilot zip**: `npm run pack -- --pilot` writes `dist/lot-current-extension-<version>-pilot.zip`, the normal zip with `src/accountConfig.js` emptied in the zip only (no sign-in, nothing syncs). store-check checks it (one copy of that file, exactly the text the pack makes, compared, never run); the release packs both zips; CI's wizard job runs set-up on the pilot zip. Give testers this zip until `docs/production-setup.md` steps 3 to 5 are done (owner decision 1e).
+- **A number in the role, name or dealership name**: the description still fails (every number must match the website), but the reason names the setting and offers a plain way to write it, and set-up and Settings warn as it is typed. When only such a number stops the form, the panel says to save Settings (and to click Reset to template for an edited or rewritten description).
+- **A second window's refused save**: said on a not-saved screen that names the car under way elsewhere, keeps the description changed there and any listing link typed there to copy, and names what else was lost.
+- **My listings and To do**: a listing is compared only with a scan taken since it got its price; Updated records the basis it used.
+- **The old-name check** from PR #11, ported and made stricter; close #11 once #12 is merged.
+- Small corrections: the hints on where the sign-off and the VIN line sit, the demo script's queue step, comments that overclaimed.
+- Outside the repository (the project folder): `launch/checks/live-check-walkthrough.md` and `results-sheet.md` match this build (plan step 3); the pilot pitch files in `launch/pilot/` and the new `set-up-day.md`; the attorney cover email and the attorney-choice note say 16 October.
+
+### 23.2 Still open from this round
+
+- A scan that read a car before the side panel did but finished after the post was recorded (or the draft saved, or the price updated) counts as taken since, so until the next scan My listings and To do can show the older price it read as a price change. A To do item waiting for the next scan still counts on the toolbar icon.
+- A second window's copy stopped by the re-check whose save was refused still holds that post, so **Back to the list** there can drop the other window's post once that window's side panel has closed.
+- The set-up and Settings warning about a number in the role counts the dealership's name, city and ZIP as facts but not a ticked store's name; a dealership city or store name that reads as a mileage still fails with the plain mileage reason.
+- The old-name check still passes the name glued after the stem of a word it lists (s, p, b, c, "al", "pi", "mate" and the like), a regular expression's `\b` or `\s` included.
+- Version 0.6.0 waits for the live-check walkthrough's results.
 
 ## 11. Quick reference
 ```
