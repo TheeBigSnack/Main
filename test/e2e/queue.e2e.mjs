@@ -275,9 +275,11 @@ try {
 
   // ---- 6. At the daily cap nothing more can be selected or posted; the form saved as a draft counts ----
   // The cap counts the local day's posts, and a run can cross midnight after the post in step 3. So
-  // the post, its entry in the day's log and the draft are stamped with one moment, and the popups
-  // from here on read the clock at that moment: all of them fall on one day, whenever the run is.
+  // the post, its entry in the day's log and the draft are stamped with one moment, noon today, and the
+  // popups from here on read the clock at that moment or a moment after it: all of them fall on one day,
+  // whenever the run is.
   const capDay = new Date();
+  capDay.setHours(12, 0, 0, 0);
   await popup.evaluate(async ({ o, at }) => {
     const k = `settings:${o}`;
     const s = (await chrome.storage.local.get(k))[k];
@@ -316,7 +318,7 @@ try {
   await popup.screenshot({ path: join(shots, 'queue-6-draft-price-changed.png') });
   await popup.close();
   // published since that scan and marked posted a moment later: the listing got its price when the draft was filled,
-  // before the scan (src/drafts.js markDraftPosted, src/rescan.js scanCar), so the scan's price is the one to take now
+  // no later than the scan (src/drafts.js markDraftPosted, src/rescan.js scanCar), so the scan's price is the one to take now
   popup = await openPopup({ at: new Date(capDay.getTime() + 1) });
   await tab(popup, 'ready').click();
   await popup.click(`button[data-action="post"][data-vin="${WAGONEER}"]`);
