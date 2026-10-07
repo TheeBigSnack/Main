@@ -59,7 +59,7 @@ export const BANNED_PHRASES = Object.freeze([
   'private seller', 'private sale', 'private party', 'by owner', 'fsbo', 'not a dealer', 'not a dealership',
   'selling it myself', 'i am the owner', "i'm the owner", 'i\u2019m the owner', 'selling my', 'my personal', 'my truck', 'my car', 'my suv', 'my daily driver',
   //   steering the buyer away from the dealership, or selling for someone else
-  'not the dealership', 'not the dealer', 'not through the dealership', 'not through the dealer', 'not at the dealership', 'skip the dealership', 'skip the dealer',
+  'not the dealership', 'not the dealer', 'not the dealerships', 'not the dealers', 'not through the dealership', 'not through the dealer', 'not at the dealership', 'skip the dealership', 'skip the dealer',
   'instead of the dealership', 'instead of the dealer', "don't call the dealership", "don't call the dealer", 'don\u2019t call the dealership', 'don\u2019t call the dealer',
   'bypass the dealership', 'bypass the dealer', 'avoid the dealership', 'avoid the dealer',
   'for the owner', 'for the owners', 'on behalf of the owner', 'for a friend', 'for my friend', 'for my brother', 'for my sister', 'for my neighbor', 'for my neighbour', 'reason for selling',
@@ -91,6 +91,8 @@ const THE_BUSINESS = "[\\s-]+of[\\s-]+(?:this|the|our)[\\s-]+(?:dealership|deale
 export const BANNED_UNLESS = Object.freeze({
   'not the dealership': Object.freeze({ after: DEALERS_DESK }),
   'not the dealer': Object.freeze({ after: DEALERS_DESK }),
+  'not the dealerships': Object.freeze({ after: DEALERS_DESK }),
+  'not the dealers': Object.freeze({ after: DEALERS_DESK }),
   'i am the owner': Object.freeze({ after: THE_BUSINESS }),
   "i'm the owner": Object.freeze({ after: THE_BUSINESS }),
   'i\u2019m the owner': Object.freeze({ after: THE_BUSINESS }),
@@ -116,7 +118,49 @@ const FEES_GO_TO = `(?:^|[.!?\\n])\\s*${FEES_OPENING}\\b(?:tax(?:es)?|title|regi
 export const PRICE_NOTE_UNLESS = Object.freeze({
   'not the dealership': Object.freeze({ before: FEES_GO_TO }),
   'not the dealer': Object.freeze({ before: FEES_GO_TO }),
+  'not the dealerships': Object.freeze({ before: FEES_GO_TO }),
+  'not the dealers': Object.freeze({ before: FEES_GO_TO }),
 });
+
+// A price note that says one of those phrases ("not the dealer", "not the
+// dealership", "not the dealers", "not the dealerships") passes only when,
+// besides that rule, every word of the whole note is price and fee wording:
+// a word on this closed list, or a word of the dealership's own name, city
+// or state as set. A word is a run of letters, read after NFKC (so
+// full-width letters and digits read as plain ones) and in lower case, with
+// an apostrophe or a hyphen splitting it into its parts ("dealer's" is
+// "dealer" and "s"). Its only digits are dollar amounts ("$499", "$1,299.00")
+// and percentages ("6%", "6.25 %"), and its only other marks are the
+// punctuation between words (NOTE_MARKS). Anything else (a name, a way to
+// get in touch, a payment route, "in person", a phone number, a year, an
+// emoji, a word with a look-alike letter from another alphabet) refuses the
+// note, and the reason quotes it (noteSteerWords). A note without those
+// phrases is read as before. The list holds no pronoun but "our" and "your",
+// no word for a person or a role, no way to get in touch or to pay, no place
+// but a government fee place (FEE_PLACE's words) and no word for haggling;
+// test/priceNoteWords.test.js holds it to that, and the hosted checker
+// (supabase/functions/_shared/guardrails.ts) lists the same words.
+export const PRICE_NOTE_WORDS = Object.freeze([
+  // articles, determiners, conjunctions and prepositions
+  'a', 'an', 'the', 'all', 'any', 'no', 'only', 'our', 'your', 'these', 'those', 'that', 'which',
+  'and', 'or', 'nor', 'but', 'as', 'if', 'where',
+  'of', 'to', 'for', 'from', 'in', 'on', 'at', 'by', 'with', 'without', 'per', 'before', 'after', 'through', 'upon',
+  // verbs that say what the price includes and where the fees go
+  'is', 'are', 'be', 'does', 'do', 'not', 'may', 'vary', 'apply', 'applies', 'requires',
+  'include', 'includes', 'included', 'including', 'exclude', 'excludes', 'excluded', 'excluding',
+  'go', 'goes', 'paid', 'payable', 'collected', 'due', 'sent', 'remitted', 'directly',
+  // the price
+  'price', 'prices', 'priced', 'pricing', 'advertised', 'listed', 'internet', 'sale', 'selling', 'cash', 'plus',
+  'applicable', 'additional', 'extra',
+  'rebate', 'rebates', 'incentive', 'incentives', 'discount', 'discounts', 'manufacturer',
+  'financing', 'finance', 'credit', 'approval', 'subject', 'qualified', 'buyers',
+  // the fees and who they go to
+  'tax', 'taxes', 'sales', 'title', 'titling', 'tag', 'tags', 'plate', 'plates', 'registration', 'registered', 'license', 'licensing',
+  'fee', 'fees', 'doc', 'documentation', 'documentary', 'processing', 'electronic', 'filing',
+  'dealer', 'dealers', 'dealership', 'dealerships',
+  'state', 'county', 'city', 'local', 'government',
+  'dmv', 'bmv', 'mvd', 'rmv', 'office', 'collector', 'assessor', 'secretary', 'department', 'motor', 'vehicle', 'vehicles', 'division', 'agency', 'revenue',
+]);
 
 // Which features matter most to a Marketplace shopper. Earlier = better.
 export const FEATURE_PRIORITY = Object.freeze([
@@ -617,6 +661,76 @@ const phraseRe = (p, { before, after } = {}) => new RegExp((before ? `(?<!${befo
 const BANNED_RE = BANNED_PHRASES.map((p) => [p, phraseRe(p, BANNED_UNLESS[p])]);
 // the same phrases as the dealership's price note may say them (PRICE_NOTE_UNLESS)
 const NOTE_BANNED_RE = new Map(BANNED_PHRASES.map((p) => [p, phraseRe(p, { ...BANNED_UNLESS[p], ...PRICE_NOTE_UNLESS[p] })]));
+// The phrases a price note may end its fee sentence with, as said anywhere in
+// the note (the dealership's own desk or line too: "Ask for Sam, not the
+// dealer's front desk." in a note is held to the word list).
+const NOTE_STEER_SAID = new Map(Object.keys(PRICE_NOTE_UNLESS).map((p) => [p, phraseRe(p)]));
+const NOTE_WORD_SET = new Set(PRICE_NOTE_WORDS);
+// a dollar amount or a percentage standing on its own (not "$5551234567", "US$499" or "6.25.7")
+const NOTE_AMOUNT = /(?<![\p{L}\p{N}])(?:\$\s?(?:\d{1,3}(?:,\d{3})+|\d{1,6})(?:\.\d{1,2})?|\d{1,3}(?:\.\d{1,3})?\s?%)(?![\p{L}\p{N}]|[.,]\p{N})/gu;
+// the marks a note may have between its words: spaces, punctuation, brackets, quotes, dashes, "/", "&", "*", "+", and accents and invisible marks
+const NOTE_MARKS = /^[\s.,;:!?'"\u2018\u2019\u201c\u201d()[\]\-\u2010-\u2015/&*+\p{M}\p{Cf}]$/u;
+const NOTE_EDGE_MARKS = /^[.,;:!?'"\u2018\u2019\u201c\u201d()[\]\-\u2010-\u2015/&*+]+|[.,;:!?'"\u2018\u2019\u201c\u201d()[\]\-\u2010-\u2015/&*+]+$/gu;
+const NOTE_NUMBER = /\S*\p{N}\S*/gu;
+const NOTE_WORD = /\p{L}+(?:['\u2019\u2010-]\p{L}+)*/gu;
+const lettersOf = (s) => String(s ?? '').normalize('NFKC').toLowerCase().match(/\p{L}+/gu) || [];
+const blank = (s) => ' '.repeat(s.length);
+// What a price note says that is not price and fee wording, in the order it
+// says it, each once: a number that is not an amount or a percentage, a word
+// (with its apostrophe or hyphen parts) one of whose parts is neither on
+// PRICE_NOTE_WORDS nor in the dealership's name, city or state, and any other
+// mark. [] when there is none.
+function noteSteerWords(note, dealer) {
+  const d = dealer || {};
+  const own = new Set([d.name, d.city, d.state].flatMap(lettersOf));
+  const found = [];
+  let rest = String(note ?? '').normalize('NFKC').replace(NOTE_AMOUNT, blank);
+  rest = rest.replace(NOTE_NUMBER, (said, at) => {
+    found.push({ at, text: said.replace(NOTE_EDGE_MARKS, '') });
+    return blank(said);
+  });
+  rest = rest.replace(NOTE_WORD, (said, at) => {
+    if (!lettersOf(said).every((w) => NOTE_WORD_SET.has(w) || own.has(w))) found.push({ at, text: said });
+    return blank(said);
+  });
+  for (const m of rest.matchAll(/\S/gu)) if (!NOTE_MARKS.test(m[0])) found.push({ at: m.index, text: m[0] });
+  const seen = new Set();
+  return found.sort((a, b) => a.at - b.at).map((f) => f.text).filter((t) => !seen.has(t.toLowerCase()) && seen.add(t.toLowerCase()));
+}
+const quoteList = (list) => {
+  const q = list.map((w) => `"${w}"`);
+  return q.length > 1 ? `${q.slice(0, -1).join(', ')} and ${q[q.length - 1]}` : q[0];
+};
+// The reason a note that says one of those phrases is refused for its words
+// ('' when it is not): the words to take out, or the phrase.
+function noteSteer(phrase, noteSaid, dealer) {
+  const said = NOTE_STEER_SAID.get(phrase);
+  if (!said || !said.test(noteSaid)) return '';
+  const words = noteSteerWords(noteSaid, dealer);
+  return words.length ? `Your price note says "${phrase}", so it may only say where the fees go and what the price includes; take out ${quoteList(words)}, or take out "${phrase}". Change the note in Settings.` : '';
+}
+const noteBanned = (phrase) => `Your dealership's price note says "${phrase}"; change the note in Settings`;
+// What the checks say of the price note's "not the dealer", "not the
+// dealership" and their plurals, as runGuardrails says it: the phrase where
+// the fees do not go, or a word that is not price and fee wording. `notice`
+// says the same without the quoted words, so it stays the same while the
+// warning stands.
+function priceNoteReasons(note, dealer) {
+  const said = oneLine(note);
+  if (!said) return [];
+  const out = [];
+  for (const phrase of NOTE_STEER_SAID.keys()) {
+    if (NOTE_BANNED_RE.get(phrase).test(said)) out.push({ text: noteBanned(phrase), notice: noteBanned(phrase) });
+    else if (noteSteer(phrase, said, dealer)) out.push({ text: noteSteer(phrase, said, dealer), notice: `Your price note says "${phrase}", so it may only say where the fees go and what the price includes. Take out the other words, or take out "${phrase}".` });
+  }
+  return out;
+}
+// The warning set-up and Settings show under the price note ('' for none),
+// with the dealership (its name, city and state) as the form holds it now.
+// Plain text. Saving is never held back by it.
+export const priceNoteWarning = (note, dealer) => priceNoteReasons(note, dealer).map((r) => r.text).join(' ');
+// What a screen reader is told when the warning comes ('' for none).
+export const priceNoteNotice = (note, dealer) => priceNoteReasons(note, dealer).map((r) => r.notice).join(' ');
 // "one owner", "1-owner", "single-owner", "one careful owner", "one
 // careful, loving owner", "one very careful adult owner" (up to three words
 // between, a comma after any but the last), "only one previous owner", "its
@@ -1257,7 +1371,8 @@ export function runGuardrails(text, { vehicle = {}, dealer = {}, salesperson = {
   const besideOwnNote = noteSaid ? withoutOwnSentenceNote(t, noteSaid) : t;
   for (const [phrase, re] of BANNED_RE) {
     if (re.test(besideNote)) problems.push({ code: 'banned-phrase', text: `Says "${phrase}"` });
-    else if (noteSaid && NOTE_BANNED_RE.get(phrase).test(noteSaid)) problems.push({ code: 'banned-phrase', text: `Your dealership's price note says "${phrase}"; change the note in Settings` });
+    else if (noteSaid && NOTE_BANNED_RE.get(phrase).test(noteSaid)) problems.push({ code: 'banned-phrase', text: noteBanned(phrase) });
+    else if (noteSaid && noteSteer(phrase, noteSaid, dealer)) problems.push({ code: 'banned-phrase', text: noteSteer(phrase, noteSaid, dealer) });
     else if (!re.test(t)) continue;
     else if (!(noteSaid && re.test(noteSaid))) problems.push({ code: 'banned-phrase', text: `Says "${phrase}"` });
     else if (re.test(besideOwnNote)) problems.push({ code: 'banned-phrase', text: `Says "${phrase}" with words joined to your price note's sentence; keep the note as a sentence of its own: end the sentence before it, and start the one after it with a capital letter` });

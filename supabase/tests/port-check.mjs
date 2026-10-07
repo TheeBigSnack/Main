@@ -13,9 +13,9 @@
 import assert from 'node:assert/strict';
 import { runGuardrails as jsGuardrails } from '../../extension/src/rewriteTemplate.js';
 import { buildRewritePrompt as jsPrompt } from '../../backend/rewritePrompt.js';
-import { runGuardrails as tsGuardrails, BANNED_PHRASES, BANNED_UNLESS, PRICE_NOTE_UNLESS, WORD_LIMITS, CLAIM_KINDS, spelledQuantities as tsSpelled, ownAbbreviations as tsOwn, numbersAsWords as tsWords, nameWithoutNumber as tsNameWithout } from '../functions/_shared/guardrails.ts';
+import { runGuardrails as tsGuardrails, BANNED_PHRASES, BANNED_UNLESS, PRICE_NOTE_UNLESS, PRICE_NOTE_WORDS, WORD_LIMITS, CLAIM_KINDS, spelledQuantities as tsSpelled, ownAbbreviations as tsOwn, numbersAsWords as tsWords, nameWithoutNumber as tsNameWithout } from '../functions/_shared/guardrails.ts';
 import { buildRewritePrompt as tsPrompt, SYSTEM_PROMPT } from '../functions/_shared/rewritePrompt.ts';
-import { BANNED_PHRASES as JS_BANNED, BANNED_UNLESS as JS_UNLESS, PRICE_NOTE_UNLESS as JS_NOTE_UNLESS, WORD_LIMITS as JS_LIMITS, CLAIM_KINDS as JS_CLAIMS, spelledQuantities as jsSpelled, ownAbbreviations as jsOwn, numbersAsWords as jsWords, nameWithoutNumber as jsNameWithout } from '../../extension/src/rewriteTemplate.js';
+import { BANNED_PHRASES as JS_BANNED, BANNED_UNLESS as JS_UNLESS, PRICE_NOTE_UNLESS as JS_NOTE_UNLESS, PRICE_NOTE_WORDS as JS_NOTE_WORDS, WORD_LIMITS as JS_LIMITS, CLAIM_KINDS as JS_CLAIMS, spelledQuantities as jsSpelled, ownAbbreviations as jsOwn, numbersAsWords as jsWords, nameWithoutNumber as jsNameWithout } from '../../extension/src/rewriteTemplate.js';
 import { SYSTEM_PROMPT as JS_SYSTEM } from '../../backend/rewritePrompt.js';
 
 const vehicle = {
@@ -125,6 +125,10 @@ const texts = [
   // a role that is only a number: set aside only where it is said once, and never inside a longer number
   sixty('2019 Ram 1500 Big Horn with 41,230 miles. Seats 2 rows.').replace('sales consultant', '2') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn with 2,000 miles.').replace('sales consultant', '2') + '\nVIN TESTVIN0000000001.',
+  // "not the dealers" and "not the dealerships" in a description, and a price note with words that are not price and fee wording
+  sixty('2019 Ram 1500 Big Horn. Buy from me, not the dealers; text me, not the dealerships.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. Tax, title and fees go to the state, not the dealer. Text Sam at 555-123-4567.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. Example Motors prices plus tax. Tax and fees go to the county, not the dealers. Springfield sales tax applies.') + '\nVIN TESTVIN0000000001.',
 ];
 const contexts = [
   { vehicle, dealer, priceNote: '', price: 28995 },
@@ -163,6 +167,13 @@ const contexts = [
   { vehicle, dealer, salesperson: { name: 'Alex', title: '#1 salesman' }, priceNote: '', price: 28995 },
   { vehicle, dealer, salesperson: { name: 'Alex (Store 2)', title: 'sales consultant' }, priceNote: '', price: 28995 },
   { vehicle, dealer, salesperson: { name: 'Alex 2nd shift', title: 'sales consultant' }, priceNote: '', price: 28995 },
+  // a price note that says "not the dealer": every word price and fee wording, the dealership's own name, city and state, amounts and percentages
+  { vehicle, dealer: { ...dealer, state: 'OH' }, priceNote: 'Tax, title and fees go to the state, not the dealer. Text Sam at 555-123-4567.', price: 28995 },
+  { vehicle, dealer: { ...dealer, state: 'OH' }, priceNote: 'Example Motors prices plus tax. Tax and fees go to the county, not the dealers. Springfield sales tax applies.', price: 28995 },
+  { vehicle, dealer: { name: 'Sample Auto', city: 'Shelbyville' }, priceNote: 'Example Motors prices plus tax. Tax and fees go to the county, not the dealers. Springfield sales tax applies.', price: 28995 },
+  { vehicle, dealer, priceNote: 'Price includes the $490 doc fee and 6.25 % tax. Tax and tags go to the state, not the dealerships. Call \uff15\uff15\uff15-0100 or email sales@carmail.com \u{1F4DE}', price: 28995 },
+  { vehicle, dealer, priceNote: "Ask for Sam, not the dealer's front desk. T\u0435xt us; prices valid through 2026, $5551234567.", price: 28995 },
+  { vehicle, dealer, priceNote: 'Text Sam, not the dealers.', price: 28995 },
   {},
 ];
 
@@ -180,6 +191,7 @@ for (const text of texts) {
 assert.deepEqual([...BANNED_PHRASES], [...JS_BANNED]);
 assert.deepEqual(JSON.parse(JSON.stringify(BANNED_UNLESS)), JSON.parse(JSON.stringify(JS_UNLESS)));
 assert.deepEqual(JSON.parse(JSON.stringify(PRICE_NOTE_UNLESS)), JSON.parse(JSON.stringify(JS_NOTE_UNLESS)));
+assert.deepEqual([...PRICE_NOTE_WORDS], [...JS_NOTE_WORDS]);
 assert.deepEqual(CLAIM_KINDS.map((k) => [k.what, String(k.re), Boolean(k.part), String(k.hedge), String(k.sourceRe)]), JS_CLAIMS.map((k) => [k.what, String(k.re), Boolean(k.part), String(k.hedge), String(k.sourceRe)]));
 assert.deepEqual([...settingsNamed].sort(), ["Your dealership's name", 'Your name', 'Your role']);
 for (const value of ['2nd shift sales', 'sales, 2nd shift', 'Team 3 Sales', '8 Mile Auto', '12th Street Motors', 'sales, 24/7', 'Route19', 'sales consultant', '', '0th', '21st', '#1 salesman', 'Sales 2.0', '0% APR specialist', '$0 down specialist', 'Sales Associate 2', 'Internet Sales (Store 2)', 'Sales 2nd shift', 'Shift 2.', '(2nd shift)', '“3rd” shift']) assert.equal(tsWords(value), jsWords(value), value);
