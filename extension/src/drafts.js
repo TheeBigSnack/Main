@@ -31,11 +31,26 @@ const draftBasis = (draft, basis) => postedBasis(draft && typeof draft === 'obje
 // Mark posted on a car saved as a draft: the posted entry, at the draft's
 // price when the draft kept one, on the basis the draft was filled under
 // (src/rescan.js postedBasis: rescans compare the listing with the website
-// on it), else at the website's price (as for any listing marked by hand).
+// on it), and with when the draft was filled (`draftSavedAt`), else at the
+// website's price (as for any listing marked by hand). The listing got its
+// price when the draft was filled, not when it was marked posted: a scan
+// taken in between shows the website price it should take now, on My
+// listings as on To do (src/rescan.js scanCar reads the time).
 export function markDraftPosted(posted, entry, draft, basis = 'website', now = new Date().toISOString(), extra = {}) {
   const next = markPosted(posted, entry, basis, now, extra);
   const price = draftPrice(draft);
-  return price === null ? next : { ...next, [entry.vin]: { ...next[entry.vin], price, basis: draftBasis(draft, basis) } };
+  if (price === null) return next;
+  const filled = draftFilledAt(draft, now);
+  return { ...next, [entry.vin]: { ...next[entry.vin], price, basis: draftBasis(draft, basis), ...(filled ? { draftSavedAt: filled } : {}) } };
+}
+
+// When the draft was filled with its price, as an ISO time; null for a time
+// that is not one, or not before the moment it is marked posted (`now`):
+// then the posting time stands.
+function draftFilledAt(draft, now) {
+  const saved = typeof draft.savedAt === 'string' && draft.savedAt ? Date.parse(draft.savedAt) : NaN;
+  const marked = typeof now === 'string' ? Date.parse(now) : NaN;
+  return Number.isFinite(saved) && Number.isFinite(marked) && saved < marked ? new Date(saved).toISOString() : null;
 }
 
 // The price update a draft's car needs once its draft is published, shaped

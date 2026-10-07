@@ -87,10 +87,13 @@ function msOf(x) {
 }
 
 // When a posted listing got the price it carries: its last price update
-// (updatedAt), else its post (postedAt); null when it carries neither.
+// (updatedAt), else, for a listing published from a Facebook draft, when the
+// draft was filled with that price (draftSavedAt, drafts.js markDraftPosted;
+// it stays in this browser), else its post (postedAt); null when it carries
+// none.
 function pricedAt(entry) {
   if (!entry || typeof entry !== 'object') return null;
-  return msOf(entry.updatedAt) ?? msOf(entry.postedAt);
+  return msOf(entry.updatedAt) ?? msOf(entry.draftSavedAt) ?? msOf(entry.postedAt);
 }
 
 // Whether a scan was taken before a listing got its price: false when

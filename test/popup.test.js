@@ -742,6 +742,38 @@ test('My listings shows a sale pending, needs a look or not pre-owned from a sca
   assert.match(q.panel(), /Listed \$27,163<br>Website \$26,173/);
 });
 
+// A draft filled before the last scan and published since: Mark posted
+// records the draft's price, and the scan, taken after the draft got that
+// price, shows the website's price now. To do lists the change at once
+// (src/drafts.js draftPriceUpdate), and My listings shows it too, with
+// Updated at the website's price, not "Price compared at the next scan".
+test('My listings shows the price change of a listing published from a draft filled before the last scan, as To do does', async () => {
+  const ram = vehicle('usedNormal'); // $27,163 on the website
+  const savedAt = new Date(Date.now() - 86400e3).toISOString(); // filled yesterday, when the website asked $27,663
+  const drafts = { [ram.vin]: { name: ram.name, savedAt, price: 27663, basis: 'website' } };
+  const p = await loadPopup({ local: { [k.settings]: { ...MY_STORE }, [k.drafts]: drafts } });
+  await p.scan();
+  assert.equal(p.status(), '', 'the scan went through');
+  await p.tab('ready');
+  await p.click('markToday', { vin: ram.vin }); // published today
+  assert.match(p.status(), /^Recorded at \$27,663, the price the draft was filled with\. The website now shows \$27,163: update the price on the listing \(To do, Update price\)\.$/);
+  await p.tab('todo');
+  assert.match(p.panel(), new RegExp(`data-action="priceUpdated" data-vin="${ram.vin}" data-price="27163"`));
+  await p.tab('mine');
+  assert.match(p.panel(), /<span class="pill warn">Website price changed<\/span>/);
+  assert.match(p.panel(), /Listed \$27,663<br>Website \$27,163/);
+  assert.match(p.panel(), new RegExp(`data-action="priceUpdated" data-vin="${ram.vin}" data-price="27163"`), 'Updated at the website\'s price');
+  // the listing keeps when the draft got its price, and the time it was marked posted
+  const entry = p.local[k.posted][ram.vin];
+  assert.deepEqual([entry.price, entry.basis, entry.draftSavedAt], [27663, 'website', savedAt]);
+  assert.ok(Date.parse(entry.postedAt) > Date.parse(p.local[k.snapshot].takenAt), 'marked after the scan');
+  await p.click('priceUpdated', { vin: ram.vin, price: '27163' });
+  assert.equal(p.local[k.posted][ram.vin].price, 27163, 'Updated records the website\'s price');
+  await p.tab('mine');
+  assert.match(p.panel(), /<span class="pill good">Matches the website<\/span>/);
+  assert.doesNotMatch(p.panel(), /data-action="priceUpdated"/);
+});
+
 // A listing with no basis whose price is older than the last scan is read as
 // before: the basis off that scan where only one of its prices is the
 // listing's, else the setting, and Updated records the website's price on it.

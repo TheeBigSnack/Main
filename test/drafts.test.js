@@ -6,7 +6,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { draftRecord, draftPrice, markDraftPosted, draftPriceUpdate, withPriceUpdate, draftPill } from '../extension/src/drafts.js';
-import { diffScans, markPosted, markPriceUpdated, basisPrice } from '../extension/src/rescan.js';
+import { diffScans, markPosted, markPriceUpdated, basisPrice, listingLine } from '../extension/src/rescan.js';
+import { syncPayload } from '../extension/src/sync.js';
 import { snapshot, fixtures } from './helpers.js';
 
 const VIN = fixtures.usedNormal.vin; // ready, $27,163 ($26,673 before fees)
@@ -74,6 +75,39 @@ test('a draft on the lower price before fees is compared on that basis; a draft 
   assert.deepEqual(markDraftPosted({}, day3, draft, 'beforeFees', AT, { salesperson: 'Pat' })[VIN], { ...markPosted({}, day3, 'beforeFees', AT, { salesperson: 'Pat' })[VIN], price: 26673 });
   // a website that shows no price now: no update offered (the rescan's Needs a look says so)
   assert.equal(draftPriceUpdate(draft, { ...day3, price: null, priceBeforeFees: null }, 'beforeFees'), null);
+});
+
+// A listing published from a draft shows the price the draft was filled
+// with, so it got that price when the draft was saved, not when it was
+// marked posted: a scan taken in between shows the website price the
+// listing should take now, and My listings says so as To do does (rescan.js
+// listingLine reads the entry's draftSavedAt). A scan from before the draft
+// was filled shows the website as it was then, and is compared at the next
+// scan as for any listing.
+test('a listing published from a draft got its price when the draft was filled: My listings compares it with a scan taken since then, as To do does', () => {
+  const draft = draftRecord({ name: 'Ram', price: 27163, basis: 'website', savedAt: AT }); // filled on day 1
+  const day3 = dropped(1500); // the website at $25,663 on day 3
+  const marked = '2026-10-04T10:00:00.000Z'; // published and marked posted on day 4
+  const posted = markDraftPosted({}, day3.vehicles[VIN], draft, 'website', marked);
+  assert.deepEqual(posted[VIN], { name: day3.vehicles[VIN].name, price: 27163, basis: 'website', postedAt: marked, draftSavedAt: AT });
+  const todo = draftPriceUpdate(draft, day3.vehicles[VIN], 'website');
+  const line = listingLine(posted[VIN], day3, VIN, 'website');
+  assert.deepEqual([line.status.text, line.status.priceChanged, line.compared, line.site], ['Website price changed', true, true, todo.to], 'the change To do lists, with Updated at its price');
+  // a scan from before the draft was filled
+  const older = { ...dropped(1500), takenAt: '2026-09-30T15:00:00.000Z' };
+  assert.deepEqual([listingLine(posted[VIN], older, VIN, 'website').status.text, listingLine(posted[VIN], older, VIN, 'website').site], ['Price compared at the next scan', null]);
+  // once the listing's price is updated, the update is when it got its price
+  const updated = markPriceUpdated(posted, VIN, 25663, '2026-10-05T10:00:00.000Z');
+  assert.equal(listingLine(updated[VIN], day3, VIN, 'website').status.text, 'Matches the website');
+  assert.equal(listingLine(markPriceUpdated(posted, VIN, 25000, '2026-10-05T10:00:00.000Z')[VIN], day3, VIN, 'website').status.text, 'Price compared at the next scan');
+  // no draft time: a draft that kept no price (recorded at the website's price), a time that is not one or is not before the post
+  assert.equal('draftSavedAt' in markDraftPosted({}, day3.vehicles[VIN], { name: 'Ram', savedAt: AT }, 'website', marked)[VIN], false);
+  for (const savedAt of [undefined, '', 'yesterday', marked, '2026-10-05T00:00:00.000Z']) {
+    assert.equal('draftSavedAt' in markDraftPosted({}, day3.vehicles[VIN], { ...draft, savedAt }, 'website', marked)[VIN], false, String(savedAt));
+  }
+  // it stays in this browser: the sync sends none (another computer goes by the posting time)
+  const sent = syncPayload({ origin: 'https://example-dealer.test', posted, userId: 'u' }).posted[VIN];
+  assert.ok(sent && !('draftSavedAt' in sent));
 });
 
 test('the update goes on the saved To do list in place of any other for the car, in the rescan\'s order', () => {
