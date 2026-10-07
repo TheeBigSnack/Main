@@ -210,15 +210,33 @@ const NOT_THE_PRICE = /msrp|\bwas\b|original|previous|prior|\bold\b|list ?price|
 // the end). The marks are the standard-data reader's own list
 // (schemaOrgNormalize.js LABEL_MARKS), so the two never drift. Before,
 // "Your Carvana Offer*" did not end in "Offer" for the offer test, so "your"
-// made it a selling price again. Read from the end one character at a time,
-// so a long label costs one pass. The label is still quoted as the website
+// made it a selling price again. The label is still quoted as the website
 // writes it.
-const TRAILING_MARK = new RegExp(String.raw`[\s:.${LABEL_MARKS}]`);
+// A footnote is also read when it is written as a number in brackets ("(1)",
+// "[2]", "(*)"), a mark with a number ("*1"), inside an HTML tag
+// ("<sup>*</sup>", "<sup>1</sup>") or as an HTML entity ("&#42;",
+// "&trade;"): a number in a superscript tag is dropped, other tags too, and
+// entities read as their characters first, anywhere in the label ("Kelley
+// Blue Book<sup>&reg;</sup> Value" reads "Kelley Blue Book® Value"). A bare
+// number at the end is kept: nothing says it is a footnote.
+const SUP_NUMBER = /<sup\b[^<>]*>\s*(?:\(\s*\d{1,3}\s*\)|\[\s*\d{1,3}\s*\]|\d{1,3})\s*<\/sup\s*>/gi;
+const TAG = /<\/?[a-z][^<>]*>/gi;
+const ENTITY = /&(?:#(\d{1,7})|#x([0-9a-f]{1,6})|([a-z][a-z0-9]{1,31}));/gi;
+const NAMED_ENTITY = { amp: '&', nbsp: ' ', reg: '®', trade: '™', dagger: '†', Dagger: '‡', ast: '*', midast: '*', excl: '!', sect: '§', sup1: '¹', sup2: '²', sup3: '³', apos: '\'', rsquo: '’', quot: '"' };
+const entityText = (whole, dec, hex, name) => {
+  const code = dec ? Number(dec) : hex ? parseInt(hex, 16) : null;
+  if (code !== null) return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : ' ';
+  return NAMED_ENTITY[name] ?? NAMED_ENTITY[name.toLowerCase()] ?? ' ';
+};
+const NOTE_END = new RegExp(String.raw`(?:[(\[]\s*(?:\d{1,3}|[${LABEL_MARKS}]{1,3})\s*[)\]]|[${LABEL_MARKS}]\d{1,3}|[\s:.${LABEL_MARKS}])$`);
 export function labelWords(label) {
-  const text = String(label || '');
-  let end = text.length;
-  while (end > 0 && TRAILING_MARK.test(text[end - 1])) end -= 1;
-  return text.slice(0, end);
+  let text = String(label || '').replace(SUP_NUMBER, '').replace(TAG, '').replace(ENTITY, entityText);
+  for (;;) {
+    // a footnote is short: only the label's last characters are read each time
+    const note = NOTE_END.exec(text.slice(-12));
+    if (!note) return text;
+    text = text.slice(0, text.length - note[0].length);
+  }
 }
 // A guide's value, an estimate or an offer for the car ("KBB Value",
 // "Market Price", "Instant Cash Offer"): the standard-data reader's own list
@@ -246,7 +264,7 @@ const SELLING_WORDS = new RegExp(String.raw`${SELLER_WORDS.source}|\bour\b|\byou
 // do not make it the website's price. Only the website's own selling words
 // do ("Internet Offer", "Sale Offer"), as before.
 const OFFER_END = /\boffers?\s*[:.]?\s*$/i;
-const isOfferForTheCar = (label) => OFFER_END.test(labelWords(label)) && !SELLER_WORDS.test(String(label || ''));
+const isOfferForTheCar = (label) => OFFER_END.test(labelWords(label)) && !SELLER_WORDS.test(labelWords(label));
 const GENERIC_PRICE = /^\s*(?:the\s+)?price\s*:?\s*$/i;
 const NAMED_PRICE = /^\s*[A-Za-z][\w.&'’ -]{0,40}\s+price\s*:?\s*$/i;
 

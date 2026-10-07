@@ -10,7 +10,7 @@ import dealerOn, { pageAddress as dealerOnPage, pagePhotos } from '../extension/
 import dealerCom, { pageAddress as dealerComPage } from '../extension/adapters/dealerCom.js';
 import dealerInspire from '../extension/adapters/dealerInspire.js';
 import schemaOrg from '../extension/adapters/schemaOrg.js';
-import { keyName, pick, findCards, totalCount, labeledPrices, choosePrices, priceKind, imageUrls, normalizeInventoryRecord, MAX_INVENTORY_PAGES, mileageOf, cappedText, crawlDelaySeconds, scanInventory, MAX_PAGE_GAP_MS, MAX_FAILED_IN_A_ROW } from '../extension/adapters/inventoryJson.js';
+import { keyName, pick, findCards, totalCount, labeledPrices, choosePrices, priceKind, labelWords, imageUrls, normalizeInventoryRecord, MAX_INVENTORY_PAGES, mileageOf, cappedText, crawlDelaySeconds, scanInventory, MAX_PAGE_GAP_MS, MAX_FAILED_IN_A_ROW } from '../extension/adapters/inventoryJson.js';
 import { assessVehicle, DECISION, checkPreOwned } from '../extension/src/classify.js';
 import { basisPrice } from '../extension/src/rescan.js';
 import { feeGap, withDefaults } from '../extension/src/settings.js';
@@ -1408,4 +1408,44 @@ test('Rule 4: a final or selling price the reader can\'t read as an amount leave
   // the usual card is unchanged: the dealer's price, the retail price below it
   const usual = on({});
   assert.deepEqual([usual.price, usual.priceBeforeFees], [car.base + car.fee, car.base]);
+});
+
+// R-8, repair cycle 2 round 2: the other ways a website writes a footnote
+// after a price's label: a number in brackets ("(1)", "[2]"), a mark with a
+// number ("*1"), a mark inside an HTML tag ("<sup>*</sup>") or an HTML
+// entity ("&#42;", "&trade;"). Before, only a bare mark was set aside, so
+// "Your Carvana Offer (1)" was a selling price again ("your"), taken ahead
+// of a plain "Price" when marked final and alone made the car Ready at the
+// offer. The label is still quoted as the website writes it.
+test('R-8: a footnote written "(1)", "[2]", "*1", inside an HTML tag or as an HTML entity after a price\'s label changes nothing either', () => {
+  const quoted = (label) => `the list labels its price "${label}", which Lot Current does not read as the selling price`;
+  const none = (label) => ({ price: null, priceLabel: quoted(label), priceBeforeFees: null });
+  const P = (dprice) => choosePrices(labeledPrices({ pricing: { dprice } }), { dealer: 'Sample Chevrolet' });
+  const NOTES = ['Your Carvana Offer (1)', 'Your Carvana Offer [2]', 'Your Carvana Offer *1', 'Your Carvana Offer*12', 'Your Carvana Offer (*)', 'Your Carvana Offer<sup>*</sup>', 'Your Carvana Offer<sup>1</sup>', 'Your Carvana Offer <span class="final-note">†</span>',
+    'Your Carvana Offer&#42;', 'Our Offer&trade;', 'Our Offer&#x2122;', 'Your Offer&nbsp;*', 'Market Value&dagger;', 'KBB Value (1)', 'Kelley Blue Book<sup>&reg;</sup> Value'];
+  for (const label of NOTES) {
+    assert.deepEqual(P([{ label: 'Price', value: '$21,000' }, { label, value: '$19,000' }]), { price: 21000, priceLabel: 'Price', priceBeforeFees: null }, `"${label}" beside a plain price`);
+    assert.deepEqual(P([{ label: 'Price', value: '$21,000' }, { label, value: '$19,000', isFinalPrice: true }]), none(label), `"${label}" marked final beside a plain price`);
+    assert.deepEqual(P([{ label, value: '$19,000' }]), none(label), `"${label}" alone is quoted`);
+  }
+  // through DealerOn's own label: an offer with a footnote is no price; the dealer's own price with one still is
+  const [c] = platformCars(1, { from: 750 });
+  const car = { ...c, certified: false };
+  for (const label of ['Your Offer (1)', 'Our Offer<sup>*</sup>', 'Market Value&#8224;']) {
+    const on = normalizeInventoryRecord({ ...dealerOnCard(car).VehicleCard, VehiclePriceLabel: label }, { origin: DEALERON_ORIGIN });
+    assert.deepEqual([on.price, on.priceLabel], [null, quoted(label)], `DealerOn's own label "${label}"`);
+  }
+  for (const label of ['Sample Motors Price (1)', 'Sample Motors Price<sup>*</sup>', 'Sample Motors Price&reg;', 'Sample Motors Price *2']) {
+    const on = normalizeInventoryRecord({ ...dealerOnCard(car).VehicleCard, VehiclePriceLabel: label }, { origin: DEALERON_ORIGIN });
+    assert.deepEqual([on.price, on.priceBeforeFees], [car.base + car.fee, car.base], `DealerOn's own label "${label}" is the dealer's price`);
+  }
+  // the selling side reads the same: the dealer's own price, an internet price, a plain price
+  assert.equal(priceKind({ label: 'Sample Price (1)', key: '', final: false, value: 1 }, 'Sample Chevrolet'), 'selling');
+  assert.equal(priceKind({ label: 'Internet Price<sup>†</sup>', key: '', final: false, value: 1 }, 'Sample Chevrolet'), 'selling');
+  assert.equal(priceKind({ label: 'Price&#42;', key: '', final: false, value: 1 }, 'Sample Chevrolet'), 'plain');
+  // the words the label tests read: the footnote gone, the label's own words kept
+  assert.equal(labelWords('Your Carvana Offer<sup>(1)</sup>'), 'Your Carvana Offer');
+  assert.equal(labelWords('Kelley Blue Book<sup>&reg;</sup> Value&trade;'), 'Kelley Blue Book® Value');
+  assert.equal(labelWords('Sample &amp; Sons Price [3]'), 'Sample & Sons Price');
+  assert.equal(labelWords('Model Year 2024 Price'), 'Model Year 2024 Price');
 });
