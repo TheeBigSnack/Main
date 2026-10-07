@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { PILOT_RETENTION_DAYS } from '../extension/src/pilot.js';
+import { notSavedReport, NOT_SAVED_STEPS } from '../extension/src/notSaved.js';
 import { STORAGE_FULL } from '../extension/src/storage.js';
 import { withDefaults, profileFrom } from '../extension/src/settings.js';
 import { wizardSteps } from '../extension/src/wizardSteps.js';
@@ -1795,19 +1796,30 @@ test('the help says one post from a website goes at a time across Chrome windows
   // review: the help and the data inventory said a second window's copy never replaces the saved post, and nothing
   // said a refused save goes unsaid: typing saves without reading the answer (onInput), and once the first window's
   // panel is closed with no form open there (liveElsewhere null) the second window's save replaces the post
-  assert.match(panel, /setFormButtons\(\);\n    saveFlow\(\);\n  \}, 250\);/, 'typing in the review now reads whether its save was refused: the help can say what the panel shows');
   assert.match(panel, /other = samePost \? null : await liveElsewhere\(saved\);\n      if \(other\) return undefined;/, 'a refused save no longer writes nothing: update the help and the data inventory');
   assert.match(panel, /const panels = await chrome\.runtime\.getContexts\(\{ contextTypes: \['SIDE_PANEL'\], windowIds: \[saved\.windowId\] \}\);\n    if \(panels && panels\.length\) return found;/);
-  assert.match(help, /The second window's panel does not say when a change made there was not saved: text typed into its copy then stays only on that screen, is kept nowhere, and is gone once that side panel closes, so type in the window whose side panel has the post\./);
+  // HANDOFF 22.5: a refused save went unsaid, and what was done there was lost. The panel now says it
+  // (saveFlow, notSavedHere) from a review, a fields check or a form waiting for Publish, keeps the
+  // text typed there on screen to copy, and names the rest (src/notSaved.js)
+  assert.match(panel, /if \(other && !quiet && run === flowRun\) await notSavedHere\(other, newer\);/, 'saveFlow no longer says a refused save: update the help and the data inventory');
+  assert.match(panel, /setFormButtons\(\);\n    saveFlow\(\);\n  \}, 250\);/, 'typing saves through saveFlow, which says a refused save');
+  assert.deepEqual(NOT_SAVED_STEPS, ['review', 'probe', 'publish'], 'a refused save is said from other steps now: the help names the changes it covers');
+  const notSaved = notSavedReport({ copy: { vin: 'AAA', step: 'review', description: 'typed', descriptionSource: 'claude', photoPick: [], highlights: ['x'], colorGuess: { exterior: 'Red' }, vinCheck: { online: { ok: true } }, listingTyped: 'y' }, broughtBack: { vin: 'AAA' }, saved: null, other: { where: 'review', vin: 'AAA', name: 'A' } });
+  assert.deepEqual(notSaved.kept.map((k) => k.label), ['Description', 'Listing link'], 'the panel keeps other text now: the help says which');
+  assert.equal(notSaved.notSaved.length, 5, 'the panel names other changes as not saved now: the help says which');
+  assert.doesNotMatch(help, /The second window's panel does not say when a change made there was not saved/, 'the help still says a refused save goes unsaid');
+  assert.match(help, /When a change made in the second window's copy is not saved this way \(text typed there, photos or highlights picked, a rewrite, a colour guess or VIN check, a step changed\), that side panel says so: it names the car under way in the other window and says to finish or stop that post there\. It then leaves its copy and opens no form, shows the description and any listing link typed there in boxes with a \*\*Copy\*\* button \(kept on that screen only, until that side panel closes or you click \*\*Back to the list\*\*\), and names the photo or highlight picks, rewrite, colour guess or VIN check made there, which were not saved and can be done again in the other window\. So type in the window whose side panel has the post\./);
+  assert.match(panel, /<button type="button" class="primary wide" id="back">Back to the list<\/button>/, 'the help names the button that leaves the kept text');
   assert.match(help, /Once the first window's side panel is closed with no Marketplace form of that post open there, the side panel in the second window takes the post over: its next save replaces the saved post with its own copy as it stands/);
   const single = help.slice(help.indexOf('## Post one car'), help.indexOf('## Post several (the queue)'));
-  assert.match(single, /Side panels open in two Chrome windows: one post from a website goes at a time, and a change made in the second window's copy of a post may not be saved\. The point under "Post several \(the queue\)" that starts "Each car is recorded once" says how; it holds for a single post too\./, 'the single-post section does not point to what happens in a second window');
-  assert.match(help, /^- Each car is recorded once[^\n]*The second window's panel does not say when a change made there was not saved/m, 'the pointer names the point that says it');
+  assert.match(single, /Side panels open in two Chrome windows: one post from a website goes at a time, and a change made in the second window's copy of a post may not be saved; that side panel then says so and keeps what you typed there for you to copy\. The point under "Post several \(the queue\)" that starts "Each car is recorded once" says how; it holds for a single post too\./, 'the single-post section does not point to what happens in a second window');
+  assert.match(help, /^- Each car is recorded once[^\n]*When a change made in the second window's copy is not saved this way/m, 'the pointer names the point that says it');
   const flowRow = doc('data-inventory.md').split('\n').find((l) => l.startsWith('| `postFlow:<origin>` |'));
   assert.doesNotMatch(flowRow, /never replaces it/, 'the data inventory says a second window\'s copy never replaces the saved post, while it takes the post over once the first window\'s panel is closed with no form open');
   assert.doesNotMatch(flowRow, /\(in a queue, with whether its page was seen to show the car\)/, 'the data inventory says the listing page is read only in a queue, while it is read after every post');
   assert.match(flowRow, /the listing address detected, with whether its page was seen to show the car \(read after every post, in a queue or not\)/);
-  assert.match(flowRow, /a save from a second window's side panel replaces the saved post only while it is that post as last saved, or once the window that saved it has its side panel closed and no Marketplace form of it open, when that panel takes the post over; otherwise nothing is written: opening the form or starting a post there says that the post is under way in another window, while anything else done there \(text typed, photos or highlights picked, a rewritten or regenerated description, a colour guess or VIN check, a step changed\) is dropped without a word/, 'the data inventory names every second-window change that is dropped without a word: only opening the form and starting a post say why (sidepanel.js giveWay, openForm)');
+  assert.doesNotMatch(flowRow, /dropped without a word/, 'the data inventory still says a refused save goes unsaid');
+  assert.match(flowRow, /a save from a second window's side panel replaces the saved post only while it is that post as last saved, or once the window that saved it has its side panel closed and no Marketplace form of it open, when that panel takes the post over; otherwise nothing is written: opening the form or starting a post there says that the post is under way in another window, and anything else done there \(text typed, photos or highlights picked, a rewritten or regenerated description, a colour guess or VIN check, a step changed\) is dropped and that side panel says so, showing the description and any listing link typed there on its screen to copy \(held in no storage, and gone once that panel closes or goes back to its list\) and naming the picks, rewrite, colour guess or VIN check made there/, 'the data inventory says what a second window\'s panel shows of a refused save, and that the kept text is stored nowhere (sidepanel.js notSavedHere, src/notSaved.js)');
 });
 
 // The help said a price "with or without $" and a mileage "however it is
