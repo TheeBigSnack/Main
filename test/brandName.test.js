@@ -3,10 +3,10 @@
 // test keeps the old name out of everything people can see: every text file in
 // the repo, code comments included (the owner and the testers read those), in
 // any spelling (with or without a space, hyphen, dot, underscore,
-// a non-breaking or zero-width space, an HTML entity or a JS escape, Markdown
-// emphasis or an inline HTML or SVG tag between the words, and across a
-// wrapped line), and in file names, the names of images and other binary
-// files included.
+// a non-breaking or zero-width space, an HTML entity, a JS escape or a URL
+// escape, Markdown emphasis or an inline HTML or SVG tag between the words,
+// and across a wrapped line), and in file names, the names of images and
+// other binary files included.
 //
 // Some internal names keep the old spelling on purpose: renaming them would
 // break data on pilot installs, the database, CI or Stripe, and no customer
@@ -68,29 +68,35 @@ const OLD_NAME_ONE = new RegExp(`${LOT}${SEP}${SYNC}`);
 
 // HTML entities, JS escapes and URL escapes are decoded first, so
 // "Lot&nbsp;Sync", "Lot\u00a0Sync" written as an escape, "Lot%20Sync" in an
-// address and "subject=Lot+Sync" in a mail link are caught too (a plus is a
-// space only in an address's query, so "lot+sync" in code is left alone; a
-// run of escapes that is not UTF-8 stays as written). Inline tags that can
-// sit inside a name ("Lot<wbr>Sync", "Lot <strong>Sync</strong>", an SVG
-// "<tspan>") are removed when tags is true. A tag is removed with its
-// attributes, so the scan reads every line both ways: with those tags removed,
-// and with them kept, where an old name inside an attribute
-// (title="...", href="...", download="...") is still caught.
+// address and "subject=Lot+Sync" in a mail link are caught too. A plus is read
+// as a space only in a key=value pair after a ? or & (an address's query, a
+// mail link's subject), so "lot+sync" and "x &=lot+sync" in code are left
+// alone, but so is a form body with no ? or & in front ("q=Lot+Sync"), and
+// the rare code shaped like a pair ("a?b=lot+sync") is read as one. An
+// escaped plus ("%2B") stays a plus. A run of escapes that is not UTF-8 is
+// read as Latin-1, as JavaScript's escape() writes it ("Lot%A0Sync").
+// Inline tags that can sit inside a name ("Lot<wbr>Sync",
+// "Lot <strong>Sync</strong>", an SVG "<tspan>") are removed when tags is
+// true. A tag is removed with its attributes, so the scan reads every line
+// both ways: with those tags removed, and with them kept, where an old name
+// inside an attribute (title="...", href="...", download="...") is still
+// caught.
 const INLINE_TAG = /<\/?(?:wbr|br|b|i|em|strong|span|u|s|mark|small|abbr|sup|sub|a|code|kbd|tspan|font|del|ins|q|cite|var|dfn|bdi|bdo|time|data|label)\b[^>]*>/gi;
 const NAMED = {
   nbsp: '\u00a0', shy: '\u00ad', ZeroWidthSpace: '\u200b', zwnj: '\u200c', zwj: '\u200d', NoBreak: '\u2060',
   ensp: '\u2002', emsp: '\u2003', thinsp: '\u2009', hairsp: '\u200a', hyphen: '\u2010', dash: '\u2010',
-  ndash: '\u2013', mdash: '\u2014', minus: '\u2212', period: '.', lowbar: '_', UnderBar: '_', amp: '&',
+  ndash: '\u2013', mdash: '\u2014', minus: '\u2212', period: '.', lowbar: '_', UnderBar: '_', amp: '&', AMP: '&',
 };
 const char = (n) => (n === 10 || n === 13 ? ' ' : n >= 0 && n <= 0x10ffff ? String.fromCodePoint(n) : '');
-const urlRun = (run) => { try { return decodeURIComponent(run).replace(/[\r\n]/g, ' '); } catch { return run; } };
+const latin1 = (run) => run.replace(/%([0-9a-f]{2})/gi, (_, h) => char(parseInt(h, 16)));
+const urlRun = (run) => { try { return decodeURIComponent(run).replace(/[\r\n]/g, ' '); } catch { return latin1(run); } };
 function decode(line, { tags = true } = {}) {
   return (tags ? line.replace(INLINE_TAG, '') : line)
     .replace(/&#x([0-9a-f]{1,6});?/gi, (_, h) => char(parseInt(h, 16)))
     .replace(/&#(\d{1,7});?/g, (_, d) => char(Number(d)))
     .replace(/&([A-Za-z]+);/g, (m, name) => NAMED[name] ?? m)
     .replace(/\\u\{([0-9a-f]{1,6})\}|\\u([0-9a-f]{4})|\\x([0-9a-f]{2})/gi, (_, a, b, c) => char(parseInt(a || b || c, 16)))
-    .replace(/[?&][\w.~-]*=[^\s"'<>&#]*/g, (pair) => pair.replace(/\+/g, ' '))
+    .replace(/[?&][\w.~-]+=[^\s"'<>&#]*/g, (pair) => pair.replace(/\+/g, ' '))
     .replace(/(?:%[0-9a-f]{2})+/gi, urlRun);
 }
 
@@ -438,6 +444,10 @@ test('the scan catches the old name in every spelling, in any file that is not e
     '<a href="mailto:x@lotcurrent.com?to=x&amp;subject=Lot+Sync">Email us</a>',
     'https://www.example.com/Lot%C2%A0Sync',
     'L%6F%74%53ync',
+    // an escape run that is not UTF-8 is read as Latin-1 (JavaScript's escape() writes those)
+    '<a href="/s/Lot%A0Sync">search</a>',
+    // and "&AMP;", HTML's capitalised "&amp;", in front of a query pair
+    '<a href="/s?a=1&AMP;subject=Lot+Sync">Email us</a>',
   ];
   for (const text of spellings) {
     for (const path of ['docs/help.md', 'extension/popup.js', 'site/index.html', 'marketing/sales-sheet.md']) {
@@ -452,9 +462,11 @@ test('the scan catches the old name in every spelling, in any file that is not e
   assert.deepEqual(hitsIn('docs/lot-sync-guide.md', 'clean'), ['docs/lot-sync-guide.md: the file name carries the old name']);
   // and nothing else
   // nor a longer word that ends in "lot" ("pilot", "ballot", "slot", "allot")
-  // nor a plus outside an address's query, an escaped mark that is no separator, or a broken escape
+  // nor a plus that is not in a key=value pair after a ? or & (code's "&=" and "??=" included), an
+  // escaped plus (a plus, not a space), an escaped mark that is no separator, or a broken UTF-8
+  // escape (read as Latin-1, its letters are no separator either)
   for (const text of ['Lot Current', 'the lot is in sync with the website', 'a parking lot; sync later', 'lots synced', 'the **lot** is in `sync`', '<b>lot</b> and <i>sync</i>', 'the pilot sync runs nightly', 'ballotSync()', 'a slot-sync job', 'PILOTSYNC', 'allot_sync', 'PilotSync',
-    'const n = lot+sync;', '?tags=lot+%26+sync', 'the lot %ZZ sync', 'a lot%E2%80sync']) {
+    'const n = lot+sync;', '?tags=lot+%26+sync', 'x &=lot+sync;', 'a ??=lot+sync', '?q=lot%2Bsync', 'a lot%E2%80sync']) {
     assert.deepEqual(hitsIn('docs/help.md', text), [], text);
   }
 });
