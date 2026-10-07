@@ -331,3 +331,23 @@ test('an example that would fail a check of its own is not offered, and a name l
     assert.deepEqual(checked(c).g.problems, [], example);
   }
 });
+
+// ---------- a setting that is only a number ----------
+// A value with no letter ("2") can't be told apart from the description's
+// own numbers, so it is set aside only where the text says it once (the
+// sign-off): said again elsewhere, the plain reason stands, as for "row 2"
+// beside "2nd shift sales". And a value is never read inside a longer number
+// ("2" in "2,000" or "2.5").
+test('a role that is only a number does not hide the description\'s own number', () => {
+  const c = ctxFor({ salesperson: { name: 'Sam', title: '2' } });
+  const text = buildTemplateDescription(c);
+  assert.deepEqual(ruleProblems(runGuardrails(text, c)).map((p) => p.code), ['setting-number'], 'said once, in the sign-off: the role is named');
+  const rows = runGuardrails(text.replace('Highlights:', 'Seats 2 rows. Highlights:'), c);
+  assert.deepEqual(ruleProblems(rows), [{ code: 'unknown-number', text: '"2" isn\'t in the website\'s data for this car' }], 'said twice: the plain reason, which stays true once the role changes');
+  const miles = runGuardrails(text.replace('34,567 miles', '2,000 miles'), c);
+  assert.deepEqual(ruleProblems(miles).map((p) => p.code), ['setting-number', 'unknown-number', 'mileage-mismatch'], 'the "2" of "2,000" is not the role\'s');
+  assert.equal(ruleProblems(miles)[1].text, '"2000" isn\'t in the website\'s data for this car');
+  // a name with the same number: both named
+  const both = ctxFor({ salesperson: { name: 'Sam 2', title: '2' } });
+  assert.deepEqual(ruleProblems(runGuardrails(buildTemplateDescription(both), both)).map((p) => p.text.slice(0, 14)), ['Your role "2" ', 'Your name "Sam']);
+});

@@ -119,6 +119,9 @@ const texts = [
   sixty('2019 Ram 1500 Big Horn with 41,230 miles.').replace('I am Alex, sales consultant', 'I am J2 Smith, 1 owner car specialist') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn with 41,230 miles.').replace('sales consultant', 'Sales Associate 2') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn with 41,230 miles.').replace('sales consultant', '#1 salesman') + '\nVIN TESTVIN0000000001.',
+  // a role that is only a number: set aside only where it is said once, and never inside a longer number
+  sixty('2019 Ram 1500 Big Horn with 41,230 miles. Seats 2 rows.').replace('sales consultant', '2') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn with 2,000 miles.').replace('sales consultant', '2') + '\nVIN TESTVIN0000000001.',
 ];
 const contexts = [
   { vehicle, dealer, priceNote: '', price: 28995 },

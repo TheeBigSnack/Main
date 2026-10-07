@@ -847,8 +847,16 @@ function settingNumberText(setting: Setting, value: string): string {
   return `${w.your} "${value}" ${why}; change it in Settings (${w.field})${how}`;
 }
 // The text with each value set aside where it stands as words of its own:
-// "Sam 2" in "I'm Sam 2, ...", never the "2" of "12,000".
-const setAside = (text: string, values: string[]): string => values.reduce((out, value) => out.replace(new RegExp(`(?<![\\p{L}\\p{N}])${escapeRe(value).replace(/ /g, '\\s+')}(?![\\p{L}\\p{N}])`, 'giu'), ' '), text);
+// "Sam 2" in "I'm Sam 2, ...", never the "2" of "12,000", "2,000" or "2.5".
+// A value with no letter ("2") can't be told from the description's own
+// numbers, so it is set aside only where the text says it once (the
+// sign-off), after the values with letters; said again, it stays.
+const asWords = (value: string): RegExp => new RegExp(`(?<![\\p{L}\\p{N}]|\\p{N}[.,])${escapeRe(value).replace(/ /g, '\\s+')}(?![\\p{L}\\p{N}]|[.,]\\p{N})`, 'giu');
+const hasLetter = (value: string): boolean => /\p{L}/u.test(value);
+const setAside = (text: string, values: string[]): string => [...values].sort((a, b) => Number(hasLetter(b)) - Number(hasLetter(a))).reduce((out, value) => {
+  const re = asWords(value);
+  return !hasLetter(value) && (out.match(re) || []).length > 1 ? out : out.replace(re, ' ');
+}, text);
 // The problems the text no longer gives with every such setting set aside
 // (gone), and one problem for each setting that, with the others set aside,
 // still gives one of those; nothing is set aside when no setting is to blame.
