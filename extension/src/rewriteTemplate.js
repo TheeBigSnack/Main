@@ -684,9 +684,11 @@ const NOTE_AMOUNT = /(?<![\p{L}\p{N}])(?:\$\s?(?:\d{1,3},\d{3}|\d{1,6})(?:\.\d{1
 // the marks a note may have between its words: spaces, punctuation, brackets, quotes, dashes, "/", "&", "*" and "+"
 const NOTE_MARKS = /^[\s.,;:!?'"\u2018\u2019\u201c\u201d()[\]\-\u2010-\u2015/&*+]$/u;
 const NOTE_EDGE_MARKS = /^[.,;:!?'"\u2018\u2019\u201c\u201d()[\]\-\u2010-\u2015/&*+]+|[.,;:!?'"\u2018\u2019\u201c\u201d()[\]\-\u2010-\u2015/&*+]+$/gu;
-const NOTE_NUMBER = /\S*\p{N}\S*/gu;
+// each run of characters with no space in it, read whole (a number or a web link is refused whole)
+const NOTE_TOKEN = /\S+/gu;
+const NOTE_DIGIT = /\p{N}/u;
 // a word joined to the next by "." or ":" with no space between, as in a web link ("dealer.to/sale", "cash.sale")
-const NOTE_LINK = /\S*[\p{L}\p{M}][.:]\p{L}\S*/gu;
+const NOTE_LINK = /[\p{L}\p{M}][.:]\p{L}/u;
 const NOTE_WORD = /\p{L}[\p{L}\p{M}]*(?:['\u2019\u2010-]\p{L}[\p{L}\p{M}]*)*/gu;
 // an invisible character: read as nothing, unless it changes the direction of the text
 const NOTE_HIDDEN = /\p{Default_Ignorable_Code_Point}/gu;
@@ -714,7 +716,8 @@ function noteSteerWords(note, dealer) {
     return ' ';
   });
   const ownSaid = [d.name, d.city].map((s) => String(s ?? '').normalize('NFKC').replace(NOTE_HIDDEN, '').toLowerCase()).join('\n');
-  rest = rest.replace(NOTE_LINK, (said, at) => {
+  rest = rest.replace(NOTE_TOKEN, (said, at) => {
+    if (!NOTE_LINK.test(said)) return said;
     const bare = said.replace(NOTE_EDGE_MARKS, '');
     // the dealership's own name or city as set, dots and all ("J.D. Example Motors"), is read word by word
     if (new RegExp(`(?<![\\p{L}\\p{N}])${escapeRe(bare.toLowerCase())}(?![\\p{L}\\p{N}])`, 'u').test(ownSaid)) return said;
@@ -722,7 +725,8 @@ function noteSteerWords(note, dealer) {
     return blank(said);
   });
   rest = rest.replace(NOTE_AMOUNT, blank);
-  rest = rest.replace(NOTE_NUMBER, (said, at) => {
+  rest = rest.replace(NOTE_TOKEN, (said, at) => {
+    if (!NOTE_DIGIT.test(said)) return said;
     found.push({ at, text: `"${said.replace(NOTE_EDGE_MARKS, '')}"` });
     return blank(said);
   });
