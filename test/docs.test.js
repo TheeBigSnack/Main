@@ -1696,6 +1696,26 @@ test('the help says Mark posted on a draft records the draft\'s price, or the we
   assert.match(line, /when a scan taken since the draft was saved shows a different website price, the status line says so and \*\*To do\*\* lists the car under \*\*Update price\*\* at once\. Otherwise the next scan compares the two/);
 });
 
+// A scan's time is when it finished (the adapter's fetchedAt, set once every
+// page is read: scanRunner.js), and a listing's price counts from when it was
+// recorded (rescan.js scanCar). So a scan still running when a listing was
+// posted counts as taken since, even for a car it read before the side panel
+// did. The help says only what holds: a scan that finished before the post
+// is from before, one still running counts as since, and what to do then.
+test('the help says a scan counts from when it finished, so one still running when a listing got its price counts as since', async () => {
+  const { scanCar } = await import('../extension/src/rescan.js');
+  const car = { vin: 'AAA', price: 27663 }; // read at 10:00:05, before the website's cut
+  const posted = { price: 27163, basis: 'website', postedAt: '2026-10-01T10:03:00.000Z' };
+  assert.equal(scanCar(posted, { takenAt: '2026-10-01T10:04:00.000Z', vehicles: { AAA: car } }, 'AAA'), car, 'a scan no longer counts from when it finished: update the help and this test');
+  assert.equal(scanCar(posted, { takenAt: '2026-10-01T10:02:00.000Z', vehicles: { AAA: car } }, 'AAA'), null);
+  assert.match(read('../extension/src/scanRunner.js'), /diff\.takenAt = res\.fetchedAt;[\s\S]*makeSnapshot\(\{ site, takenAt: res\.fetchedAt,/, 'a scan\'s time is no longer the adapter\'s fetchedAt: update the help and this test');
+  const line = doc('help.md').split('\n').find((l) => l.startsWith('- **My listings** shows each car as'));
+  assert.match(line, /a scan that finished before the post was recorded is from before, so a price change it saw shows here and on \*\*To do\*\* at the next scan\./);
+  assert.match(line, /A scan counts from when it finished, not from when it read each car: one still running when a listing was posted, a draft saved or a price updated counts as taken since/);
+  assert.match(line, /check the car on the website before you click \*\*Updated\*\* or change the draft/);
+  assert.doesNotMatch(line, /a scan that ran while the form was open is from before/, 'not every such scan is');
+});
+
 // What has not been checked on Facebook's live pages is listed where a
 // tester and a maintainer look: the README's Limits and the form map's
 // header. The listing page's sold and removed signs (listingSigns.js, NOT
