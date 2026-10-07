@@ -28,6 +28,7 @@ import { honestyProblems } from './honesty.js';
 import { ADAPTERS, platformNames, unsupportedSiteMessage } from '../extension/adapters/index.js';
 import { LEGAL } from '../extension/src/legalLinks.js';
 import { accountsConfigured } from '../extension/src/accountConfig.js';
+import { PRICE_NOTE_WORDS } from '../extension/src/rewriteTemplate.js';
 import { FORM_MAP } from '../extension/facebook/formMap.js';
 import { runGuardrails } from '../extension/src/rewriteTemplate.js';
 
@@ -138,6 +139,19 @@ test('help.md names every abbreviation whose dot ends no sentence before the pri
   const sentence = /the dot of ((?:"[^"]+",? (?:or )?)+)ends no sentence/.exec(doc('help.md'));
   assert.ok(sentence, 'help.md says which dots end no sentence');
   assert.deepEqual([...sentence[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]).sort(), [...js].sort());
+});
+
+// A price note that says "not the dealer" (or "not the dealership", "not
+// the dealers", "not the dealerships") may hold only the words on
+// PRICE_NOTE_WORDS and the dealership's own: help.md lists them, so a
+// dealer can write a note that passes before the warning shows.
+test('help.md lists every word a "not the dealer" price note may hold, as the description checks list them', () => {
+  const help = doc('help.md');
+  const listed = /one of these words: ([a-z]+(?:, [a-z]+)*)\./.exec(help);
+  assert.ok(listed, 'help.md lists the words');
+  assert.deepEqual(listed[1].split(', ').sort(), [...PRICE_NOTE_WORDS].sort());
+  for (const phrase of ['not the dealership', 'not the dealers', 'not the dealerships']) assert.ok(help.includes(`"${phrase}"`), `help.md names "${phrase}"`);
+  assert.ok(help.includes('Your price note says "not the dealer", so it may only say where the fees go and what the price includes; take out'), 'help.md quotes the reason a dealer sees');
 });
 
 test('the adapter contract\'s PLATFORM row names every adapter and quotes no stale unsupported-page message', () => {
