@@ -292,6 +292,14 @@ const ctx = () => ({ vehicle: state.vehicle, dealer: state.settings.dealer, sale
 const dealerNamed = () => Boolean(String((state.settings && state.settings.dealer && state.settings.dealer.name) || '').trim());
 const NO_DEALER_TEXT = "Add your dealership's name in Settings first (Dealership name): every description names the dealership.";
 
+// What fixes the description's stops when every one of them is a number in
+// Settings (rewriteTemplate.js settingNumberProblems): the description must
+// keep naming the role, the name and the dealership, so the fix is in
+// Settings, and a Settings save writes the template again
+// (reviewAfterSettings). '' when the description itself needs fixing. The
+// status line (fillBlocker, carStillCurrent) and the checks line say it.
+const settingsFix = (stops) => (stops.length && stops.every((p) => p.code === 'setting-number') ? 'After you save Settings, the template writes the description again; if you edited it, click Reset to template.' : '');
+
 // Why a description can't be typed into the form, or '' when it can. Every
 // way of opening or filling the form goes through this (Open the
 // Marketplace form, Open the form and check fields only, Fill it in now
@@ -312,9 +320,7 @@ function fillBlocker(description) {
   }
   const stops = ruleProblems(runGuardrails(description, ctx()));
   if (!stops.length) return '';
-  const fix = stops.every((p) => p.code === 'setting-number')
-    ? 'After you save Settings, the template writes the description again; if you edited it, click Reset to template.'
-    : 'Fix the description (or use Reset to template) first.';
+  const fix = settingsFix(stops) || 'Fix the description (or use Reset to template) first.';
   return `The description fails ${stops.length === 1 ? 'a check' : `${stops.length} checks`} that must pass before the form is filled: ${stops.map((p) => p.text).join('; ')}. ${fix}`;
 }
 
@@ -564,9 +570,9 @@ async function carStillCurrent(waiting = 'the form opens') {
   const reopen = was === 'publish' || was === 'probe'
     ? 'click Open the Marketplace form for a new form, and close the form opened before without publishing it'
     : 'click Open the Marketplace form again';
-  const next = stops.length
-    ? ` The description no longer matches it: ${stops.map((p) => p.text).join('; ')}. Fix the description, then ${reopen}.`
-    : ` Check the review, then ${reopen}.`;
+  const fix = settingsFix(stops);
+  const next = !stops.length ? ` Check the review, then ${reopen}.`
+    : ` The description no longer matches it: ${stops.map((p) => p.text).join('; ')}. ${fix ? `${fix} Then` : 'Fix the description, then'} ${reopen}.`;
   setStatus(`The website changed this car since it was read${what}.${next}`, 'error');
   await saveFlow();
   return false;

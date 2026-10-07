@@ -58,9 +58,9 @@ function constText(name) {
   return m[0];
 }
 // The description stop every opening and fill goes through (fillBlocker), with
-// the two consts it reads, as sidepanel.js writes them: compiled into a scope
+// the three consts it reads, as sidepanel.js writes them: compiled into a scope
 // that has state, runGuardrails, ruleProblems and ctx.
-const BLOCKER_CONSTS = ['dealerNamed', 'NO_DEALER_TEXT'];
+const BLOCKER_CONSTS = ['dealerNamed', 'NO_DEALER_TEXT', 'settingsFix'];
 // Several functions compiled in one scope, so they call each other as written;
 // consts: top-level one-line consts compiled in with them.
 function compileMany(names, scope, consts = []) {
@@ -2791,7 +2791,7 @@ function staleReader(state, read) {
     render: () => { if (state.step === 'checking') calls.checking.push(state.message); },
     saveFlow: async () => { calls.saved += 1; },
   };
-  const fns = compileMany(['carStillCurrent', 'readIsOld', 'readCarNow', 'takeCar', 'formValues'], scope, ['money', 'ctx', 'noteFor']);
+  const fns = compileMany(['carStillCurrent', 'readIsOld', 'readCarNow', 'takeCar', 'formValues'], scope, ['money', 'ctx', 'noteFor', 'settingsFix']);
   return { run: fns.carStillCurrent, calls };
 }
 
@@ -2862,6 +2862,31 @@ test('a post whose car was read a while ago (or before the panel was closed) rea
     assert.equal(open.step, 'review');
     assert.match(r.calls.said.at(-1)[0], /^The website changed this car since it was read \(Mileage 20986 → 21500; Price \$27,163 → \$26,163\)\. The description no longer matches it: [^]+\. Fix the description, then click Open the Marketplace form for a new form, and close the form opened before without publishing it\.$/, step);
   }
+});
+
+// A role with a number passes for a car whose own data holds that number
+// (its write-up says "2nd key"). Once the website's write-up no longer does,
+// the read before the fill finds the role's number stopping the form, and the
+// fix is in Settings: the description must keep naming the role.
+test('a stop only Settings can fix, found by the read before a fill, says to save Settings, not to fix the description', async () => {
+  const salesperson = { name: 'Sam', title: '2nd shift sales' };
+  const car = { ...FRESH_CAR(), descriptionRaw: 'Comes with a 2nd key.' };
+  const base = reviewState();
+  const settings = { ...base.settings, salesperson };
+  const description = template.buildTemplateDescription({ vehicle: car, dealer: settings.dealer, salesperson, priceNote: '' });
+  assert.deepEqual(template.ruleProblems(template.runGuardrails(description, { vehicle: car, dealer: settings.dealer, salesperson, price: base.price })), [], 'the car\'s own write-up holds the number');
+  for (const [step, reopen] of [['review', 'click Open the Marketplace form again'], ['publish', 'click Open the Marketplace form for a new form, and close the form opened before without publishing it']]) {
+    const state = reviewState({ readAt: '', step, vehicle: car, settings, description });
+    const r = staleReader(state, () => ({ ok: true, vehicle: { ...FRESH_CAR(), descriptionRaw: 'Comes with two keys.' } }));
+    assert.equal(await r.run(), false, step);
+    assert.equal(state.step, 'review');
+    assert.deepEqual(r.calls.said.at(-1), [`The website changed this car since it was read. The description no longer matches it: Your role "2nd shift sales" has a number in it, and every number in a description must match the website's data for the car; change it in Settings (Your role), for example to "Second shift sales". After you save Settings, the template writes the description again; if you edited it, click Reset to template. Then ${reopen}.`, 'error'], step);
+  }
+  // a stop of the description's own beside it: the description needs fixing too
+  const state = reviewState({ readAt: '', vehicle: car, settings, description: description.replace(/\d{1,3}(,\d{3})+ miles/, '12,000 miles') });
+  const r = staleReader(state, () => ({ ok: true, vehicle: { ...FRESH_CAR(), descriptionRaw: 'Comes with two keys.' } }));
+  assert.equal(await r.run(), false);
+  assert.match(r.calls.said.at(-1)[0], /^The website changed this car since it was read\. The description no longer matches it: Your role "2nd shift sales" has a number in it, [^]+\. Fix the description, then click Open the Marketplace form again\.$/);
 });
 
 test('a car that sold, went sale-pending, turned new or lost its price since it was read is stopped before the form is filled', async () => {
