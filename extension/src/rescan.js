@@ -112,7 +112,8 @@ function scanBefore(entry, snap) {
 // time when the listing has one, and for a car the scan doesn't hold. A
 // listing that carries no time at all can be read off any scan. The side
 // panel's price update reads the last scan through it too (sidepanel.js
-// upkeepPriceNow), so it fills the price the To do item asked for.
+// upkeepPriceNow), so it fills the price the To do item asked for, and so
+// does My listings (listingLine).
 export function scanCar(entry, snap, vin) {
   const car = snap && snap.vehicles && typeof snap.vehicles === 'object' ? snap.vehicles[vin] : null;
   if (!car) return null;
@@ -255,21 +256,47 @@ export function pendingText(e) {
 
 // A posted car's line on My listings, from the last scan's entry for it
 // (null when the scan did not have the car), the price on the listing and
-// the website price on the dealer's basis. The first that applies: not on
-// the website, sold or sale-pending, held back by the pre-owned check (the
-// website now calls it new, demo or loaner, or its details need a look),
-// a different price, else matching. The same states To do raises on every
-// scan while the listing is still marked posted (diffScans).
-export function listingStatus(now, listedPrice, sitePrice) {
+// the website price on the listing's basis (listingLine). The first that
+// applies: not on the website, sold or sale-pending, held back by the
+// pre-owned check (the website now calls it new, demo or loaner, or its
+// details need a look), a different price, else matching. The same states
+// To do raises on every scan while the listing is still marked posted
+// (diffScans). `compared` is false when the scan was taken before the
+// listing got its price (scanCar): a website price there that is not the
+// listing's (or none) is the website as it was before, not a change since,
+// so the price waits for the next scan (`waits`), and nothing is offered to
+// record.
+export function listingStatus(now, listedPrice, sitePrice, compared = true) {
   if (!now) return { tone: 'bad', text: 'Not on the website at the last scan' };
   const held = pendingText(now);
   if (held) return { tone: 'bad', text: held };
   if (now.decision === DECISION.SKIP) return { tone: 'bad', text: 'Not pre-owned on the website' };
   if (now.decision === DECISION.REVIEW) return { tone: 'warn', text: 'Needs a look (see To do)' };
+  if (!compared && sitePrice !== listedPrice) return { tone: '', text: 'Price compared at the next scan', waits: true };
   // as To do says it (diffScans): the listing has a price the website no longer shows
   if (listedPrice && !sitePrice) return { tone: 'warn', text: 'Website no longer shows a price' };
   if (sitePrice && sitePrice !== listedPrice) return { tone: 'warn', text: 'Website price changed', priceChanged: true };
   return { tone: 'good', text: 'Matches the website' };
+}
+
+// A posted listing's line on My listings, from the last scan (`snap`): the
+// car as that scan shows it (`now`, null when it does not hold the car), the
+// basis the listing's price is on (postedBasis: the entry's own; for an entry
+// with none, read off the last scan only when it was taken once the listing
+// had its price, scanCar, as the rescan reads it; else the setting `basis`),
+// the website price on that basis (`site`) and the line (listingStatus). On
+// a scan from before the listing's price (posted or updated since, on this
+// computer or another), a website price that differs from the listing's is
+// not named (`site` null) and the line waits for the next scan, so Updated
+// never records a price from before the listing's own; one that equals it
+// still matches. What the scan says about the car itself shows either way.
+export function listingLine(entry, snap, vin, basis = 'website') {
+  const now = snap && snap.vehicles && typeof snap.vehicles === 'object' ? snap.vehicles[vin] || null : null;
+  const since = scanCar(entry, snap, vin);
+  const own = postedBasis(entry, basis, [since]);
+  const site = now ? basisPrice(now, own) : null;
+  const status = listingStatus(now, entry ? entry.price : undefined, site, Boolean(since));
+  return { now, basis: own, site: status.waits ? null : site, status };
 }
 
 function whatGotReady(before, now) {

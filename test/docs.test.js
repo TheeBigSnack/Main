@@ -109,6 +109,7 @@ test('help.md names every state My listings can show a posted car in, as the cod
     listingStatus({ decision: 'not-ready' }, 1, null),
     listingStatus({ decision: 'ready' }, 1, 2),
     listingStatus({ decision: 'ready' }, 1, 1),
+    listingStatus({ decision: 'ready' }, 1, 2, false), // the last scan is from before the listing's price (rescan.js listingLine)
   ];
   assert.equal(new Set(states.map((s) => s.text)).size, states.length);
   for (const s of states) assert.ok(help.includes(`"${s.text}"`), `docs/help.md does not name the My listings state "${s.text}"`);

@@ -562,6 +562,70 @@ test('a scan from before a listing got its price never decides its basis: a webs
   assert.equal(withSeenBasis(synced, shows(2, 26163, 25163), shows(3, 26663, 25663))[VIN.ram].basis, 'website', 'the oldest scan since the post decides');
 });
 
+// My listings (popup.js viewMine) takes each listing's line from listingLine,
+// with the basis read as the rescan reads it (scanCar, postedBasis). On a
+// last scan taken before the listing got its price, a website price that
+// differs from the listing's is the website as it was before, not a change
+// since: no price is named, there is nothing for Updated to record, and the
+// price is compared at the next scan. What the scan says about the car
+// itself (gone, sold, sale-pending, held back by the pre-owned check) shows
+// as before, as To do raises it on every scan.
+test('My listings\' line: a scan from before the listing\'s price names no price of its own and offers nothing to record; a scan since reads as the rescan does', () => {
+  const line = rescan.listingLine;
+  assert.equal(typeof line, 'function', 'rescan.js exports listingLine');
+  const at = (day) => `2026-10-0${day}T09:00:00.000Z`;
+  const shows = (day, price, lower) => repriced(snapshot(LOT, MY_STORE, at(day)), VIN.ram, price, lower);
+  const WAITS = { tone: '', text: 'Price compared at the next scan', waits: true };
+  const MATCHES = { tone: 'good', text: 'Matches the website' };
+  const parts = (l) => [l.basis, l.site, l.status];
+
+  // the last scan here is from before the website's $500 cut; the listing was posted after it, elsewhere, with no basis
+  const before = shows(1, 27663, 27173);
+  const synced = { name: 'Ram', price: 27163, postedAt: at(2) };
+  assert.deepEqual(parts(line(synced, before, VIN.ram, 'beforeFees')), ['beforeFees', null, WAITS], 'on neither price: the setting\'s older price is not named');
+  assert.deepEqual(parts(line(synced, before, VIN.ram, 'website')), ['website', null, WAITS]);
+  // cut by exactly the gap: the older scan's lower price is the listing's, and is not read as its basis
+  const gap = shows(1, 27163, 26673);
+  assert.deepEqual(parts(line({ ...synced, price: 26673 }, gap, VIN.ram, 'website')), ['website', null, WAITS]);
+  // the price the setting gives on that scan is the listing's: it matches, nothing is read and nothing offered
+  assert.deepEqual(parts(line({ ...synced, price: 27663 }, before, VIN.ram, 'website')), ['website', 27663, MATCHES]);
+  // the same for a listing that carries its basis (posted here after the scan, at the price read when the form was filled)
+  assert.deepEqual(parts(line({ ...synced, basis: 'website' }, before, VIN.ram, 'beforeFees')), ['website', null, WAITS]);
+  assert.deepEqual(parts(line({ ...synced, price: 27173, basis: 'beforeFees' }, before, VIN.ram, 'website')), ['beforeFees', 27173, MATCHES]);
+  // a price updated after the scan counts from the update
+  const updated = { name: 'Ram', price: 27163, basis: 'website', postedAt: '2026-09-20T09:00:00.000Z', updatedAt: at(2) };
+  assert.deepEqual(parts(line(updated, before, VIN.ram, 'website')), ['website', null, WAITS]);
+  // the website's call for price on a scan from before is not "no longer shows a price" either
+  const noPrice = repriced(before, VIN.ram, null, null);
+  assert.deepEqual(parts(line(synced, noPrice, VIN.ram, 'website')), ['website', null, WAITS]);
+  // what the scan says about the car itself still shows
+  const pending = { ...before, vehicles: { ...before.vehicles, [VIN.ram]: { ...before.vehicles[VIN.ram], status: 'pend-sale' } } };
+  assert.equal(line(synced, pending, VIN.ram, 'website').status.text, 'Sale pending on the website');
+  const skipped = { ...before, vehicles: { ...before.vehicles, [VIN.ram]: { ...before.vehicles[VIN.ram], decision: 'skip' } } };
+  assert.equal(line(synced, skipped, VIN.ram, 'website').status.text, 'Not pre-owned on the website');
+  assert.deepEqual(parts(line(synced, snapshot([], MY_STORE, at(1)), VIN.ram, 'website')), ['website', null, { tone: 'bad', text: 'Not on the website at the last scan' }]);
+  assert.equal(line(synced, null, VIN.ram, 'website').status.text, 'Not on the website at the last scan', 'no scan at all');
+  // a scan with no time, for a listing that has one, is from before as far as anyone can tell
+  assert.deepEqual(parts(line(synced, { ...before, takenAt: undefined }, VIN.ram, 'website')), ['website', null, WAITS]);
+
+  // a scan taken since the listing's price: as today
+  const since = shows(3, 27163, 26673);
+  assert.deepEqual(parts(line({ ...synced, price: 26673 }, since, VIN.ram, 'website')), ['beforeFees', 26673, MATCHES], 'the basis read off it');
+  assert.deepEqual(parts(line(synced, since, VIN.ram, 'beforeFees')), ['website', 27163, MATCHES]);
+  assert.deepEqual(parts(line({ ...synced, price: 27663 }, since, VIN.ram, 'website')), ['website', 27163, { tone: 'warn', text: 'Website price changed', priceChanged: true }], 'on neither price: the setting, and Updated records its price');
+  assert.deepEqual(parts(line({ ...synced, price: 27663 }, since, VIN.ram, 'beforeFees')), ['beforeFees', 26673, { tone: 'warn', text: 'Website price changed', priceChanged: true }]);
+  assert.deepEqual(parts(line({ ...synced, price: 27663, basis: 'website' }, since, VIN.ram, 'beforeFees')), ['website', 27163, { tone: 'warn', text: 'Website price changed', priceChanged: true }]);
+  assert.deepEqual(parts(line({ ...synced, postedAt: at(3) }, since, VIN.ram, 'beforeFees')), ['website', 27163, MATCHES], 'taken the moment the listing got its price counts as since');
+  // a listing with no time at all is read off any scan, as the rescan reads it
+  assert.deepEqual(parts(line({ name: 'Ram', price: 26673 }, gap, VIN.ram, 'website')), ['beforeFees', 26673, MATCHES]);
+  // the website shows no price: said, as To do says it
+  assert.deepEqual(parts(line(synced, repriced(since, VIN.ram, null, null), VIN.ram, 'website')), ['website', null, { tone: 'warn', text: 'Website no longer shows a price' }]);
+  // and the line agrees with the rescan's price for the listing (listingWebsitePrice) wherever it names one
+  for (const [entry, snap, basis] of [[{ ...synced, price: 26673 }, since, 'website'], [{ ...synced, price: 27663 }, since, 'beforeFees'], [{ ...synced, price: 27663 }, before, 'website']]) {
+    assert.equal(line(entry, snap, VIN.ram, basis).site, listingWebsitePrice(entry, snap.vehicles[VIN.ram], basis, [rescan.scanCar(entry, snap, VIN.ram)]));
+  }
+});
+
 // Every place that saves a scan records the basis it read (scanRunner.js
 // keepSeenBasis): the popup's Scan, set-up's read and the background rescan,
 // each handing over the scan's diff. A read held back as a website hiccup
@@ -594,11 +658,12 @@ test('the popup, set-up and the background rescan each record the basis a scan r
 
 // My listings (popup.js viewMine), as written, with the page around it
 // stubbed: each row's parts are collected as viewMine hands them over.
-function myListings(posted, vehicles, basis) {
+// `snap`: the last scan.
+function myListings(posted, snap, basis) {
   const src = readFileSync(new URL('../extension/popup.js', import.meta.url), 'utf8');
   const start = src.indexOf('function viewMine(');
   assert.ok(start >= 0, 'viewMine is defined');
-  const state = { settings: { basis } };
+  const state = { settings: { basis }, snapshot: snap };
   const shown = [];
   const scope = {
     state,
@@ -609,17 +674,16 @@ function myListings(posted, vehicles, basis) {
     money: (n) => `$${n}`,
     when: (x) => String(x),
     day: (x) => String(x),
-    // the listing's own basis (rescan.js postedBasis) and its price and status on it
+    // the listing's line from the last scan (rescan.js listingLine) and the basis the setting gives (postedBasis)
     postedBasis: rescan.postedBasis,
-    basisPrice: rescan.basisPrice,
-    listingStatus: rescan.listingStatus,
+    listingLine: rescan.listingLine,
     notShared: () => null,
     notSharedText: String,
     viewColleagues: () => '',
     openListing: () => '', // the Open listing link (popup.test.js checks it)
   };
   const viewMine = new Function(...Object.keys(scope), `${src.slice(start, src.indexOf('\n}\n', start) + 2)}\nreturn viewMine;`)(...Object.values(scope));
-  viewMine({ mine: Object.entries(posted).map(([vin, p]) => ({ vin, ...p, now: vehicles[vin] || null })) });
+  viewMine({ mine: Object.entries(posted).map(([vin, p]) => ({ vin, ...p, now: snap.vehicles[vin] || null })) });
   return shown.map((r) => ({ changed: /Website price changed/.test(r.sub), right: r.right, updated: (r.action.match(/data-action="priceUpdated"[^>]*data-price="(\d+)"/) || [])[1] || null }));
 }
 
@@ -627,20 +691,20 @@ test('My listings compares each listing on its own price basis: a switch of Pric
   const s = snapshot(LOT); // the Ram: 27,163 main, 26,673 before fees
   for (const [postedAs, setting] of [['website', 'beforeFees'], ['beforeFees', 'website']]) {
     const posted = markPosted({}, s.vehicles[VIN.ram], postedAs, AT);
-    const [ram] = myListings(posted, s.vehicles, setting);
+    const [ram] = myListings(posted, s, setting);
     assert.deepEqual(ram, { changed: false, right: `Listed $${posted[VIN.ram].price}`, updated: null }, `posted at the ${postedAs} price, setting now ${setting}`);
   }
   // a listing posted before the basis was recorded: the website price it carries tells
-  assert.equal(myListings({ [VIN.ram]: { name: 'Ram', price: 27163, postedAt: AT } }, s.vehicles, 'beforeFees')[0].changed, false);
-  assert.equal(myListings({ [VIN.ram]: { name: 'Ram', price: 26673, postedAt: AT } }, s.vehicles, 'website')[0].changed, false);
+  assert.equal(myListings({ [VIN.ram]: { name: 'Ram', price: 27163, postedAt: AT } }, s, 'beforeFees')[0].changed, false);
+  assert.equal(myListings({ [VIN.ram]: { name: 'Ram', price: 26673, postedAt: AT } }, s, 'website')[0].changed, false);
   // a real drop shows at the listing's own basis, and Updated records that price: the next scan has nothing left
   const posted = markPosted({}, s.vehicles[VIN.ram], 'website', AT);
   const dropped = repriced(snapshot(LOT), VIN.ram, 26163, 25673);
-  const [ram] = myListings(posted, dropped.vehicles, 'beforeFees');
+  const [ram] = myListings(posted, dropped, 'beforeFees');
   assert.deepEqual(ram, { changed: true, right: 'Listed $27163<br>Website $26163', updated: '26163' });
   const updated = markPriceUpdated(posted, VIN.ram, Number(ram.updated), '2026-09-27T21:00:00.000Z');
   assert.deepEqual(moves(diffScans(dropped, dropped, { posted: updated, confirm: confirmed(), basis: 'beforeFees' })), []);
-  assert.equal(myListings(updated, dropped.vehicles, 'beforeFees')[0].changed, false);
+  assert.equal(myListings(updated, dropped, 'beforeFees')[0].changed, false);
   // the helper itself: the listing's basis, read from this scan when the entry has none
   assert.equal(rescan.listingWebsitePrice?.({ price: 27163, basis: 'website' }, s.vehicles[VIN.ram], 'beforeFees'), 27163);
   assert.equal(rescan.listingWebsitePrice?.({ price: 26673 }, s.vehicles[VIN.ram], 'website'), 26673);

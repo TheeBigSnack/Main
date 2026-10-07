@@ -659,6 +659,111 @@ test('a price item listed before Price to post changed is the website\'s change 
   assert.equal(flagged(), 1, 'and the numbers count only the one real price change');
 });
 
+// This computer's last scan of the website, as a scan saved it, moved back in
+// time to `takenAt` and showing the Ram at `price`, or `lower` before the fee.
+async function lastScanOf(ram, settings, takenAt, price, lower) {
+  const first = await loadPopup({ local: { [k.settings]: settings } });
+  await first.scan();
+  assert.equal(first.status(), '', 'the scan went through');
+  const last = structuredClone(first.local[k.snapshot]);
+  last.takenAt = takenAt;
+  Object.assign(last.vehicles[ram.vin], { price, priceBeforeFees: lower });
+  return last;
+}
+
+// My listings reads the price basis of a listing that has none (posted with
+// an older version on another computer, brought here by sync) as the rescan
+// does: only off a scan taken once the listing had its price (src/rescan.js
+// scanCar). The last scan here is from before: after the website's $500 cut,
+// the listing's price is on neither of that scan's prices, and the setting
+// (the lower second price) would name that scan's old lower price as the
+// website's and offer Updated to record it, a raise the website never made.
+test('My listings names no website price for a listing with no basis priced after the last scan, and offers no Updated; the next scan compares it', async () => {
+  const ram = vehicle('usedNormal'); // $27,163 on the website, or $26,673 before the fee
+  const settings = { ...MY_STORE, basis: 'beforeFees' };
+  const last = await lastScanOf(ram, settings, '2026-10-01T09:00:00.000Z', 27663, 27173); // before the cut
+  const posted = { [ram.vin]: { name: ram.name, price: 27163, postedAt: '2026-10-02T09:00:00.000Z' } }; // at the new main price
+  const p = await loadPopup({ local: { [k.settings]: settings, [k.snapshot]: last, [k.posted]: structuredClone(posted) } });
+  await p.tab('mine');
+  const mine = p.panel();
+  assert.doesNotMatch(mine, /\$27,173|\$27,663/, 'no price of a scan from before the listing\'s price is named');
+  assert.doesNotMatch(mine, /Website price changed|data-action="priceUpdated"/, 'and there is no Updated to record one');
+  assert.doesNotMatch(mine, /posted at the/, 'nor a basis read off that scan');
+  assert.match(mine, /<span class="pill ?">Price compared at the next scan<\/span>/);
+  assert.match(mine, /Listed \$27,163/);
+  assert.deepEqual(p.local[k.posted], posted, 'nothing recorded');
+
+  // the next scan, the website as it is now: it reads the basis the listing is on, and My listings compares on it
+  await p.scan();
+  assert.equal(p.status(), '', 'the scan went through');
+  assert.deepEqual([p.local[k.posted][ram.vin].price, p.local[k.posted][ram.vin].basis], [27163, 'website']);
+  await p.tab('mine');
+  assert.match(p.panel(), /<span class="pill good">Matches the website<\/span>/);
+  assert.match(p.panel(), /posted at the website&#39;s main price; your price setting now applies to new posts/);
+  assert.doesNotMatch(p.panel(), /data-action="priceUpdated"/);
+
+  // a cut by exactly the gap between the two prices: the new main price is that older scan's lower one,
+  // which would read as posted at the lower second price
+  const gap = await lastScanOf(ram, { ...MY_STORE, basis: 'website' }, '2026-10-01T09:00:00.000Z', 27163, 26673);
+  const cut = { [ram.vin]: { name: ram.name, price: 26673, postedAt: '2026-10-02T09:00:00.000Z' } };
+  const q = await loadPopup({ local: { [k.settings]: { ...MY_STORE, basis: 'website' }, [k.snapshot]: gap, [k.posted]: structuredClone(cut) } });
+  await q.tab('mine');
+  assert.doesNotMatch(q.panel(), /posted at the|\$27,163|data-action="priceUpdated"/, 'no basis and no price read off a scan from before');
+  assert.match(q.panel(), /<span class="pill ?">Price compared at the next scan<\/span>/);
+  assert.deepEqual(q.local[k.posted], cut);
+});
+
+// A listing with no basis whose price is older than the last scan is read as
+// before: the basis off that scan where only one of its prices is the
+// listing's, else the setting, and Updated records the website's price on it.
+test('My listings still reads the basis of a listing with no basis off a scan taken since its price, and Updated records the website price on it', async () => {
+  const ram = vehicle('usedNormal'); // $27,163 on the website, or $26,673 before the fee
+  const settings = { ...MY_STORE, basis: 'website' };
+  const last = await lastScanOf(ram, settings, '2026-10-03T09:00:00.000Z', 27163, 26673);
+  const lower = { [ram.vin]: { name: ram.name, price: 26673, postedAt: '2026-10-02T09:00:00.000Z' } }; // posted at the lower second price before that scan
+  const p = await loadPopup({ local: { [k.settings]: settings, [k.snapshot]: last, [k.posted]: lower } });
+  await p.tab('mine');
+  assert.match(p.panel(), /<span class="pill good">Matches the website<\/span>/);
+  assert.match(p.panel(), /posted at the lower second price; your price setting now applies to new posts/, 'the basis read off the scan taken since');
+
+  // posted at the website's earlier $27,663 before that scan: on neither of its prices, so compared on the setting
+  const earlier = { [ram.vin]: { name: ram.name, price: 27663, postedAt: '2026-10-02T09:00:00.000Z' } };
+  const q = await loadPopup({ local: { [k.settings]: settings, [k.snapshot]: last, [k.posted]: earlier } });
+  await q.tab('mine');
+  assert.match(q.panel(), /<span class="pill warn">Website price changed<\/span>/);
+  assert.match(q.panel(), /Website \$27,163/);
+  assert.match(q.panel(), new RegExp(`data-action="priceUpdated" data-vin="${ram.vin}" data-price="27163"`));
+  await q.click('priceUpdated', { vin: ram.vin, price: '27163' });
+  assert.equal(q.local[k.posted][ram.vin].price, 27163, 'Updated records the website\'s price');
+  assert.ok(Date.parse(q.local[k.posted][ram.vin].updatedAt) > Date.parse(last.takenAt));
+  await q.tab('mine');
+  assert.match(q.panel(), /<span class="pill good">Matches the website<\/span>/, 'and the listing then matches it');
+  assert.doesNotMatch(q.panel(), /data-action="priceUpdated"/);
+});
+
+// A listing posted here after the last scan, at the price the side panel read
+// on the website when it filled the form, after the website changed it: the
+// last scan's price is from before, so it is not the website's price now,
+// and Updated there would record a price the listing was never asked to take
+// (here a raise back to the price before the cut).
+test('My listings does not ask a listing posted after the last scan to take that scan\'s older price', async () => {
+  const ram = vehicle('usedNormal'); // $27,163 on the website, or $26,673 before the fee
+  const settings = { ...MY_STORE, basis: 'website' };
+  const last = await lastScanOf(ram, settings, '2026-10-01T09:00:00.000Z', 27663, 27173); // before the cut
+  const posted = { [ram.vin]: { name: ram.name, price: 27163, basis: 'website', postedAt: '2026-10-02T09:00:00.000Z' } };
+  const p = await loadPopup({ local: { [k.settings]: settings, [k.snapshot]: last, [k.posted]: structuredClone(posted) } });
+  await p.tab('mine');
+  assert.doesNotMatch(p.panel(), /\$27,663|Website price changed|data-action="priceUpdated"/);
+  assert.match(p.panel(), /<span class="pill ?">Price compared at the next scan<\/span>/);
+  assert.deepEqual(p.local[k.posted], posted, 'nothing recorded');
+
+  // the same listing, posted at the price the last scan showed: it matches, as before
+  const same = { [ram.vin]: { ...posted[ram.vin], price: 27663 } };
+  const q = await loadPopup({ local: { [k.settings]: settings, [k.snapshot]: last, [k.posted]: same } });
+  await q.tab('mine');
+  assert.match(q.panel(), /<span class="pill good">Matches the website<\/span>/);
+});
+
 // Settings says before the save that a change is for new posts, with how
 // many listings the person has here; only where the website shows a lower
 // second price, since elsewhere there is no other price to choose.
