@@ -324,7 +324,7 @@ try {
   assert.equal(await panel.evaluate(() => document.activeElement && document.activeElement.id), 'kept-description', 'the keyboard lands on the kept text, where the typing box was');
   assert.equal(await panel.getAttribute('#kept-description', 'readonly'), '', 'read-only');
   assert.equal(await panel.getAttribute('button[aria-label="Copy the description"]', 'data-copy'), typed, 'Copy copies it');
-  assert.match(await panel.textContent('#notSavedKept'), /What you typed here is below, kept on this screen only/);
+  assert.equal(await panel.textContent('#notSavedKept'), 'The text from this side panel is below, kept on this screen only: copy it before you leave this screen.');
   assert.equal(await panel.textContent('#notSavedEither'), 'Not saved either, so do it again in that window if you still want it: the photos picked.');
   assert.equal(await panel.$('#openForm'), null, 'the copy is left: no form button');
   assert.deepEqual(await savedFlow(), newer, 'the other window\'s post is not written over');

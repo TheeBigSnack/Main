@@ -241,14 +241,15 @@ async function saveFlow({ quiet = false } = {}) {
 // is written over that post, and this panel does no more with its copy: it
 // says what happened and what to do, keeps what was typed here on screen to
 // copy, and names what else done here was not saved (src/notSaved.js says
-// which). The text is read from the boxes on screen, so what was typed while
-// the save ran is kept too. A copy of the same car's post ends no attempt in
-// the pilot numbers: the other window's panel carries that attempt on. A
-// post recorded, or a car stopped, loses nothing, and stays as it is.
+// which). The description is read from its box, so what was typed while the
+// save ran is kept too; Listing link is what was typed into it (onInput sets
+// listingTyped on every keystroke), never the link the panel offered there.
+// A copy of the same car's post ends no attempt in the pilot numbers: the
+// other window's panel carries that attempt on. A post recorded, or a car
+// stopped, stays as it is (a stop shows why, as in one window).
 async function notSavedHere(other, saved) {
   const box = $('description');
-  const link = $('listingUrl');
-  const copy = { ...state, description: box ? box.value : state.description, listingTyped: link ? link.value : state.listingTyped };
+  const copy = { ...state, description: box ? box.value : state.description };
   const report = notSavedReport({ copy, broughtBack: state.broughtBack, saved, other });
   if (!report) return;
   clearTimeout(inputTimer); // a keystroke's save still waiting: its text is in the box read above

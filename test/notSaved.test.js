@@ -26,7 +26,9 @@ test('a refused save of a copy brought back from another window says what happen
   const r = notSavedReport({ copy, broughtBack, saved: formOpenThere, other: FORM });
   assert.equal(r.text, "2020 Make Model A's Marketplace form is open from the side panel in another Chrome window, and the post changed there after this side panel showed it, so what was done here was not saved. Finish the post there; opening the side panel in that window brings it back.");
   assert.deepEqual(r.kept, [{ key: 'description', label: 'Description', value: typed }], 'the description typed here is kept, whole, closing line and all');
-  assert.equal(r.keptText, 'What you typed here is below, kept on this screen only: copy it before you close this side panel or click Back to the list.');
+  // the text is this side panel's, typed here or not (a description begun or rewritten here), and
+  // anything that leaves this screen clears it: Back, closing the panel, a To do item, set-up, a post
+  assert.equal(r.keptText, 'The text from this side panel is below, kept on this screen only: copy it before you leave this screen.');
   assert.deepEqual(r.notSaved, ['the photos picked']);
   assert.equal(r.notSavedText, 'Not saved either, so do it again in that window if you still want it: the photos picked.');
 
@@ -36,10 +38,12 @@ test('a refused save of a copy brought back from another window says what happen
 });
 
 test('only what was done in this panel, and is not in the post the other window saved, is kept or named', () => {
-  // nothing done here: the panel still says the save was refused, and keeps and names nothing
+  // nothing done here (the car read again at Open the Marketplace form, say): the panel says where
+  // the post is and what to do, claims nothing was lost, and keeps and names nothing
   const idle = notSavedReport({ copy: { ...broughtBack }, broughtBack, saved: formOpenThere, other: FORM });
-  assert.match(idle.text, /so what was done here was not saved/);
+  assert.equal(idle.text, "2020 Make Model A's Marketplace form is open from the side panel in another Chrome window, and the post changed there after this side panel showed it. Finish the post there; opening the side panel in that window brings it back.");
   assert.deepEqual([idle.kept, idle.keptText, idle.notSaved, idle.notSavedText], [[], '', [], '']);
+  assert.equal(notSavedReport({ copy: { ...broughtBack }, broughtBack, saved: { ...broughtBack, saveId: 'save-2' }, other: REVIEW }).text, '2020 Make Model A is being posted from the side panel in another Chrome window, and the post changed there after this side panel showed it. Finish or stop the post there.');
 
   // what the other window changed itself is its own, not something lost here
   const theirs = { ...formOpenThere, description: 'typed in window 1', photoPick: ['https://img.example.test/5.jpg'], colorGuess: { exterior: 'Red', interior: 'Black', confidence: 'high' } };
@@ -89,10 +93,14 @@ test('a copy of a post begun in this panel, or of another car than the one under
   const elsewhere = notSavedReport({ copy: { ...broughtBack, photoPick: ['https://img.example.test/1.jpg'] }, broughtBack, saved: { vin: 'BBB', windowId: 1, step: 'review', vehicle: { name: other.name } }, other });
   assert.equal(elsewhere.text, '2021 Make Model B is being posted from the side panel in another Chrome window. One post from a website goes at a time, so what was done here for 2020 Make Model A was not saved. Finish or stop that post there first.');
   assert.equal(elsewhere.notSavedText, 'Not saved either, so do it again when you post 2020 Make Model A if you still want it: the photos picked.');
-  const form = notSavedReport({ copy: { ...broughtBack }, broughtBack, saved: null, other: { ...other, where: 'form' } });
+  const form = notSavedReport({ copy: { ...broughtBack, highlights: ['Heated seats'] }, broughtBack, saved: null, other: { ...other, where: 'form' } });
   assert.equal(form.text, "2021 Make Model B's Marketplace form is open from the side panel in another Chrome window. One post from a website goes at a time, so what was done here for 2020 Make Model A was not saved. Finish that post there first; opening the side panel in that window brings it back.");
+  // nothing done here for this car: nothing is said to be lost
+  assert.equal(notSavedReport({ copy: { ...broughtBack }, broughtBack, saved: null, other: { ...other, where: 'form' } }).text, "2021 Make Model B's Marketplace form is open from the side panel in another Chrome window. One post from a website goes at a time, so this side panel leaves its copy of 2020 Make Model A's post. Finish that post there first; opening the side panel in that window brings it back.");
+  assert.equal(notSavedReport({ copy: { ...broughtBack }, broughtBack, saved: null, other }).text, "2021 Make Model B is being posted from the side panel in another Chrome window. One post from a website goes at a time, so this side panel leaves its copy of 2020 Make Model A's post. Finish or stop that post there first.");
   // a car with no name read yet goes by its VIN
-  assert.match(notSavedReport({ copy: { ...broughtBack, vehicle: null }, broughtBack, saved: null, other }).text, /what was done here for AAA was not saved/);
+  assert.match(notSavedReport({ copy: { ...broughtBack, vehicle: null, description: 'typed' }, broughtBack, saved: null, other }).text, /what was done here for AAA was not saved/);
+  assert.match(notSavedReport({ copy: { ...broughtBack, vehicle: null }, broughtBack, saved: null, other }).text, /leaves its copy of AAA's post/);
 });
 
 test('a refused save is said only from a review, a fields check or a form waiting for Publish', () => {
@@ -111,7 +119,9 @@ test('a refused save is said only from a review, a fields check or a form waitin
 test('what the panel says of a refused save passes the copy checks', () => {
   const everything = { ...broughtBack, description: 'x', descriptionSource: 'claude', photoPick: [], highlights: ['a'], colorGuess: { exterior: 'Blue' }, vinCheck: { online: { ok: true } }, listingTyped: 'y' };
   for (const other of [FORM, REVIEW, { where: 'form', vin: 'BBB', name: 'B' }, { where: 'review', vin: 'BBB', name: 'B' }]) {
-    const r = notSavedReport({ copy: everything, broughtBack, saved: formOpenThere, other });
-    for (const text of [r.text, r.keptText, r.notSavedText, ...r.kept.map((k) => k.label)]) assert.deepEqual(copyProblems(text), [], text);
+    for (const copy of [everything, { ...broughtBack }]) {
+      const r = notSavedReport({ copy, broughtBack, saved: formOpenThere, other });
+      for (const text of [r.text, r.keptText, r.notSavedText, ...r.kept.map((k) => k.label)]) assert.deepEqual(copyProblems(text), [], text);
+    }
   }
 });

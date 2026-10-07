@@ -7,9 +7,11 @@
 // screen. Plain data in, plain data out; the panel draws it and gives way.
 
 // The steps whose refused save is said: a review, a fields check, a form
-// waiting for Publish. A post recorded (done: the posted list has it) or a
-// car stopped (blocked) loses nothing, and a post just starting or opening
-// its form gives way and says so itself (startFlow, openForm).
+// waiting for Publish. A post recorded (done: the posted list has it) loses
+// nothing; a car the re-check stopped (blocked) shows why it stopped, and
+// nothing more, as it does in one window, where its text is not shown again
+// either; a post just starting or opening its form gives way and says so
+// itself (startFlow, openForm).
 export const NOT_SAVED_STEPS = Object.freeze(['review', 'probe', 'publish']);
 
 const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
@@ -34,11 +36,12 @@ const vinOnline = (p) => (p.vinCheck && p.vinCheck.online && p.vinCheck.online.o
  *   saved: the post saved for the website now, which the save left in place.
  *   other: whose post holds the website (sidepanel.js liveElsewhere):
  *     { where: 'form' | 'review', vin, name }.
- * Returns null when nothing is said (no car, not refused, or a step in which
- * nothing is lost: NOT_SAVED_STEPS). Otherwise { text, kept, keptText,
+ * Returns null when nothing is said (no car, not refused, or a step outside
+ * NOT_SAVED_STEPS). Otherwise { text, kept, keptText,
  * notSaved, notSavedText }: text says what happened and what to do; kept
  * lists the text typed or written here ({ key, label, value }) that the
- * panel shows to copy; notSaved names what else done here was lost.
+ * panel shows to copy; notSaved names what else done here was lost. The
+ * text says something was lost only when kept or notSaved has anything.
  * Something counts as done here when it changed since the copy was brought
  * back, and as lost when the saved post does not have it as well (another
  * car's post has none of it).
@@ -63,22 +66,29 @@ export function notSavedReport({ copy, broughtBack = null, saved = null, other }
   if (lost(colorGuess)) notSaved.push('the colour guess from the photos');
   if (lost(vinOnline)) notSaved.push('the VIN check with NHTSA');
 
+  // what was lost is said only when something was (the car read again at
+  // Open the Marketplace form loses nothing the person did)
+  const lostAny = kept.length > 0 || notSaved.length > 0;
   let said;
   if (sameCar) {
+    const changed = `the post changed there after this side panel showed it${lostAny ? ', so what was done here was not saved' : ''}`;
     said = other.where === 'form'
-      ? `${name}'s Marketplace form is open from the side panel in another Chrome window, and the post changed there after this side panel showed it, so what was done here was not saved. Finish the post there; opening the side panel in that window brings it back.`
-      : `${name} is being posted from the side panel in another Chrome window, and the post changed there after this side panel showed it, so what was done here was not saved. Finish or stop the post there.`;
+      ? `${name}'s Marketplace form is open from the side panel in another Chrome window, and ${changed}. Finish the post there; opening the side panel in that window brings it back.`
+      : `${name} is being posted from the side panel in another Chrome window, and ${changed}. Finish or stop the post there.`;
   } else {
+    const oneAtATime = `One post from a website goes at a time, so ${lostAny ? `what was done here for ${name} was not saved` : `this side panel leaves its copy of ${name}'s post`}.`;
     said = other.where === 'form'
-      ? `${other.name}'s Marketplace form is open from the side panel in another Chrome window. One post from a website goes at a time, so what was done here for ${name} was not saved. Finish that post there first; opening the side panel in that window brings it back.`
-      : `${other.name} is being posted from the side panel in another Chrome window. One post from a website goes at a time, so what was done here for ${name} was not saved. Finish or stop that post there first.`;
+      ? `${other.name}'s Marketplace form is open from the side panel in another Chrome window. ${oneAtATime} Finish that post there first; opening the side panel in that window brings it back.`
+      : `${other.name} is being posted from the side panel in another Chrome window. ${oneAtATime} Finish or stop that post there first.`;
   }
   const one = notSaved.length === 1;
   const again = sameCar ? 'in that window' : `when you post ${name}`;
   return {
     text: said,
     kept,
-    keptText: kept.length ? 'What you typed here is below, kept on this screen only: copy it before you close this side panel or click Back to the list.' : '',
+    // the text may not have been typed here (a description begun or rewritten
+    // here), and anything that takes this screen's place clears it
+    keptText: kept.length ? 'The text from this side panel is below, kept on this screen only: copy it before you leave this screen.' : '',
     notSaved,
     notSavedText: notSaved.length ? `Not saved either, so do ${one ? 'it' : 'them'} again ${again} if you still want ${one ? 'it' : 'them'}: ${notSaved.join(', ')}.` : '',
   };

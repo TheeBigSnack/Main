@@ -3422,6 +3422,31 @@ test('a save refused in a second window\'s side panel is said there, with the te
   assert.deepEqual(t.store[key], formPost);
 });
 
+// A copy at Publish in a second window shows the listing link its own
+// watcher offered (the box filled from the listing page it read,
+// offeredLink), which nobody typed. A refused save there keeps what was
+// typed into Listing link (state.listingTyped, set on every keystroke),
+// never the link the panel offered; the description is read from its box,
+// where typing lands before its save. sidepanel.js's own notSavedHere, with
+// src/notSaved.js.
+test('a refused save in a second window keeps the listing link typed there, not the one its side panel offered', async () => {
+  const run = async (listingTyped) => {
+    const post = { vin: 'AAA', windowId: 1, step: 'publish', fbTabId: 100, vehicle: { vin: 'AAA', name: '2020 Make Model A' }, description: 'The template.', descriptionSource: 'template', photoPick: null, highlights: null, colorGuess: null, vinCheck: null, saveId: 'save-1' };
+    const state = { ...JSON.parse(JSON.stringify(post)), origin: 'https://www.example-motors.test', detected: { status: 'listing', url: 'https://www.facebook.com/marketplace/item/111/', verified: true }, listingTyped, broughtBack: JSON.parse(JSON.stringify(post)) };
+    const boxes = { description: { value: 'The template.' }, listingUrl: { value: listingTyped ?? 'https://www.facebook.com/marketplace/item/111/' } };
+    const notSavedHere = compile('notSavedHere', {
+      state, notSavedReport, inputTimer: null, flowRun: 1, $: (id) => boxes[id] || null,
+      clearFlow: async ({ keepSaved }) => { assert.equal(keepSaved, true); Object.assign(state, { vin: null, step: 'idle', notSaved: null }); return 1; },
+      setStatus: () => {}, render: () => {},
+    });
+    await notSavedHere({ where: 'form', vin: 'AAA', name: '2020 Make Model A' }, { ...post, saveId: 'save-2', description: 'typed in window 1' });
+    assert.equal(state.step, 'notSaved');
+    return state.notSaved.kept;
+  };
+  assert.deepEqual(await run(null), [], 'the offered link, and the description as it was brought back, are not kept as typed here');
+  assert.deepEqual(await run(' https://www.facebook.com/marketplace/item/222/ '), [{ key: 'listingTyped', label: 'Listing link', value: 'https://www.facebook.com/marketplace/item/222/' }], 'a link typed here is kept');
+});
+
 // The same refused save in window 2, of a copy window 1's side panel has
 // at review (text typed there since), and then window 1's side panel closes,
 // with no Marketplace form open there. The post is window 1's still: a side
