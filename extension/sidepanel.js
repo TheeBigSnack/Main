@@ -250,7 +250,7 @@ async function saveFlow({ quiet = false } = {}) {
 async function notSavedHere(other, saved) {
   const box = $('description');
   const copy = { ...state, description: box ? box.value : state.description };
-  const report = notSavedReport({ copy, broughtBack: state.broughtBack, saved, other, alreadyPosted: Boolean(state.vin && state.posted[state.vin]) });
+  const report = notSavedReport({ copy, broughtBack: state.broughtBack, saved, other, alreadyPosted: Boolean(state.vin && state.posted && state.posted[state.vin]) });
   if (!report) return;
   clearTimeout(inputTimer); // a keystroke's save still waiting: its text is in the box read above
   if (other.vin === state.vin) state.vin = null;
@@ -344,7 +344,9 @@ const NO_DEALER_TEXT = "Add your dealership's name in Settings first (Dealership
 // Settings, and a Settings save writes the template again
 // (reviewAfterSettings). '' when the description itself needs fixing. The
 // status line (fillBlocker, carStillCurrent) and the checks line say it.
-const settingsFix = (stops) => (stops.length && stops.every((p) => p.code === 'setting-number') ? 'After you save Settings, the template writes the description again; if you edited it, click Reset to template.' : '');
+// Only a template description is written again by a Settings save
+// (reviewAfterSettings); an edited or rewritten one is only checked again.
+const settingsFix = (stops, source = 'template') => (stops.length && stops.every((p) => p.code === 'setting-number') ? (source === 'template' ? 'After you save Settings, the template writes the description again; if you edited it, click Reset to template.' : 'After you save Settings, click Reset to template to write the description again.') : '');
 
 // Why a description can't be typed into the form, or '' when it can. Every
 // way of opening or filling the form goes through this (Open the
@@ -366,7 +368,7 @@ function fillBlocker(description) {
   }
   const stops = ruleProblems(runGuardrails(description, ctx()));
   if (!stops.length) return '';
-  const fix = settingsFix(stops) || 'Fix the description (or use Reset to template) first.';
+  const fix = settingsFix(stops, state.descriptionSource) || 'Fix the description (or use Reset to template) first.';
   return `The description fails ${stops.length === 1 ? 'a check' : `${stops.length} checks`} that must pass before the form is filled: ${stops.map((p) => p.text).join('; ')}. ${fix}`;
 }
 
@@ -380,7 +382,7 @@ function descriptionStopped() {
   if (box) state.description = box.value;
   state.guardrails = runGuardrails(state.description, ctx());
   const old = $('checks');
-  if (old) old.outerHTML = checksHtml(state.guardrails);
+  if (old) old.outerHTML = checksHtml(state.guardrails, state.descriptionSource);
   setFormButtons();
   const why = fillBlocker(state.description);
   if (!why) return false;
@@ -616,7 +618,7 @@ async function carStillCurrent(waiting = 'the form opens') {
   const reopen = was === 'publish' || was === 'probe'
     ? 'click Open the Marketplace form for a new form, and close the form opened before without publishing it'
     : 'click Open the Marketplace form again';
-  const fix = settingsFix(stops);
+  const fix = settingsFix(stops, state.descriptionSource);
   const next = !stops.length ? ` Check the review, then ${reopen}.`
     : ` The description no longer matches it: ${stops.map((p) => p.text).join('; ')}. ${fix ? `${fix} Then` : 'Fix the description, then'} ${reopen}.`;
   setStatus(`The website changed this car since it was read${what}.${next}`, 'error');
@@ -1579,13 +1581,13 @@ async function downloadPhotos() {
 // ones that only warn (length and tone). When only numbers in Settings stop
 // it, the line says the fix is there (settingsFix): Open the Marketplace form
 // and Check fields are off meanwhile, so the status line's reason rarely shows.
-function checksHtml(g) {
+function checksHtml(g, source = 'template') {
   if (!g) return '';
   if (g.ok) return `<div class="checks ok" id="checks">All checks passed: ${g.words} words; every number the checks found is in the website's data, price and mileage included; no banned phrases or flagged claims; dealership and your role named${noteFor() ? '; price note included' : ''}. The checks look for set words and numbers, so read it through before you publish.</div>`;
   const stops = ruleProblems(g);
   const warns = g.problems.filter((p) => !stops.includes(p));
   const list = (ps) => `<ul>${ps.map((p) => `<li>${esc(p.text)}</li>`).join('')}</ul>`;
-  const fix = settingsFix(stops);
+  const fix = settingsFix(stops, source);
   return `<div class="checks ${stops.length ? 'bad' : 'warn'}" id="checks">${stops.length ? `Fix before the form can be filled:${list(stops)}${fix ? `<p>${esc(fix)}</p>` : ''}` : ''}${warns.length ? `Worth fixing (the form can still be filled):${list(warns)}` : ''}</div>`;
 }
 
@@ -1949,7 +1951,7 @@ function viewReview() {
     <h3 id="descriptionLabel">Description ${sourcePill()}</h3>
     ${state.note ? `<div class="banner warn">${esc(state.note)}</div>` : ''}
     <textarea id="description" spellcheck="true" aria-labelledby="descriptionLabel">${esc(state.description)}</textarea>
-    ${checksHtml(state.guardrails)}
+    ${checksHtml(state.guardrails, state.descriptionSource)}
     <div class="actions">
       <button type="button" class="plain" id="rewrite" ${rw.enabled && rw.endpoint ? '' : 'disabled title="Turn on the rewrite service in Settings first"'}>Rewrite with Claude</button>
       <button type="button" class="plain" id="resetTemplate">Reset to template</button>
@@ -2609,7 +2611,7 @@ function onInput(ev) {
     state.note = '';
     state.guardrails = runGuardrails(state.description, ctx());
     const old = $('checks');
-    if (old) old.outerHTML = checksHtml(state.guardrails);
+    if (old) old.outerHTML = checksHtml(state.guardrails, state.descriptionSource);
     setFormButtons();
     saveFlow();
   }, 250);
@@ -2905,7 +2907,7 @@ async function reviewAfterSettings() {
   }
   state.guardrails = runGuardrails(box ? box.value : state.description, ctx());
   const old = $('checks');
-  if (old) old.outerHTML = checksHtml(state.guardrails);
+  if (old) old.outerHTML = checksHtml(state.guardrails, state.descriptionSource);
   setFormButtons();
   const noDealer = $('noDealer');
   if (noDealer && dealerNamed()) noDealer.remove();

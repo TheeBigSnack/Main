@@ -2770,6 +2770,8 @@ test('the checks line says the fix is in Settings when only a number in Settings
   const c = { vehicle: CAR, dealer: SETTINGS.dealer, salesperson, price: 20986 };
   const text = template.buildTemplateDescription({ ...c, priceNote: '' });
   assert.match(checksHtml(template.runGuardrails(text, c)), /^<div class="checks bad" id="checks">Fix before the form can be filled:<ul><li>Your role "2nd shift sales" has a number in it[^<]+<\/li><\/ul><p>After you save Settings, the template writes the description again; if you edited it, click Reset to template\.<\/p><\/div>$/);
+  // an edited or rewritten description is only checked again after a Settings save: Reset to template writes it again
+  for (const source of ['edited', 'claude']) assert.match(checksHtml(template.runGuardrails(text, c), source), /<p>After you save Settings, click Reset to template to write the description again\.<\/p><\/div>$/, source);
   // a stop of the description's own beside it: no such line, the description needs fixing too
   const mixed = checksHtml(template.runGuardrails(text.replace('34,567 miles', '12,000 miles'), c));
   assert.match(mixed, /Fix before the form can be filled:<ul><li>Your role "2nd shift sales"/);
