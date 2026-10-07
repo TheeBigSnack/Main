@@ -13,7 +13,7 @@
 
 import { markPosted, basisPrice, listingWebsitePrice, pendingText, scanCar } from './src/rescan.js';
 import { DECISION } from './src/classify.js';
-import { draftRecord, draftPill } from './src/drafts.js';
+import { draftRecord, draftPill, draftScanCar } from './src/drafts.js';
 import { shortLocation, storeNames } from './src/normalize.js';
 import { readCarForPost, recheck } from './src/vehicleDetails.js';
 import { readyRows, nextToPost, siteChoices, defaultOrigin, siteReadOrigins, missingOrigins, siteAskText } from './src/panelList.js';
@@ -1611,7 +1611,9 @@ function listRowHtml(r, { canPost = true } = {}) {
   const facts = [e.stock && 'Stock ' + esc(e.stock), typeof e.mileage === 'number' ? miles(e.mileage) : '', esc(e.locationShort || '')].filter(Boolean).join(' · ');
   let action = '';
   if (r.draft) {
-    const draft = draftPill(state.drafts[r.vin], e, { basis: (state.settings && state.settings.basis) || 'website', markWhere: ' in the popup' });
+    // the draft's price is compared with the last scan only when it was taken once the draft was filled (src/drafts.js draftScanCar)
+    const seen = draftScanCar(state.drafts[r.vin], { takenAt: state.snapshotTakenAt, vehicles: state.snapshotVehicles }, r.vin);
+    const draft = draftPill(state.drafts[r.vin], seen, { basis: (state.settings && state.settings.basis) || 'website', markWhere: ' in the popup' });
     action = `<span class="pill ${draft.tone}" title="${esc(draft.title)}">${esc(draft.text)}</span>`;
   } else if (canPost) action = `<button type="button" class="small go" data-post-vin="${esc(r.vin)}" aria-label="Post ${esc(r.name)}">Post</button>`;
   return `<li class="row"><div class="main">${name}${pill}<div class="sub">${facts}</div><div class="when">${esc(r.line)}</div></div><div class="price">${money(r.price)}</div>${action}</li>`;

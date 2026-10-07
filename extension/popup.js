@@ -1,6 +1,6 @@
 import { assessVehicle, DECISION } from './src/classify.js';
-import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, listingLine, settleDiff, postedBasis, withPostedBasis, markLookDismissed, withWithheld, withheldOffer, acceptWithheld } from './src/rescan.js';
-import { draftPrice, markDraftPosted, draftPriceUpdate, withPriceUpdate, draftPill } from './src/drafts.js';
+import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, listingLine, settleDiff, postedBasis, withPostedBasis, markLookDismissed, withWithheld, withheldOffer, acceptWithheld, scanCar } from './src/rescan.js';
+import { draftPrice, markDraftPosted, draftPriceUpdate, withPriceUpdate, draftPill, draftScanCar } from './src/drafts.js';
 import { performScan, keepSeenBasis } from './src/scanRunner.js';
 import { todoCountFor, originsFor } from './src/rescanSchedule.js';
 import { askChrome } from './src/askChrome.js';
@@ -411,14 +411,15 @@ function empty(text) {
 // "Post" opens the guided flow in the side panel (only for ready cars). "Mark
 // posted" is for a listing the salesperson made by hand, or published from a
 // draft: the draft's pill shows the price it was filled with, and says so
-// when the website's price moved or the car is not ready any more.
+// when the website's price moved (on a scan taken since the draft was
+// filled: src/drafts.js draftScanCar) or the car is not ready any more.
 function postButton(vin, { canPost = true } = {}) {
   const theirs = colleagueEntry(vin);
   if (theirs) return `<span class="pill" title="A colleague's listing: theirs to update or take down">Posted by ${byWhom(theirs)}</span>`;
   if (state.posted[vin]) return `<button type="button" class="small" data-action="unpost" data-vin="${esc(vin)}" title="Click to unmark. A post recorded today still counts toward today's cap.">Posted ✓</button>`;
   if (state.markAsk === vin) return markChoice(vin);
   if (state.drafts[vin]) {
-    const pill = draftPill(state.drafts[vin], state.snapshot?.vehicles?.[vin], { basis: state.settings?.basis, ready: canPost });
+    const pill = draftPill(state.drafts[vin], draftScanCar(state.drafts[vin], state.snapshot, vin), { basis: state.settings?.basis, ready: canPost });
     return `<span class="actions"><span class="pill ${pill.tone}" title="${esc(pill.title)}">${esc(pill.text)}</span><button type="button" class="small go" data-action="post" data-vin="${esc(vin)}">Mark posted</button></span>`;
   }
   const capReached = dailyCap().reached;
@@ -1218,7 +1219,9 @@ async function onPanelClick(ev) {
       if (btn.dataset.action === 'post') setStatus(`Recorded as posted today: Lot Current filled the form for ${entry.name || 'this car'} today or recorded it earlier today, so it counts toward today's posts.`);
       else if (before) setStatus(`Recorded as listed before today: rescans watch ${entry.name || 'it'}, and it doesn't count toward today's posts.`);
       if (draft) {
-        const gap = draftPriceUpdate(draft, entry, basis);
+        // compared with the last scan only when it was taken once the listing had its price (the draft filled: the entry's
+        // draftSavedAt, src/rescan.js scanCar), as My listings compares it: a scan from before names no price to update
+        const gap = draftPriceUpdate(draft, scanCar(state.posted[vin], state.snapshot, vin), basis);
         if (gap) {
           await update('diff', (d) => withPriceUpdate(d, gap)); // on To do now; every rescan lists it too until the listing is updated
           setStatus(`Recorded at ${money(gap.from)}, the price the draft was filled with. The website now shows ${money(gap.to)}: update the price on the listing (To do, Update price).`, 'error');

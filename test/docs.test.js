@@ -1687,6 +1687,13 @@ test('the help says Mark posted on a draft records the draft\'s price, or the we
   assert.match(read('../extension/popup.js'), /draft \? markDraftPosted\(/, 'the popup\'s Mark posted no longer records a draft\'s price: update the help and this test');
   const line = doc('help.md').split('\n').find((l) => l.startsWith('- A car saved as a draft shows'));
   assert.match(line, /\*\*Mark posted\*\* records the draft's price, because that is what the listing shows \(a draft saved by an older version of Lot Current kept no price: its pill reads just "Draft on Facebook", and \*\*Mark posted\*\* records the website's price/);
+  // the pill and Mark posted compare the draft only with a scan taken since it was saved (drafts.js draftScanCar)
+  const { draftScanCar } = await import('../extension/src/drafts.js');
+  const scan = (takenAt) => ({ takenAt, vehicles: { AAA: entry } });
+  const draft = { price: 19500, basis: 'website', savedAt: '2026-09-30T12:00:00.000Z' };
+  assert.deepEqual([draftScanCar(draft, scan('2026-09-30T11:00:00.000Z'), 'AAA', '2026-10-01T12:00:00.000Z'), draftScanCar(draft, scan('2026-09-30T13:00:00.000Z'), 'AAA', '2026-10-01T12:00:00.000Z')], [null, entry], 'a draft is no longer compared only with a scan taken since it was saved: update the help and this test');
+  assert.match(line, /If a scan taken since the draft was saved shows another website price, the pill says so in red[^.]*\. A scan taken before the draft was saved shows the website as it was then, so the pill names no website price from it\./);
+  assert.match(line, /when a scan taken since the draft was saved shows a different website price, the status line says so and \*\*To do\*\* lists the car under \*\*Update price\*\* at once\. Otherwise the next scan compares the two/);
 });
 
 // What has not been checked on Facebook's live pages is listed where a

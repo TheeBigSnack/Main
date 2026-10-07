@@ -5,8 +5,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { draftRecord, draftPrice, markDraftPosted, draftPriceUpdate, withPriceUpdate, draftPill } from '../extension/src/drafts.js';
-import { diffScans, markPosted, markPriceUpdated, basisPrice, listingLine } from '../extension/src/rescan.js';
+import { draftRecord, draftPrice, markDraftPosted, draftPriceUpdate, withPriceUpdate, draftPill, draftScanCar } from '../extension/src/drafts.js';
+import { diffScans, markPosted, markPriceUpdated, basisPrice, listingLine, scanCar } from '../extension/src/rescan.js';
 import { syncPayload } from '../extension/src/sync.js';
 import { snapshot, fixtures } from './helpers.js';
 
@@ -108,6 +108,30 @@ test('a listing published from a draft got its price when the draft was filled: 
   // it stays in this browser: the sync sends none (another computer goes by the posting time)
   const sent = syncPayload({ origin: 'https://example-dealer.test', posted, userId: 'u' }).posted[VIN];
   assert.ok(sent && !('draftSavedAt' in sent));
+});
+
+// The car a draft's price is compared with (its pill, Mark posted's status
+// line and To do item): the last scan's, only when that scan was taken once
+// the draft was filled, as the entry Mark posted records for the draft reads
+// it on My listings (rescan.js scanCar). A scan from before shows the website
+// as it was before the draft got its price.
+test('a draft is compared only with a scan taken once it was filled, as the listing Mark posted records for it is', () => {
+  const draft = draftRecord({ name: 'Ram', price: 27163, basis: 'website', savedAt: AT }); // filled on day 1
+  const day3 = dropped(1500); // the website at $25,663, scanned on day 3
+  const marked = '2026-10-04T10:00:00.000Z';
+  assert.equal(draftScanCar(draft, day3, VIN, marked), day3.vehicles[VIN]);
+  assert.equal(draftScanCar(draft, { ...day3, takenAt: AT }, VIN, marked), day3.vehicles[VIN], 'a scan taken the moment it was filled');
+  const before = { ...day3, takenAt: '2026-10-01T14:00:00.000Z' }; // an hour before the draft was filled
+  assert.equal(draftScanCar(draft, before, VIN, marked), null);
+  assert.equal(draftPriceUpdate(draft, draftScanCar(draft, before, VIN, marked), 'website'), null, 'no price to update from it');
+  assert.deepEqual(draftPill(draft, draftScanCar(draft, before, VIN, marked)), { tone: 'warn', text: 'Draft on Facebook at $27,163', title: 'Saved as a draft on Facebook: publish it there, then mark it posted.' });
+  // the same answer as the entry Mark posted records
+  const entry = markDraftPosted({}, day3.vehicles[VIN], draft, 'website', marked)[VIN];
+  for (const snap of [day3, before, { ...day3, takenAt: undefined }]) assert.equal(draftScanCar(draft, snap, VIN, marked), scanCar(entry, snap, VIN), String(snap.takenAt));
+  // a draft with no time before the moment it is read counts from that moment, so no earlier scan shows it; nor a scan without the car
+  for (const savedAt of [undefined, '', 'yesterday', '2026-10-05T00:00:00.000Z']) assert.equal(draftScanCar({ ...draft, savedAt }, day3, VIN, marked), null, String(savedAt));
+  assert.equal(draftScanCar(null, day3, VIN, marked), null);
+  assert.equal(draftScanCar(draft, day3, 'NOT-IN-THE-SCAN', marked), null);
 });
 
 test('the update goes on the saved To do list in place of any other for the car, in the rescan\'s order', () => {

@@ -23,7 +23,7 @@ import { buildListingData, listingChanges } from '../extension/src/listingData.j
 import { recheck } from '../extension/src/vehicleDetails.js';
 import { basisPrice, snapshotEntry, listingWebsitePrice, pendingText, scanCar } from '../extension/src/rescan.js';
 import { assessVehicle, DECISION } from '../extension/src/classify.js';
-import { draftRecord, draftPill } from '../extension/src/drafts.js';
+import { draftRecord, draftPill, draftScanCar } from '../extension/src/drafts.js';
 import { shortLocation, storeNames } from '../extension/src/normalize.js';
 import { localVinCheck } from '../extension/src/vin.js';
 import { FORM_MAP, applyOverrides } from '../extension/facebook/formMap.js';
@@ -1495,7 +1495,7 @@ test('It\'s posted records the price the form was filled with on the basis it wa
 // drafts kept one. Run with sidepanel.js's own carCard and listRowHtml.
 test('the car card names the price basis the car was read on, and a draft\'s pill its own, whatever Settings says by then', () => {
   const car = { vin: 'AAA', name: 'Car A', price: 25000, priceBeforeFees: 24500, mileage: 1000 };
-  const scope = (state) => ({ state, esc: (t) => String(t ?? ''), money: (n) => '$' + n.toLocaleString('en-US'), miles: (n) => `${n} miles`, draftPill });
+  const scope = (state) => ({ state, esc: (t) => String(t ?? ''), money: (n) => '$' + n.toLocaleString('en-US'), miles: (n) => `${n} miles`, draftPill, draftScanCar });
   const card = (state) => /Posting at <b>([^<]*)<\/b> \(([^)]*)\)/.exec(compile('carCard', scope(state))()).slice(1).join(' · ');
   // read on the main price; the dealer then switched Settings to the lower second price
   assert.equal(card({ vehicle: car, price: 25000, priceBasis: 'website', noteApplies: true, settings: { basis: 'beforeFees' } }), '$25,000 · website\'s main price');
@@ -1505,12 +1505,41 @@ test('the car card names the price basis the car was read on, and a draft\'s pil
   assert.match(card({ vehicle: { ...car, priceBeforeFees: null }, price: 25000, priceBasis: 'beforeFees', noteApplies: false, settings: { basis: 'website' } }), /^\$25,000 · website's main price; this car shows no lower second price/);
   // a post saved before the basis was kept: the setting
   assert.equal(card({ vehicle: car, price: 24500, priceBasis: null, noteApplies: true, settings: { basis: 'beforeFees' } }), '$24,500 · the lower second price the website shows');
-  // the draft pill: the draft's own basis, the setting only when the draft kept none
-  const row = (draft, basis) => compile('listRowHtml', scope({ settings: { basis }, drafts: { AAA: draft } }))({ vin: 'AAA', name: 'Car A', entry: car, draft: true, price: 25000, line: '' });
+  // the draft pill: the draft's own basis, the setting only when the draft kept none (the last scan taken since the draft was filled)
+  const savedAt = new Date(Date.now() - 7200e3).toISOString();
+  const lastScan = { snapshotTakenAt: new Date(Date.now() - 3600e3).toISOString(), snapshotVehicles: { AAA: car } };
+  const row = (draft, basis) => compile('listRowHtml', scope({ settings: { basis }, drafts: { AAA: { ...draft, savedAt } }, ...lastScan }))({ vin: 'AAA', name: 'Car A', entry: car, draft: true, price: 25000, line: '' });
   const pill = (html) => /<span class="pill \w+" title="[^"]*">([^<]*)<\/span>/.exec(html)[1];
   assert.equal(pill(row({ name: 'Car A', price: 24500, basis: 'beforeFees' }, 'website')), 'Draft on Facebook at $24,500', 'filled at the lower second price: no gap after the switch');
   assert.equal(pill(row({ name: 'Car A', price: 25000, basis: 'website' }, 'beforeFees')), 'Draft on Facebook at $25,000');
   assert.equal(pill(row({ name: 'Car A', price: 25000 }, 'beforeFees')), 'Draft on Facebook at $25,000: the website now shows $24,500', 'a draft that kept no basis: the setting');
+});
+
+// The panel's Ready to post list compares a draft's price with the last
+// scan only when that scan was taken once the draft was filled (src/drafts.js
+// draftScanCar), as the popup's pill and Mark posted do: a scan from before
+// shows the website as it was before the draft got its price, so a price
+// there is not one to change the draft to. Run with sidepanel.js's own
+// listRowHtml.
+test('the side panel\'s draft pill names the website\'s price only from a scan taken since the draft was filled', () => {
+  const car = { vin: 'AAA', name: 'Car A', price: 25500, priceBeforeFees: 25000, mileage: 1000 };
+  const savedAt = new Date(Date.now() - 7200e3).toISOString(); // filled two hours ago, at $25,000
+  const draft = { name: 'Car A', price: 25000, basis: 'website', savedAt };
+  const scope = (state) => ({ state, esc: (t) => String(t ?? ''), money: (n) => '$' + n.toLocaleString('en-US'), miles: (n) => `${n} miles`, draftPill, draftScanCar });
+  const pill = (takenAt) => {
+    const html = compile('listRowHtml', scope({ settings: { basis: 'website' }, drafts: { AAA: draft }, snapshotTakenAt: takenAt, snapshotVehicles: { AAA: car } }))({ vin: 'AAA', name: 'Car A', entry: car, draft: true, price: 25500, line: '' });
+    return /<span class="pill (\w+)" title="([^"]*)">([^<]*)<\/span>/.exec(html).slice(1);
+  };
+  // the last scan, showing $25,500, was taken three hours ago: before the draft
+  assert.deepEqual(pill(new Date(Date.now() - 3 * 3600e3).toISOString()), ['warn', 'Saved as a draft on Facebook: publish it there, then mark it posted in the popup.', 'Draft on Facebook at $25,000']);
+  // a scan with no time says nothing about the price either
+  assert.equal(pill(null)[2], 'Draft on Facebook at $25,000');
+  // taken an hour ago, or the moment the draft was filled: the website's price since then, as before
+  for (const takenAt of [new Date(Date.now() - 3600e3).toISOString(), savedAt]) {
+    const [tone, title, text] = pill(takenAt);
+    assert.deepEqual([tone, text], ['bad', 'Draft on Facebook at $25,000: the website now shows $25,500'], takenAt);
+    assert.match(title, /^Change the price on the draft to \$25,500 before you publish it\./);
+  }
 });
 
 // Only a listing's own address is kept as the listing link. Your listings,

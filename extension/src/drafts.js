@@ -3,11 +3,11 @@
 // from it later shows that price, whatever the website says by then. So
 // "Mark posted" on a draft's car records the draft's price, and a website
 // price that moved while the draft waited becomes a price to update (on To
-// do at once, and on every rescan after: src/rescan.js diffScans compares
-// the website with the recorded price), never a silent gap. Pure helpers;
-// no chrome.*.
+// do at once when a scan taken since the draft was filled shows it, and on
+// every rescan after: src/rescan.js diffScans compares the website with the
+// recorded price), never a silent gap. Pure helpers; no chrome.*.
 
-import { basisPrice, markPosted, postedBasis } from './rescan.js';
+import { basisPrice, markPosted, postedBasis, scanCar } from './rescan.js';
 
 const money = (n) => '$' + Math.round(n).toLocaleString('en-US');
 
@@ -40,22 +40,43 @@ export function markDraftPosted(posted, entry, draft, basis = 'website', now = n
   const next = markPosted(posted, entry, basis, now, extra);
   const price = draftPrice(draft);
   if (price === null) return next;
-  const filled = draftFilledAt(draft, now);
-  return { ...next, [entry.vin]: { ...next[entry.vin], price, basis: draftBasis(draft, basis), ...(filled ? { draftSavedAt: filled } : {}) } };
+  return { ...next, [entry.vin]: { ...next[entry.vin], price, basis: draftBasis(draft, basis), ...draftTimes(draft, now) } };
 }
 
 // When the draft was filled with its price, as an ISO time; null for a time
 // that is not one, or not before the moment it is marked posted (`now`):
 // then the posting time stands.
 function draftFilledAt(draft, now) {
-  const saved = typeof draft.savedAt === 'string' && draft.savedAt ? Date.parse(draft.savedAt) : NaN;
+  const saved = draft && typeof draft === 'object' && typeof draft.savedAt === 'string' && draft.savedAt ? Date.parse(draft.savedAt) : NaN;
   const marked = typeof now === 'string' ? Date.parse(now) : NaN;
   return Number.isFinite(saved) && Number.isFinite(marked) && saved < marked ? new Date(saved).toISOString() : null;
 }
 
+// The times markDraftPosted adds to the entry of a draft's listing: when
+// the draft was filled, when there is one before `now`.
+function draftTimes(draft, now) {
+  const filled = draftFilledAt(draft, now);
+  return filled ? { draftSavedAt: filled } : {};
+}
+
+// The car as a scan (`snap`) shows it, to compare a draft's price with the
+// website's: read through src/rescan.js scanCar on the times of the entry
+// Mark posted would record for the draft at `now` (markDraftPosted), so only
+// a scan taken once the draft was filled shows it (a draft with no time
+// before `now` counts from `now`). A scan from before shows the website as it
+// was before the draft got its price: a price there that differs from the
+// draft's is not a change since, so the draft's pill and Mark posted name it
+// no more than My listings does (rescan.js listingLine), and the next scan
+// compares. null for such a scan and for a car the scan does not hold.
+export function draftScanCar(draft, snap, vin, now = new Date().toISOString()) {
+  return scanCar({ postedAt: now, ...draftTimes(draft, now) }, snap, vin);
+}
+
 // The price update a draft's car needs once its draft is published, shaped
-// like a diffScans price update for one of your listings. Null when the
-// draft's price and the website's agree, or either is unknown. The website's
+// like a diffScans price update for one of your listings. `entry`: the car
+// as a scan taken once the draft was filled shows it (draftScanCar, or
+// rescan.js scanCar on the listing's entry). Null when the draft's price and
+// the website's agree, or either is unknown. The website's
 // price is taken on the basis the draft was filled under, the one its
 // listing is recorded on (markDraftPosted), so a change of the setting alone
 // is never a price to update; `basis` (the setting) stands in for a draft
@@ -80,9 +101,12 @@ export function withPriceUpdate(diff, item) {
 
 // The pill a draft's car shows in place of Post: the draft's price, and a
 // warning when the website's price moved or the car is not ready any more.
-// markWhere: where Mark posted is ('' in the popup, ' in the popup' from the
-// side panel). tone is the pill's class: 'warn', or 'bad' when the draft
-// should not be published as it is.
+// `entry`: the car as the last scan shows it when that scan was taken once
+// the draft was filled (draftScanCar), else null: a scan from before names
+// no website price here. ready: whether the last scan shows the car ready to
+// post. markWhere: where Mark posted is ('' in the popup, ' in the popup'
+// from the side panel). tone is the pill's class: 'warn', or 'bad' when the
+// draft should not be published as it is.
 export function draftPill(draft, entry, { basis = 'website', ready = true, markWhere = '' } = {}) {
   const at = draftPrice(draft);
   const already = `Already published it? Mark it posted${markWhere} so rescans watch it.`;

@@ -755,6 +755,7 @@ test('My listings shows the price change of a listing published from a draft fil
   await p.scan();
   assert.equal(p.status(), '', 'the scan went through');
   await p.tab('ready');
+  assert.match(p.panel(), /<span class="pill bad" title="Change the price on the draft to \$27,163 before you publish it\.[^"]*">Draft on Facebook at \$27,663: the website now shows \$27,163<\/span>/, 'the pill compares the draft with a scan taken since it was filled');
   await p.click('markToday', { vin: ram.vin }); // published today
   assert.match(p.status(), /^Recorded at \$27,663, the price the draft was filled with\. The website now shows \$27,163: update the price on the listing \(To do, Update price\)\.$/);
   await p.tab('todo');
@@ -772,6 +773,51 @@ test('My listings shows the price change of a listing published from a draft fil
   await p.tab('mine');
   assert.match(p.panel(), /<span class="pill good">Matches the website<\/span>/);
   assert.doesNotMatch(p.panel(), /data-action="priceUpdated"/);
+});
+
+// A draft filled after the last scan, at the website's price then: that scan
+// shows the website as it was before the draft got its price, so its price is
+// not the website's now. The Ready pill, Mark posted's status line and To do
+// compare the draft with that scan no more than My listings does (src/drafts.js
+// draftScanCar, src/rescan.js scanCar): until the next scan none of them names
+// that scan's price, and To do offers no Updated to record it (rule 4).
+test('a draft filled after the last scan is not compared with that scan\'s older price: the pill, Mark posted, To do and My listings wait for the next scan', async () => {
+  const ram = vehicle('usedNormal'); // $27,163 on the website now
+  const settings = { ...MY_STORE, basis: 'website' };
+  const first = await loadPopup({ local: { [k.settings]: settings } });
+  await first.scan();
+  assert.equal(first.status(), '', 'the scan went through');
+  // that scan, two days ago, before the website's $500 cut
+  const last = structuredClone(first.local[k.snapshot]);
+  last.takenAt = new Date(Date.now() - 2 * 86400e3).toISOString();
+  Object.assign(last.vehicles[ram.vin], { price: 27663, priceBeforeFees: 27173 });
+  const savedAt = new Date(Date.now() - 3600e3).toISOString(); // filled an hour ago, at the website's price then
+  const drafts = { [ram.vin]: { name: ram.name, savedAt, price: 27163, basis: 'website' } };
+  const p = await loadPopup({ local: { [k.settings]: settings, [k.snapshot]: last, [k.diff]: structuredClone(first.local[k.diff]), [k.drafts]: drafts } });
+  await p.tab('ready');
+  assert.match(p.panel(), /<span class="pill warn" title="Saved as a draft on Facebook: publish it there, then mark it posted\.">Draft on Facebook at \$27,163<\/span>/);
+  assert.doesNotMatch(p.panel(), /the website now shows|Change the price on the draft/, 'the pill names no price of a scan from before the draft (the row\'s price column is that scan\'s, as for every car)');
+
+  await p.click('markToday', { vin: ram.vin }); // published today
+  assert.doesNotMatch(p.status(), /website now shows|\$27,663/, 'nor does Mark posted');
+  const entry = p.local[k.posted][ram.vin];
+  assert.deepEqual([entry.price, entry.basis, entry.draftSavedAt], [27163, 'website', savedAt], 'recorded at the draft\'s price');
+  await p.tab('todo');
+  assert.doesNotMatch(p.panel(), new RegExp(`data-action="priceUpdated" data-vin="${ram.vin}"|\\$27,663`), 'To do lists no price to update, so its Updated records none');
+  assert.equal((p.local[k.diff].priceUpdates || []).filter((u) => u.vin === ram.vin).length, 0);
+  await p.tab('mine');
+  assert.match(p.panel(), /<span class="pill ?">Price compared at the next scan<\/span>/);
+  assert.match(p.panel(), /Listed \$27,163/);
+  assert.doesNotMatch(p.panel(), /data-action="priceUpdated"|\$27,663/);
+  assert.deepEqual(p.local[k.posted][ram.vin], entry, 'nothing else recorded');
+
+  // the next scan shows the website as it is now: the listing matches it, and there is nothing to update
+  await p.scan();
+  assert.equal(p.status(), '', 'the scan went through');
+  assert.doesNotMatch(p.panel(), new RegExp(`data-action="priceUpdated" data-vin="${ram.vin}"`));
+  await p.tab('mine');
+  assert.match(p.panel(), /<span class="pill good">Matches the website<\/span>/);
+  assert.equal(p.local[k.posted][ram.vin].price, 27163);
 });
 
 // A listing with no basis whose price is older than the last scan is read as
