@@ -36,6 +36,9 @@ const vinOnline = (p) => (p.vinCheck && p.vinCheck.online && p.vinCheck.online.o
  *   saved: the post saved for the website now, which the save left in place.
  *   other: whose post holds the website (sidepanel.js liveElsewhere):
  *     { where: 'form' | 'review', vin, name }.
+ *   alreadyPosted: true when the copy's car (another car than other's) is
+ *     already recorded as posted, so the text does not say to redo things
+ *     when it is posted.
  * Returns null when nothing is said (no car, not refused, or a step outside
  * NOT_SAVED_STEPS). Otherwise { text, kept, keptText,
  * notSaved, notSavedText }: text says what happened and what to do; kept
@@ -46,7 +49,7 @@ const vinOnline = (p) => (p.vinCheck && p.vinCheck.online && p.vinCheck.online.o
  * back, and as lost when the saved post does not have it as well (another
  * car's post has none of it).
  */
-export function notSavedReport({ copy, broughtBack = null, saved = null, other }) {
+export function notSavedReport({ copy, broughtBack = null, saved = null, other, alreadyPosted = false }) {
   if (!copy || !copy.vin || !other || !NOT_SAVED_STEPS.includes(copy.step)) return null;
   const sameCar = other.vin === copy.vin;
   const name = (copy.vehicle && copy.vehicle.name) || (sameCar && other.name) || copy.vin;
@@ -82,7 +85,9 @@ export function notSavedReport({ copy, broughtBack = null, saved = null, other }
       : `${other.name} is being posted from the side panel in another Chrome window. ${oneAtATime} Finish or stop that post there first.`;
   }
   const one = notSaved.length === 1;
-  const again = sameCar ? 'in that window' : `when you post ${name}`;
+  // another car already recorded as posted is not posted again
+  const again = sameCar ? ' in that window' : alreadyPosted ? '' : ` when you post ${name}`;
+  const redo = `do ${one ? 'it' : 'them'} again${again} if you still want ${one ? 'it' : 'them'}`;
   return {
     text: said,
     kept,
@@ -90,6 +95,6 @@ export function notSavedReport({ copy, broughtBack = null, saved = null, other }
     // here), and anything that takes this screen's place clears it
     keptText: kept.length ? 'The text from this side panel is below, kept on this screen only: copy it before you leave this screen.' : '',
     notSaved,
-    notSavedText: notSaved.length ? `Not saved either, so do ${one ? 'it' : 'them'} again ${again} if you still want ${one ? 'it' : 'them'}: ${notSaved.join(', ')}.` : '',
+    notSavedText: notSaved.length ? `Not saved${kept.length ? ' either' : ''}, so ${redo}: ${notSaved.join(', ')}.` : '',
   };
 }

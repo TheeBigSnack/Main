@@ -250,7 +250,7 @@ async function saveFlow({ quiet = false } = {}) {
 async function notSavedHere(other, saved) {
   const box = $('description');
   const copy = { ...state, description: box ? box.value : state.description };
-  const report = notSavedReport({ copy, broughtBack: state.broughtBack, saved, other });
+  const report = notSavedReport({ copy, broughtBack: state.broughtBack, saved, other, alreadyPosted: Boolean(state.vin && state.posted[state.vin]) });
   if (!report) return;
   clearTimeout(inputTimer); // a keystroke's save still waiting: its text is in the box read above
   if (other.vin === state.vin) state.vin = null;
@@ -2752,6 +2752,9 @@ async function onClick(ev) {
         const open = formOpen() ? ` ${state.vehicle ? state.vehicle.name : state.vin} stays on its form: say whether it posted.` : '';
         state.queueMode = false;
         await saveFlow();
+        // a refused save shows the not-saved screen, which has no way to say
+        // whether it posted: the other window's post is finished there
+        if (state.step === 'notSaved') return setStatus(stopped);
         setStatus(stopped + open);
         return render();
       }

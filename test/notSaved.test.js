@@ -92,7 +92,10 @@ test('a copy of a post begun in this panel, or of another car than the one under
   const other = { where: 'review', vin: 'BBB', name: '2021 Make Model B' };
   const elsewhere = notSavedReport({ copy: { ...broughtBack, photoPick: ['https://img.example.test/1.jpg'] }, broughtBack, saved: { vin: 'BBB', windowId: 1, step: 'review', vehicle: { name: other.name } }, other });
   assert.equal(elsewhere.text, '2021 Make Model B is being posted from the side panel in another Chrome window. One post from a website goes at a time, so what was done here for 2020 Make Model A was not saved. Finish or stop that post there first.');
-  assert.equal(elsewhere.notSavedText, 'Not saved either, so do it again when you post 2020 Make Model A if you still want it: the photos picked.');
+  assert.equal(elsewhere.notSavedText, 'Not saved, so do it again when you post 2020 Make Model A if you still want it: the photos picked.', 'no kept text before it: no "either"');
+  // the car already recorded as posted (from that other window, say): nothing says to redo it at its post
+  const posted = notSavedReport({ copy: { ...broughtBack, photoPick: ['https://img.example.test/1.jpg'] }, broughtBack, saved: null, other, alreadyPosted: true });
+  assert.equal(posted.notSavedText, 'Not saved, so do it again if you still want it: the photos picked.');
   const form = notSavedReport({ copy: { ...broughtBack, highlights: ['Heated seats'] }, broughtBack, saved: null, other: { ...other, where: 'form' } });
   assert.equal(form.text, "2021 Make Model B's Marketplace form is open from the side panel in another Chrome window. One post from a website goes at a time, so what was done here for 2020 Make Model A was not saved. Finish that post there first; opening the side panel in that window brings it back.");
   // nothing done here for this car: nothing is said to be lost
