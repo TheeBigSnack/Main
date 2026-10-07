@@ -74,6 +74,23 @@ test('realistic price notes that say "not the dealer" pass, and the template car
   }
 });
 
+test('every word the sentence rule lets a note open with or say before "not the dealer" is on the list, so a note in its own shape passes', () => {
+  // the sentence rule's opening words, its fees, its verbs and its fee places (FEES_OPENING, FEES_GO_TO, FEE_PLACE), but "your" and the contractions
+  for (const w of ['plus', 'and', 'also', 'note', 'all', 'any', 'applicable', 'the', 'those', 'these', 'our', 'sales', 'state', 'local', 'government', 'advertised', 'listed', 'price', 'prices', 'pricing',
+    'exclude', 'excludes', 'excluding', 'include', 'includes', 'including', 'does', 'do', 'not', 'before', 'without', 'tax', 'taxes', 'title', 'registration', 'tags', 'plates', 'fee', 'fees',
+    'go', 'goes', 'paid', 'payable', 'collected', 'due', 'sent', 'remitted', 'directly', 'straight', 'to', 'for', 'by', 'county', 'city', 'dmv', 'bmv', 'mvd', 'rmv', 'office', 'collector', 'assessor',
+    'secretary', 'of', 'department', 'motor', 'vehicles', 'revenue', 'vehicle', 'division', 'agency', 'or']) {
+    assert.ok(PRICE_NOTE_WORDS.includes(w), `"${w}" is on the list`);
+  }
+  for (const note of [
+    'Registration fees are paid straight to the DMV, not the dealership.', 'Also tax, title and registration, which go to the state, not the dealer.',
+    'Note, tax and title fees go to the state, not the dealer.', 'Taxes and fees are paid straight to the county, not the dealership.',
+  ]) {
+    assert.deepEqual(problems(withNote(note)), [], note);
+    assert.equal(priceNoteWarning(note, EXAMPLE), '', note);
+  }
+});
+
 test('a "not the dealer" note with any word that is not price and fee wording is refused, and the reason quotes those words', () => {
   for (const [extra, out] of [
     ['Text Sam at 555-123-4567.', '"Text", "Sam" and "555-123-4567"'],
@@ -196,17 +213,21 @@ test('known gap, for the owner to decide: a steer said only in listed words stil
   for (const extra of [
     'No dealer or fees.', 'No Example Motors or fees.', 'Price without the dealer or fees.', 'Cash price and fees are not paid to the dealer.', 'Fees are not paid to the dealer.', 'No dealer and no fees.',
     'Cash price is not paid to the dealership.', 'Do not go to the dealer.', 'Do not go to Example Motors.', 'No dealer.', 'Price paid without the dealership.', 'The dealer is not paid.', 'Price is paid directly.',
+    // the fee places' own words are listed too, and some of them name a person or a place for the money
+    'Cash price paid to the secretary.', 'Price paid to the collector.', 'Cash paid to the assessor.', 'Cash paid at the office.', 'Cash due at the agency.', 'Cash paid to the department.',
   ]) {
     assert.deepEqual(problems(withNote(`${FEES} ${extra}`)), [], extra);
   }
 });
 
 test('dollar amounts and percentages pass; any other digits are refused', () => {
-  for (const extra of ['The $499 doc fee is extra.', 'A $1,299.00 dealer fee applies.', 'Sales tax of 6% applies.', 'A 6.25 % sales tax applies.', 'A $ 499 doc fee applies.']) {
+  for (const extra of ['The $499 doc fee is extra.', 'A $1,299.00 dealer fee applies.', 'Sales tax of 6% applies.', 'A 6.25 % sales tax applies.', 'A $ 499 doc fee applies.', 'Price plus $12,500 in fees.', 'Price plus $999,999.99 in fees.']) {
     assert.deepEqual(problems(withNote(`${FEES} ${extra}`)), [], extra);
   }
   for (const [extra, out] of [
     ['2nd shift prices.', '"2nd" and "shift"'], ['Doc fee $499 #2.', '"#2"'], ['Tax is $1,2345.', '"$1,2345"'], ['Tax 6.25.', '"6.25"'], ['Fees 24/7.', '"24/7"'],
+    // no more than six digits, with thousands commas or without, so a phone number is never one amount
+    ['Doc fee $5,551,234,567.', '"$5,551,234,567"'], ['Doc fee $5,551,234.', '"$5,551,234"'], ['Doc fee $5551234.', '"$5551234"'],
   ]) {
     assert.deepEqual(problems(withNote(`${FEES} ${extra}`)), [{ code: 'banned-phrase', text: REASON(out) }], extra);
   }

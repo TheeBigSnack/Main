@@ -135,8 +135,9 @@ export const PRICE_NOTE_UNLESS = Object.freeze({
 // "dealer" and "s"). An invisible character (a zero-width space, a soft
 // hyphen, a word joiner) is read as nothing, so a word it splits is read
 // whole ("A\u200Bbe" is "Abe"); one that changes the direction of the text
-// is refused. Its only digits are dollar amounts ("$499", "$1,299.00") and
-// percentages ("6%", "6.25 %"), and its only other marks are the
+// is refused. Its only digits are dollar amounts of up to six digits
+// ("$499", "$1,299.00") and percentages ("6%", "6.25 %"), and its only
+// other marks are the
 // punctuation between words (NOTE_MARKS). A word joined to the next by "."
 // or ":" with no space between is a web link even when its words are listed
 // ("dealer.to/sale", "cash.sale"), so it is refused whole, unless it is
@@ -144,21 +145,23 @@ export const PRICE_NOTE_UNLESS = Object.freeze({
 // Anything else (a name, a way to get in touch, a payment route, "in
 // person", a phone number, a year, an emoji, a word with a look-alike
 // letter from another alphabet) refuses the note, and the reason quotes it
-// (noteSteerWords). A note without those
-// phrases is read as before. The list holds no pronoun but "our", no word
-// for a person or a role, no way to get in touch or to pay, no place but a
-// government fee place (FEE_PLACE's words, but "your") and no word for
-// haggling; test/priceNoteWords.test.js holds it to that, and the hosted
-// checker (supabase/functions/_shared/guardrails.ts) lists the same words.
+// (noteSteerWords). A note without those phrases is read as before. The
+// list holds every word the sentence rule above lets the note say before
+// the phrase (FEES_OPENING, FEES_GO_TO, FEE_PLACE: "also", "note",
+// "straight"), but "your" and the contractions; besides those, no pronoun
+// but "our", no word for a person or a role, no way to get in touch or to
+// pay, no place but a government fee place and no word for haggling;
+// test/priceNoteWords.test.js holds it to that, and the hosted checker
+// (supabase/functions/_shared/guardrails.ts) lists the same words.
 export const PRICE_NOTE_WORDS = Object.freeze([
   // articles, determiners, conjunctions and prepositions
   'a', 'an', 'the', 'all', 'any', 'no', 'only', 'our', 'these', 'those', 'that', 'which',
-  'and', 'or', 'nor', 'but', 'as', 'if', 'where',
+  'and', 'or', 'nor', 'but', 'as', 'if', 'where', 'also',
   'of', 'to', 'for', 'from', 'in', 'on', 'at', 'by', 'with', 'without', 'per', 'before', 'after', 'through', 'upon',
   // verbs that say what the price includes and where the fees go
-  'is', 'are', 'be', 'does', 'do', 'not', 'may', 'vary', 'apply', 'applies',
+  'is', 'are', 'be', 'does', 'do', 'not', 'may', 'vary', 'apply', 'applies', 'note',
   'include', 'includes', 'included', 'including', 'exclude', 'excludes', 'excluded', 'excluding',
-  'go', 'goes', 'paid', 'payable', 'collected', 'due', 'sent', 'remitted', 'directly',
+  'go', 'goes', 'paid', 'payable', 'collected', 'due', 'sent', 'remitted', 'directly', 'straight',
   // the price
   'price', 'prices', 'priced', 'pricing', 'advertised', 'listed', 'internet', 'sale', 'selling', 'cash', 'plus',
   'applicable', 'additional', 'extra',
@@ -676,8 +679,8 @@ const NOTE_BANNED_RE = new Map(BANNED_PHRASES.map((p) => [p, phraseRe(p, { ...BA
 // dealer's front desk." in a note is held to the word list).
 const NOTE_STEER_SAID = new Map(Object.keys(PRICE_NOTE_UNLESS).map((p) => [p, phraseRe(p)]));
 const NOTE_WORD_SET = new Set(PRICE_NOTE_WORDS);
-// a dollar amount or a percentage standing on its own (not "$5551234567", "US$499" or "6.25.7")
-const NOTE_AMOUNT = /(?<![\p{L}\p{N}])(?:\$\s?(?:\d{1,3}(?:,\d{3})+|\d{1,6})(?:\.\d{1,2})?|\d{1,3}(?:\.\d{1,3})?\s?%)(?![\p{L}\p{N}]|[.,]\p{N})/gu;
+// a dollar amount of up to six digits, with a thousands comma or without, or a percentage, standing on its own (not "$5551234567", "$5,551,234", "US$499" or "6.25.7")
+const NOTE_AMOUNT = /(?<![\p{L}\p{N}])(?:\$\s?(?:\d{1,3},\d{3}|\d{1,6})(?:\.\d{1,2})?|\d{1,3}(?:\.\d{1,3})?\s?%)(?![\p{L}\p{N}]|[.,]\p{N})/gu;
 // the marks a note may have between its words: spaces, punctuation, brackets, quotes, dashes, "/", "&", "*" and "+"
 const NOTE_MARKS = /^[\s.,;:!?'"\u2018\u2019\u201c\u201d()[\]\-\u2010-\u2015/&*+]$/u;
 const NOTE_EDGE_MARKS = /^[.,;:!?'"\u2018\u2019\u201c\u201d()[\]\-\u2010-\u2015/&*+]+|[.,;:!?'"\u2018\u2019\u201c\u201d()[\]\-\u2010-\u2015/&*+]+$/gu;

@@ -186,12 +186,12 @@ export const PRICE_NOTE_UNLESS: Readonly<Record<string, Readonly<{ before?: stri
 export const PRICE_NOTE_WORDS: readonly string[] = Object.freeze([
   // articles, determiners, conjunctions and prepositions
   'a', 'an', 'the', 'all', 'any', 'no', 'only', 'our', 'these', 'those', 'that', 'which',
-  'and', 'or', 'nor', 'but', 'as', 'if', 'where',
+  'and', 'or', 'nor', 'but', 'as', 'if', 'where', 'also',
   'of', 'to', 'for', 'from', 'in', 'on', 'at', 'by', 'with', 'without', 'per', 'before', 'after', 'through', 'upon',
   // verbs that say what the price includes and where the fees go
-  'is', 'are', 'be', 'does', 'do', 'not', 'may', 'vary', 'apply', 'applies',
+  'is', 'are', 'be', 'does', 'do', 'not', 'may', 'vary', 'apply', 'applies', 'note',
   'include', 'includes', 'included', 'including', 'exclude', 'excludes', 'excluded', 'excluding',
-  'go', 'goes', 'paid', 'payable', 'collected', 'due', 'sent', 'remitted', 'directly',
+  'go', 'goes', 'paid', 'payable', 'collected', 'due', 'sent', 'remitted', 'directly', 'straight',
   // the price
   'price', 'prices', 'priced', 'pricing', 'advertised', 'listed', 'internet', 'sale', 'selling', 'cash', 'plus',
   'applicable', 'additional', 'extra',
@@ -437,8 +437,8 @@ const NOTE_BANNED_RE: Map<string, RegExp> = new Map(BANNED_PHRASES.map((p) => [p
 // the phrases a price note may end its fee sentence with, as said anywhere in the note
 const NOTE_STEER_SAID: Map<string, RegExp> = new Map(Object.keys(PRICE_NOTE_UNLESS).map((p) => [p, phraseRe(p)]));
 const NOTE_WORD_SET: ReadonlySet<string> = new Set(PRICE_NOTE_WORDS);
-// a dollar amount or a percentage standing on its own
-const NOTE_AMOUNT = /(?<![\p{L}\p{N}])(?:\$\s?(?:\d{1,3}(?:,\d{3})+|\d{1,6})(?:\.\d{1,2})?|\d{1,3}(?:\.\d{1,3})?\s?%)(?![\p{L}\p{N}]|[.,]\p{N})/gu;
+// a dollar amount of up to six digits, with a thousands comma or without, or a percentage, standing on its own
+const NOTE_AMOUNT = /(?<![\p{L}\p{N}])(?:\$\s?(?:\d{1,3},\d{3}|\d{1,6})(?:\.\d{1,2})?|\d{1,3}(?:\.\d{1,3})?\s?%)(?![\p{L}\p{N}]|[.,]\p{N})/gu;
 // the marks a note may have between its words
 const NOTE_MARKS = /^[\s.,;:!?'"\u2018\u2019\u201c\u201d()[\]\-\u2010-\u2015/&*+]$/u;
 const NOTE_EDGE_MARKS = /^[.,;:!?'"\u2018\u2019\u201c\u201d()[\]\-\u2010-\u2015/&*+]+|[.,;:!?'"\u2018\u2019\u201c\u201d()[\]\-\u2010-\u2015/&*+]+$/gu;
