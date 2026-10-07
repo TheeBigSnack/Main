@@ -11,9 +11,9 @@
 //
 // This file never clicks anything on the Facebook page.
 
-import { markPosted, basisPrice, listingWebsitePrice, pendingText, scanCar } from './src/rescan.js';
+import { markPosted, basisPrice, postedBasis, pendingText, scanCar } from './src/rescan.js';
 import { DECISION } from './src/classify.js';
-import { draftRecord, draftPill } from './src/drafts.js';
+import { draftRecord, draftPill, draftScanCar } from './src/drafts.js';
 import { shortLocation, storeNames } from './src/normalize.js';
 import { readCarForPost, recheck } from './src/vehicleDetails.js';
 import { readyRows, nextToPost, siteChoices, defaultOrigin, siteReadOrigins, missingOrigins, siteAskText } from './src/panelList.js';
@@ -25,7 +25,7 @@ import { buildListingData, listingChanges, normalizeColor, COLORS } from './src/
 import { capStatus, capCount, logPost } from './src/cap.js';
 import { withDefaults, loadProfile, settingsFromProfile } from './src/settings.js';
 import { createQueue, currentVin, advance, pause as pauseQueue, resume as resumeQueue, describe as describeQueue } from './src/queue.js';
-import { wiz, startWizard, resumeWizard, wizardHtml, handleWizardClick, handleWizardChange } from './wizard.js';
+import { wiz, startWizard, resumeWizard, wizardHtml, handleWizardClick, handleWizardChange, handleWizardInput } from './wizard.js';
 import { up, startUpkeep, endUpkeep, upkeepHtml, handleUpkeepClick, namesakesOf } from './upkeep.js';
 import { localVinCheck, decodeVinOnline, compareVin, compareSummary, NHTSA_ORIGIN } from './src/vin.js';
 import { neededPatterns, patternCovers, patternHost, hostList, isFacebookServer } from './src/photoHosts.js';
@@ -36,6 +36,7 @@ import { watchForListing, isNewListingFromForm, showsPostedCar, onCreatePage, li
 import { LISTING_SIGNS } from './facebook/listingSigns.js';
 import { beginPost, notePostStep, endPost, noteFill, updatePilot } from './src/pilot.js';
 import { relistNotice } from './src/takenDown.js';
+import { notSavedReport } from './src/notSaved.js';
 import { POSTING_RULES } from './src/postingRules.js';
 import { siteKeys, GLOBAL_KEYS, REQUEST_KEYS } from './src/storageKeys.js';
 import { updateKey, withLock, storageErrorText } from './src/storage.js';
@@ -71,6 +72,8 @@ const state = {
   highlights: null, // the salesperson's pick of this car's features for the description (rewriteTemplate.js settleHighlights); null: the usual pick
   highlightsUsed: null, // the highlights the description on screen was written with
   relist: null, // this car's take-down while the website still listed it (src/takenDown.js relistNotice): the review says so, a queue waits
+  broughtBack: null, // the post as this panel brought it back from storage (resumeFlow); null for one begun here: a refused save loses what was done since (notSavedHere)
+  notSaved: null, // what a refused save of this panel's copy left on screen (src/notSaved.js notSavedReport), for the notSaved step
   queue: null, // the batch queue (src/queue.js), shared with the popup
   queueMode: false, // this car is being posted as part of the queue
   unlinked: null, // { queue, names }: the cars this queue recorded with no listing link, said in the queue bar (the next car's steps clear the status line)
@@ -200,19 +203,25 @@ const FLOW_FIELDS = ['vin', 'dealerTabId', 'windowId', 'vehicle', 'price', 'pric
 // or about to open its form gives way (startFlow, openForm); otherwise it
 // resolves null. The check and the write run under the saved post's lock, so
 // of two panels saving at once, the second sees the first's post.
-async function saveFlow() {
+// A refused save of a post at review, at a fields check or waiting for
+// Publish is said (notSavedHere): this panel leaves its copy, with what was
+// typed here kept on screen to copy. quiet: the caller says it itself (a
+// post just started gives way, startFlow).
+async function saveFlow({ quiet = false } = {}) {
   if (!state.origin) return null;
   const origin = state.origin;
   const run = flowRun;
   const flow = {};
   for (const f of FLOW_FIELDS) flow[f] = state[f];
   let other = null;
+  let newer = null; // the post a refused save leaves in place, which this panel's copy is compared with
   try {
     await updateKey(siteKeys(origin).flow, async (saved) => {
       // the save this panel last read or made of its post: read under the
       // lock, so a save that waited for this panel's previous one counts it
       const known = run === flowRun ? state.saveId : flow.saveId;
       const samePost = Boolean(saved) && saved.vin === flow.vin && saved.windowId === flow.windowId && (saved.saveId || null) === (known || null);
+      newer = saved || null;
       other = samePost ? null : await liveElsewhere(saved);
       if (other) return undefined;
       flow.saveId = crypto.randomUUID(); // never one an earlier save had, even of a post removed and started again
@@ -222,7 +231,38 @@ async function saveFlow() {
   } catch (e) {
     setStatus(storageErrorText(e), 'error'); // the quota, most likely; the post goes on from what the panel holds
   }
+  if (other && !quiet && run === flowRun) await notSavedHere(other, newer);
   return other;
+}
+
+// A save of this panel's copy of the post was refused (saveFlow): another
+// window's side panel has this website's post under way and changed it
+// after this panel showed it, or has another car's post under way. Nothing
+// is written over that post, and this panel does no more with its copy: it
+// says what happened and what to do, keeps what was typed here on screen to
+// copy, and names what else done here was not saved (src/notSaved.js says
+// which). The description is read from its box, so what was typed while the
+// save ran is kept too; Listing link is what was typed into it (onInput sets
+// listingTyped on every keystroke), never the link the panel offered there.
+// A copy of the same car's post ends no attempt in the pilot numbers: the
+// other window's panel carries that attempt on. A post recorded, or a car
+// stopped, stays as it is (a stop shows why, as in one window).
+async function notSavedHere(other, saved) {
+  const box = $('description');
+  const copy = { ...state, description: box ? box.value : state.description };
+  const report = notSavedReport({ copy, broughtBack: state.broughtBack, saved, other, alreadyPosted: Boolean(state.vin && state.posted && state.posted[state.vin]) });
+  if (!report) return;
+  clearTimeout(inputTimer); // a keystroke's save still waiting: its text is in the box read above
+  if (other.vin === state.vin) state.vin = null;
+  const run = await clearFlow({ keepSaved: true });
+  if (run !== flowRun) return; // another post started meanwhile: it stays on screen
+  state.step = 'notSaved';
+  state.notSaved = report;
+  setStatus('');
+  render();
+  // the keyboard was in the box this view replaced: it goes to the kept text (or Back)
+  const landing = $(report.kept.length ? 'kept-' + report.kept[0].key : 'back');
+  if (landing) landing.focus();
 }
 
 // A website's saved post is written together with that website as the one
@@ -244,18 +284,24 @@ async function dropSavedFlow(origin) {
 // Resolves the new count (flowRun): the number of the post started next.
 // keepSaved: the saved post is left as it is (it is another panel's now).
 // Without it, the saved post is removed unless another window's side panel
-// has it under way (dropSavedFlow).
+// has it under way (dropSavedFlow). A panel showing a refused save
+// (notSaved) holds no post: it left its copy, and the saved post is the
+// other window's, even once that window's side panel is closed (a panel
+// reopened there brings it back), so nothing that clears this panel then
+// (Back to the list, set-up starting here) removes it. A post started here
+// takes the website over only as saveFlow lets any post.
 async function clearFlow({ keepSaved = false } = {}) {
   const run = ++flowRun;
   if (watcher) watcher.cancel();
   watcher = null;
   const { vin, origin } = state;
+  const holdsNone = state.step === 'notSaved';
   if (vin) await pilotNote((p) => endPost(p, vin, 'abandoned')); // only an attempt still open changes
-  if (origin && !keepSaved) await dropSavedFlow(origin);
+  if (origin && !keepSaved && !holdsNone) await dropSavedFlow(origin);
   if (run !== flowRun) return run; // cleared again meanwhile (another post started): that clear empties the state, and this one must not empty the new post's
   Object.assign(state, {
     vin: null, dealerTabId: null, windowId: null, vehicle: null, price: null, priceBasis: null, readAt: null, opening: false, description: '', descriptionSource: 'template', note: '', guardrails: null,
-    listing: null, fbTabId: null, fill: null, photos: null, detected: null, listingTyped: null, probe: null, vinCheck: null, colorGuess: null, photoPick: null, highlights: null, highlightsUsed: null, relist: null, queueMode: false, blockedOrigins: null, step: 'idle', message: '', doneAt: null, saveId: null, map: FORM_MAP,
+    listing: null, fbTabId: null, fill: null, photos: null, detected: null, listingTyped: null, probe: null, vinCheck: null, colorGuess: null, photoPick: null, highlights: null, highlightsUsed: null, relist: null, broughtBack: null, notSaved: null, queueMode: false, blockedOrigins: null, step: 'idle', message: '', doneAt: null, saveId: null, map: FORM_MAP,
   });
   return run;
 }
@@ -292,6 +338,16 @@ const ctx = () => ({ vehicle: state.vehicle, dealer: state.settings.dealer, sale
 const dealerNamed = () => Boolean(String((state.settings && state.settings.dealer && state.settings.dealer.name) || '').trim());
 const NO_DEALER_TEXT = "Add your dealership's name in Settings first (Dealership name): every description names the dealership.";
 
+// What fixes the description's stops when every one of them is a number in
+// Settings (rewriteTemplate.js settingNumberProblems): the description must
+// keep naming the role, the name and the dealership, so the fix is in
+// Settings, and a Settings save writes the template again
+// (reviewAfterSettings). '' when the description itself needs fixing. The
+// status line (fillBlocker, carStillCurrent) and the checks line say it.
+// Only a template description is written again by a Settings save
+// (reviewAfterSettings); an edited or rewritten one is only checked again.
+const settingsFix = (stops, source = 'template') => (stops.length && stops.every((p) => p.code === 'setting-number') ? (source === 'template' ? 'After you save Settings, the template writes the description again; if you edited it, click Reset to template.' : 'After you save Settings, click Reset to template to write the description again.') : '');
+
 // Why a description can't be typed into the form, or '' when it can. Every
 // way of opening or filling the form goes through this (Open the
 // Marketplace form, Open the form and check fields only, Fill it in now
@@ -301,6 +357,9 @@ const NO_DEALER_TEXT = "Add your dealership's name in Settings first (Dealership
 // that breaks any other posting rule (rewriteTemplate.js ruleProblems): a
 // number, price, mileage or claim the website doesn't make, a banned phrase,
 // a missing role, VIN or price note. Length, capitals and emoji only warn.
+// When the only problems are numbers in Settings (a role such as "2nd shift
+// sales": rewriteTemplate.js settingNumberProblems), the fix is there, not in
+// the description: a Settings save writes the template again (reviewAfterSettings).
 function fillBlocker(description) {
   if (!dealerNamed()) return NO_DEALER_TEXT;
   const name = String(state.settings.dealer.name).trim();
@@ -309,7 +368,9 @@ function fillBlocker(description) {
   }
   const stops = ruleProblems(runGuardrails(description, ctx()));
   if (!stops.length) return '';
-  return `The description fails ${stops.length === 1 ? 'a check' : `${stops.length} checks`} that must pass before the form is filled: ${stops.map((p) => p.text).join('; ')}. Fix the description (or use Reset to template) first.`;
+  const fix = settingsFix(stops, state.descriptionSource) || 'Fix the description (or use Reset to template) first.';
+  const why = stops.map((p) => p.text).join('; '); // a reason may end with its own full stop ("Change the note in Settings.")
+  return `The description fails ${stops.length === 1 ? 'a check' : `${stops.length} checks`} that must pass before the form is filled: ${why}${/[.!?]$/.test(why) ? '' : '.'} ${fix}`;
 }
 
 // The description's checks, run again on the text that would be filled (the
@@ -322,7 +383,7 @@ function descriptionStopped() {
   if (box) state.description = box.value;
   state.guardrails = runGuardrails(state.description, ctx());
   const old = $('checks');
-  if (old) old.outerHTML = checksHtml(state.guardrails);
+  if (old) old.outerHTML = checksHtml(state.guardrails, state.descriptionSource);
   setFormButtons();
   const why = fillBlocker(state.description);
   if (!why) return false;
@@ -558,9 +619,10 @@ async function carStillCurrent(waiting = 'the form opens') {
   const reopen = was === 'publish' || was === 'probe'
     ? 'click Open the Marketplace form for a new form, and close the form opened before without publishing it'
     : 'click Open the Marketplace form again';
-  const next = stops.length
-    ? ` The description no longer matches it: ${stops.map((p) => p.text).join('; ')}. Fix the description, then ${reopen}.`
-    : ` Check the review, then ${reopen}.`;
+  const fix = settingsFix(stops, state.descriptionSource);
+  const why = stops.map((p) => p.text).join('; ');
+  const next = !stops.length ? ` Check the review, then ${reopen}.`
+    : ` The description no longer matches it: ${why}${/[.!?]$/.test(why) ? '' : '.'} ${fix ? `${fix} Then` : 'Fix the description, then'} ${reopen}.`;
   setStatus(`The website changed this car since it was read${what}.${next}`, 'error');
   await saveFlow();
   return false;
@@ -643,7 +705,7 @@ async function startFlow(req) {
   state.step = 'review';
   state.message = '';
   render();
-  const lost = await saveFlow(); // another window's side panel took this website's saved post meanwhile: that post goes on there, not this one
+  const lost = await saveFlow({ quiet: true }); // another window's side panel took this website's saved post meanwhile: that post goes on there, not this one (giveWay says so)
   if (dropped()) return undefined;
   if (lost) return giveWay(lost);
   await pilotNote((p) => notePostStep(p, state.vin, 'reviewedAt'));
@@ -831,6 +893,7 @@ async function block(message, code = 'blocked') {
 async function resumeFlow(origin, flow) {
   state.origin = origin;
   for (const f of FLOW_FIELDS) if (f in flow) state[f] = flow[f];
+  state.broughtBack = JSON.parse(JSON.stringify(flow)); // what is done here from now on is this panel's (notSavedHere)
   const devOverrides = (await chrome.storage.local.get(GLOBAL_KEYS.devOverrides))[GLOBAL_KEYS.devOverrides]; // test hook: addresses and timings only, see formMap.js
   state.map = applyOverrides(FORM_MAP, devOverrides);
   await loadSaved();
@@ -1517,14 +1580,17 @@ async function downloadPhotos() {
 // ---------- rendering ----------
 
 // The problems that keep the form from being filled (fillBlocker), then the
-// ones that only warn (length and tone).
-function checksHtml(g) {
+// ones that only warn (length and tone). When only numbers in Settings stop
+// it, the line says the fix is there (settingsFix): Open the Marketplace form
+// and Check fields are off meanwhile, so the status line's reason rarely shows.
+function checksHtml(g, source = 'template') {
   if (!g) return '';
   if (g.ok) return `<div class="checks ok" id="checks">All checks passed: ${g.words} words; every number the checks found is in the website's data, price and mileage included; no banned phrases or flagged claims; dealership and your role named${noteFor() ? '; price note included' : ''}. The checks look for set words and numbers, so read it through before you publish.</div>`;
   const stops = ruleProblems(g);
   const warns = g.problems.filter((p) => !stops.includes(p));
   const list = (ps) => `<ul>${ps.map((p) => `<li>${esc(p.text)}</li>`).join('')}</ul>`;
-  return `<div class="checks ${stops.length ? 'bad' : 'warn'}" id="checks">${stops.length ? `Fix before the form can be filled:${list(stops)}` : ''}${warns.length ? `Worth fixing (the form can still be filled):${list(warns)}` : ''}</div>`;
+  const fix = settingsFix(stops, source);
+  return `<div class="checks ${stops.length ? 'bad' : 'warn'}" id="checks">${stops.length ? `Fix before the form can be filled:${list(stops)}${fix ? `<p>${esc(fix)}</p>` : ''}` : ''}${warns.length ? `Worth fixing (the form can still be filled):${list(warns)}` : ''}</div>`;
 }
 
 function sourcePill() {
@@ -1611,7 +1677,9 @@ function listRowHtml(r, { canPost = true } = {}) {
   const facts = [e.stock && 'Stock ' + esc(e.stock), typeof e.mileage === 'number' ? miles(e.mileage) : '', esc(e.locationShort || '')].filter(Boolean).join(' · ');
   let action = '';
   if (r.draft) {
-    const draft = draftPill(state.drafts[r.vin], e, { basis: (state.settings && state.settings.basis) || 'website', markWhere: ' in the popup' });
+    // the draft's price is compared with the last scan only when it was taken once the draft was filled (src/drafts.js draftScanCar)
+    const seen = draftScanCar(state.drafts[r.vin], { takenAt: state.snapshotTakenAt, vehicles: state.snapshotVehicles }, r.vin);
+    const draft = draftPill(state.drafts[r.vin], seen, { basis: (state.settings && state.settings.basis) || 'website', markWhere: ' in the popup' });
     action = `<span class="pill ${draft.tone}" title="${esc(draft.title)}">${esc(draft.text)}</span>`;
   } else if (canPost) action = `<button type="button" class="small go" data-post-vin="${esc(r.vin)}" aria-label="Post ${esc(r.name)}">Post</button>`;
   return `<li class="row"><div class="main">${name}${pill}<div class="sub">${facts}</div><div class="when">${esc(r.line)}</div></div><div class="price">${money(r.price)}</div>${action}</li>`;
@@ -1885,7 +1953,7 @@ function viewReview() {
     <h3 id="descriptionLabel">Description ${sourcePill()}</h3>
     ${state.note ? `<div class="banner warn">${esc(state.note)}</div>` : ''}
     <textarea id="description" spellcheck="true" aria-labelledby="descriptionLabel">${esc(state.description)}</textarea>
-    ${checksHtml(state.guardrails)}
+    ${checksHtml(state.guardrails, state.descriptionSource)}
     <div class="actions">
       <button type="button" class="plain" id="rewrite" ${rw.enabled && rw.endpoint ? '' : 'disabled title="Turn on the rewrite service in Settings first"'}>Rewrite with Claude</button>
       <button type="button" class="plain" id="resetTemplate">Reset to template</button>
@@ -2048,6 +2116,24 @@ function viewPublish() {
   </section>`;
 }
 
+// A save of this panel's copy refused (notSavedHere): what happened and what
+// to do, the text from this panel in read-only boxes to copy (nothing keeps
+// it once this panel closes or shows anything else), and what else done here
+// was not saved. The panel holds no post meanwhile (clearFlow).
+function viewNotSaved() {
+  const r = state.notSaved || { text: '', kept: [], keptText: '', notSavedText: '' };
+  const boxes = r.kept.map((k) => `<section class="kept">
+    <h3 id="kept-${esc(k.key)}-label">${esc(k.label)}</h3>
+    <textarea id="kept-${esc(k.key)}" class="kept${k.key === 'description' ? '' : ' short'}" readonly aria-labelledby="kept-${esc(k.key)}-label">${esc(k.value)}</textarea>
+    <div class="actions"><button type="button" class="plain" data-copy="${esc(k.value)}" aria-label="Copy the ${esc(k.label.toLowerCase())}">Copy</button></div>
+  </section>`).join('');
+  return `<div class="banner bad" id="notSaved" role="alert">${esc(r.text)}</div>
+  ${r.keptText ? `<p class="lead" id="notSavedKept">${esc(r.keptText)}</p>` : ''}
+  ${boxes}
+  ${r.notSavedText ? `<p class="hint" id="notSavedEither">${esc(r.notSavedText)}</p>` : ''}
+  <button type="button" class="primary wide" id="back">Back to the list</button>`;
+}
+
 function viewDone() {
   const p = state.posted[state.vin] || {};
   return `<div class="banner good" id="done">Recorded: <b>${esc(state.vehicle.name)}</b> at ${money(p.price)}, ${esc(when(state.doneAt))}. It's now under <b>My listings</b> in the popup, and every rescan will tell you if it sells or the website price changes.</div>
@@ -2083,7 +2169,7 @@ function refocus(kept) {
 
 function render() {
   $('site').textContent = state.siteName || '';
-  const views = { idle: viewIdle, rules: viewRules, checking: viewChecking, blocked: viewBlocked, review: viewReview, filling: viewFilling, probe: viewProbe, publish: viewPublish, done: viewDone, queueDone: viewQueueDone, wizard: wizardHtml };
+  const views = { idle: viewIdle, rules: viewRules, checking: viewChecking, blocked: viewBlocked, review: viewReview, filling: viewFilling, probe: viewProbe, publish: viewPublish, done: viewDone, notSaved: viewNotSaved, queueDone: viewQueueDone, wizard: wizardHtml };
   if (state.step === 'wizard') {
     $('panel').innerHTML = wizardHtml();
     return;
@@ -2116,11 +2202,12 @@ function renderList() {
 // need a look. Another store, no photos or not yet on the lot hold back a
 // new post but not this: the listing is up, and its price should match the
 // website. The price is the website's now, on the basis the listing was
-// posted at (listingWebsitePrice), as the To do item's was: a listing with
+// posted at (rescan.js postedBasis), as the To do item's was: a listing with
 // no basis recorded reads it off the last scan only when that scan was taken
 // once the listing had its price (rescan.js scanCar), then off this read.
-// Resolves { ok, price } or { ok: false, message }; upkeep.js fills nothing
-// on a stop or when there is no price.
+// Resolves { ok, price, basis } or { ok: false, message }; upkeep.js fills
+// nothing on a stop or when there is no price, and records the basis with
+// the price on a listing that carries none (rescan.js markPriceUpdated).
 async function upkeepPriceNow(req) {
   const vin = String(req.vin || '').toUpperCase();
   const host = hostOf(req.origin);
@@ -2139,7 +2226,8 @@ async function upkeepPriceNow(req) {
   if (held) return { ok: false, message: `${held}, so its price was not updated. Rescan the website: To do then lists it to take down.` };
   const check = recheck(fresh.vehicle, state.settings);
   if (!check.ok && check.assessment.decision !== DECISION.NOT_READY) return { ok: false, message: `${check.message} Its price was not updated: rescan the website to see what to do with this listing.` };
-  return { ok: true, price: listingWebsitePrice(state.posted[vin], fresh.vehicle, state.settings.basis, [scanCar(state.posted[vin], { takenAt: state.snapshotTakenAt, vehicles: state.snapshotVehicles }, vin), fresh.vehicle]) };
+  const basis = postedBasis(state.posted[vin], state.settings.basis, [scanCar(state.posted[vin], { takenAt: state.snapshotTakenAt, vehicles: state.snapshotVehicles }, vin), fresh.vehicle]);
+  return { ok: true, price: basisPrice(fresh.vehicle, basis), basis };
 }
 
 const upkeepCtx = {
@@ -2504,6 +2592,10 @@ async function onPickChange(target) {
 
 let inputTimer = null;
 function onInput(ev) {
+  if (state.step === 'wizard') {
+    handleWizardInput(ev.target); // set-up's warning under the name, role or dealership name follows the typing
+    return;
+  }
   if (ev.target.id === 'panelSearch') {
     state.listFilter = ev.target.value;
     renderList();
@@ -2521,7 +2613,7 @@ function onInput(ev) {
     state.note = '';
     state.guardrails = runGuardrails(state.description, ctx());
     const old = $('checks');
-    if (old) old.outerHTML = checksHtml(state.guardrails);
+    if (old) old.outerHTML = checksHtml(state.guardrails, state.descriptionSource);
     setFormButtons();
     saveFlow();
   }, 250);
@@ -2664,6 +2756,9 @@ async function onClick(ev) {
         const open = formOpen() ? ` ${state.vehicle ? state.vehicle.name : state.vin} stays on its form: say whether it posted.` : '';
         state.queueMode = false;
         await saveFlow();
+        // a refused save shows the not-saved screen, which has no way to say
+        // whether it posted: the other window's post is finished there
+        if (state.step === 'notSaved') return setStatus(stopped);
         setStatus(stopped + open);
         return render();
       }
@@ -2707,11 +2802,12 @@ const handlers = { [GLOBAL_KEYS.postRequest]: postRequested, [GLOBAL_KEYS.setupR
 // the panel already holds is not a change. What is redrawn: steps without a
 // text box are redrawn whole; on the posting rules, review and publish only
 // the queue bar and the cap line are replaced, so the rules' tick, the
-// description and the listing link the person is typing stay put; the
+// description and the listing link the person is typing stay put, and so
+// does a refused save's kept text the person is copying (notSaved); the
 // wizard and upkeep draw their own views.
 // When the popup stops the queue while a car is under way, that car can
 // still be finished; afterQueueStep then finds no queue and stops.
-const INPUT_STEPS = ['rules', 'review', 'publish'];
+const INPUT_STEPS = ['rules', 'review', 'publish', 'notSaved'];
 const OWN_VIEW_STEPS = ['wizard', 'upkeep'];
 function adoptChanges(changes) {
   // the site registry: a website scanned or set up elsewhere, its service and permission state
@@ -2813,7 +2909,7 @@ async function reviewAfterSettings() {
   }
   state.guardrails = runGuardrails(box ? box.value : state.description, ctx());
   const old = $('checks');
-  if (old) old.outerHTML = checksHtml(state.guardrails);
+  if (old) old.outerHTML = checksHtml(state.guardrails, state.descriptionSource);
   setFormButtons();
   const noDealer = $('noDealer');
   if (noDealer && dealerNamed()) noDealer.remove();

@@ -6,37 +6,71 @@
 // after the name too when src/accountConfig.js is filled in, skipped here) ->
 // Ready to post is right -> the salesperson marks a car posted -> the mock
 // site "sells" it -> the service worker rescans it by calling the inventory
-// service directly (no tab) -> the badge shows 1 and the popup's To do agrees.
+// service directly (no tab) -> the badge shows 1 and the popup's To do agrees
+// -> Settings shows sign-in only in a copy with accounts.
+//
+// --zip <file> runs the same flow on a packed zip's files instead of
+// extension/, so a release checks set-up on the pilot zip, which has no
+// Account step (docs/release.md step 3):
+//   npm run test:e2e:wizard -- --zip dist/lot-current-extension-<version>-pilot.zip
 //
 // The real facebook.com is never automated. Run: npm run test:e2e:wizard
 
 import { chromium } from 'playwright';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { startMockSite } from './mock-dealer-site.mjs';
 import { LEGAL, legalHosted } from '../../extension/src/legalLinks.js';
-import { wizardSteps } from '../../extension/src/wizardSteps.js';
-import { accountsConfigured } from '../../extension/src/accountConfig.js';
+import { wizardSteps, termsSummary } from '../../extension/src/wizardSteps.js';
+import { NOT_CONFIGURED } from '../../extension/src/accountFlow.js';
+import { readZip } from '../../scripts/store-check.mjs';
+import { loadAccountConfig, pilotAccountConfig } from '../../scripts/pilot-config.mjs';
 import { blockFacebook } from './noFacebook.mjs';
-
-// The step numbers come from the wizard's own list, so filling in the
-// account config (supabase/README.md step 6) adds the Account step here too.
-const STEPS = wizardSteps(accountsConfigured());
-if (!accountsConfigured()) assert.equal(STEPS.length, 10, 'the shipped wizard without accounts has ten steps');
-const stepOf = (name) => {
-  assert.ok(STEPS.includes(name), `no ${name} step`);
-  return new RegExp(`step ${STEPS.indexOf(name) + 1} of ${STEPS.length}(?!\\d)`); // the heading follows with no space
-};
+import { until } from './until.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const shots = join(root, 'test/e2e/screenshots');
 mkdirSync(shots, { recursive: true });
 
+// The copy under test: extension/, or the files of the zip --zip names.
+const zipAt = process.argv.indexOf('--zip');
+const zipFile = zipAt > 0 ? process.argv[zipAt + 1] || '' : '';
+if (zipAt > 0 && !zipFile) throw new Error('--zip needs a file: npm run test:e2e:wizard -- --zip dist/lot-current-extension-<version>-pilot.zip');
 const extDir = mkdtempSync(join(tmpdir(), 'lot-current-ext-')); // a fresh folder, so flows can run side by side
-cpSync(join(root, 'extension'), extDir, { recursive: true });
+if (zipFile) {
+  for (const e of readZip(readFileSync(resolve(process.cwd(), zipFile)), true)) {
+    assert.ok(!e.name.split('/').includes('..') && !e.name.startsWith('/'), `${zipFile} holds ${e.name}, outside its own folder`);
+    mkdirSync(dirname(join(extDir, e.name)), { recursive: true });
+    writeFileSync(join(extDir, e.name), e.data);
+  }
+} else {
+  cpSync(join(root, 'extension'), extDir, { recursive: true });
+}
+
+// The step numbers come from the wizard's own list and the copy's own
+// account config: the committed one names the production project (an
+// Account step after the name), the pilot zip's is empty (no Account step).
+// A zip's copy is compared with what the pack makes of the committed file
+// before it is loaded, so no code from an archive runs here.
+const configText = readFileSync(join(extDir, 'src/accountConfig.js'), 'utf8');
+if (zipFile) {
+  const committed = readFileSync(join(root, 'extension/src/accountConfig.js'), 'utf8');
+  const expected = /-pilot\.zip$/.test(zipFile) ? pilotAccountConfig(committed) : committed;
+  assert.equal(configText, expected, `${zipFile} holds a src/accountConfig.js that npm run pack${/-pilot\.zip$/.test(zipFile) ? ' -- --pilot' : ''} does not make of today's file: pack it again`);
+}
+const { accountsConfigured } = await loadAccountConfig(configText);
+const configured = accountsConfigured();
+if (zipFile && /-pilot\.zip$/.test(zipFile)) assert.equal(configured, false, 'the pilot zip offers no sign-in');
+const STEPS = wizardSteps(configured);
+if (!configured) assert.equal(STEPS.length, 10, 'the wizard without accounts has ten steps');
+const stepOf = (name) => {
+  assert.ok(STEPS.includes(name), `no ${name} step`);
+  return new RegExp(`step ${STEPS.indexOf(name) + 1} of ${STEPS.length}(?!\\d)`); // the heading follows with no space
+};
+console.log(`Set-up on ${zipFile || 'extension/'}: ${configured ? 'with' : 'without'} accounts, ${STEPS.length} steps.`);
 const manifest = JSON.parse(readFileSync(join(extDir, 'manifest.json'), 'utf8'));
 manifest.host_permissions = ['http://127.0.0.1/*'];
 manifest.permissions = manifest.permissions.filter((p) => p !== 'sidePanel'); // no real side panel in tests
@@ -99,6 +133,7 @@ try {
   await panel.waitForSelector('#wizNext');
   assert.match(await panel.textContent('#panel'), /Set up Lot Current for this dealership/);
   assert.match(await panel.textContent('#panel'), stepOf('welcome'));
+  assert.equal(/your dealership's account \(optional\)/.test(await panel.textContent('#panel')), configured, 'the welcome names the Account step only when there is one');
   await panel.click('#wizNext'); // -> read the website (runs by itself)
   await panel.waitForSelector('.banner.good', { timeout: 30000 });
   assert.match(await panel.textContent('.banner.good'), /6 used cars read from Ron Lewis Chrysler Dodge Jeep Ram Waynesburg\. 3 stores found\./);
@@ -109,6 +144,25 @@ try {
   await panel.click('#wizNext'); // -> you
   await panel.fill('#wizName', 'Roger');
   assert.match(await panel.textContent('#panel'), stepOf('you'));
+  // a number in the role keeps the Marketplace form shut for nearly every car: the step says so as it is typed, and stops once it is gone
+  assert.equal(await panel.getAttribute('#wizTitle', 'aria-describedby'), 'wizTitleWarn');
+  assert.equal(await panel.getAttribute('#wizTitleWarn', 'aria-live'), null, 'the warning under the field changes on every key, so it is not spoken on each');
+  assert.equal(await panel.getAttribute('#wizTitleSay', 'aria-live'), 'polite', 'a screen reader hears the warning from the live region beside it');
+  assert.equal((await panel.textContent('#wizTitleWarn')).trim(), '', 'no warning for the default role');
+  assert.equal((await panel.textContent('#wizTitleSay')).trim(), '');
+  // typed key by key: the warning follows every key, the live region changes once, when the warning comes
+  await panel.evaluate(() => {
+    window.__sayWrites = 0;
+    new MutationObserver((list) => { window.__sayWrites += list.length; }).observe(document.querySelector('#wizTitleSay'), { childList: true, characterData: true, subtree: true });
+  });
+  await panel.fill('#wizTitle', '');
+  await panel.locator('#wizTitle').pressSequentially('2nd shift sales');
+  await panel.waitForFunction(() => /"Second shift sales"/.test(document.querySelector('#wizTitleWarn').textContent));
+  assert.match(await panel.textContent('#wizTitleWarn'), /^A number in your role \("2nd"\) keeps the Marketplace form shut for nearly every car: every number in a description must match the website's data for the car\. Write the number as a word or leave it out, for example "Second shift sales"\.$/);
+  assert.equal((await panel.textContent('#wizTitleSay')).trim(), "A number in your role keeps the Marketplace form shut for nearly every car: every number in a description must match the website's data for the car. Write the number as a word or leave it out.");
+  assert.equal(await panel.evaluate(() => window.__sayWrites), 1, 'the live region was written once over 15 keys');
+  await panel.fill('#wizTitle', 'sales consultant');
+  await panel.waitForFunction(() => document.querySelector('#wizTitleWarn').textContent.trim() === '' && document.querySelector('#wizTitleSay').textContent.trim() === '');
   await panel.click('#wizNext'); // -> account (when configured), then address
   if (STEPS.includes('account')) {
     await panel.waitForSelector('#wizEmail');
@@ -116,6 +170,8 @@ try {
     assert.match(await panel.textContent('#panel'), stepOf('account'));
     assert.equal((await panel.textContent('#wizNext')).trim(), 'Skip for now', 'signing in is optional');
     await panel.click('#wizNext'); // -> address, signed out
+  } else {
+    assert.equal(await panel.$('#wizEmail'), null, 'no Account step in a copy without accounts');
   }
   await panel.waitForSelector('#wizZip');
   assert.match(await panel.textContent('#panel'), stepOf('address'));
@@ -123,6 +179,13 @@ try {
   assert.match(await panel.textContent('#wizAddressHint'), /^Read from the website \(structured data\)\. Marketplace asks/, 'the step says where the address came from');
   assert.equal(await panel.inputValue('#wizState'), 'PA');
   assert.equal(await panel.inputValue('#wizZip'), '15370', "from the website's structured data");
+  // a dealership typed here that no longer has the number in the role or the name brings that warning up here; this role and name have none
+  assert.equal(await panel.getAttribute('#wizZip', 'aria-describedby'), 'wizYouWarn');
+  assert.equal(await panel.getAttribute('#wizDealer', 'aria-describedby'), 'wizDealerWarn wizYouWarn');
+  assert.equal(await panel.getAttribute('#wizYouSay', 'aria-live'), 'polite');
+  await panel.locator('#wizZip').pressSequentially('0');
+  await panel.fill('#wizZip', '15370');
+  assert.equal((await panel.textContent('#wizYouWarn')).trim(), '', 'no number in the role or the name: nothing to say');
   await panel.click('#wizNext'); // -> price
   await panel.waitForSelector('#wizPriceNote');
   assert.match(await panel.textContent('h3'), /^The price to post$/);
@@ -141,6 +204,29 @@ try {
   await panel.check('input[name="wizBasis"][value="beforeFees"]'); // the suggested wording follows the basis
   assert.equal(await panel.getAttribute('#wizPriceNote', 'placeholder'), 'Price is before the $490 doc fee; tax and tags extra.');
   assert.match(await panel.textContent('#wizPriceHint'), /Suggested: "Price is before the \$490 doc fee; tax and tags extra\."$/);
+  // a note that says "not the dealer" may hold only price and fee wording: the step warns under the field as it is typed, and Next still keeps the note
+  const noteReason = (out) => `Your price note says "not the dealer", so it may only say where the fees go and what the price includes; take out ${out}, or take out "not the dealer". Change the note in Settings.`;
+  assert.equal(await panel.getAttribute('#wizPriceNote', 'aria-describedby'), 'wizPriceNoteWarn wizPriceHint');
+  assert.equal(await panel.getAttribute('#wizPriceNoteWarn', 'aria-live'), null, 'the warning under the field changes on every key, so it is not spoken on each');
+  assert.equal(await panel.getAttribute('#wizPriceNoteSay', 'aria-live'), 'polite');
+  assert.equal((await panel.textContent('#wizPriceNoteWarn')).trim(), '');
+  await panel.evaluate(() => {
+    window.__noteSayWrites = 0;
+    new MutationObserver((list) => { window.__noteSayWrites += list.length; }).observe(document.querySelector('#wizPriceNoteSay'), { childList: true, characterData: true, subtree: true });
+  });
+  await panel.locator('#wizPriceNote').pressSequentially('Tax, title and fees go to the state, not the dealer. Text Sam.');
+  await panel.waitForFunction(() => /"Sam"/.test(document.querySelector('#wizPriceNoteWarn').textContent));
+  assert.equal((await panel.textContent('#wizPriceNoteWarn')).trim(), noteReason('"Text" and "Sam"'));
+  assert.equal((await panel.textContent('#wizPriceNoteSay')).trim(), 'Your price note says "not the dealer", so it may only say where the fees go and what the price includes. Take out the other words, or take out "not the dealer".');
+  assert.equal(await panel.evaluate(() => window.__noteSayWrites), 1, 'the live region was written once, when the warning came');
+  await panel.click('#wizBack'); // only a warning: the note is kept, and the warning is back with it
+  await panel.waitForSelector('#wizZip');
+  await panel.click('#wizNext');
+  await panel.waitForSelector('#wizPriceNote');
+  assert.equal(await panel.inputValue('#wizPriceNote'), 'Tax, title and fees go to the state, not the dealer. Text Sam.');
+  assert.equal((await panel.textContent('#wizPriceNoteWarn')).trim(), noteReason('"Text" and "Sam"'));
+  await panel.fill('#wizPriceNote', 'Tax, title and fees go to the state, not the dealer.');
+  await panel.waitForFunction(() => document.querySelector('#wizPriceNoteWarn').textContent.trim() === '' && document.querySelector('#wizPriceNoteSay').textContent.trim() === '');
   await panel.fill('#wizPriceNote', 'Tax and tags extra.');
   await panel.click('#wizBack'); // the choice and the typed note survive Back and Next
   await panel.waitForSelector('#wizZip');
@@ -153,6 +239,7 @@ try {
   await panel.click('#wizNext'); // -> permission
   assert.match(await panel.textContent('#panel'), /Automatic rescans/);
   assert.match(await panel.textContent('#panel'), stepOf('permission'));
+  assert.equal(/signed in to a Lot Current account/.test(await panel.textContent('#panel')), configured, 'rescans sync only in a copy with accounts');
   await panel.click('#wizGrant'); // the test copy already has this host; Chrome answers without a prompt
   await panel.waitForSelector('.banner.good');
   assert.match(await panel.textContent('.banner.good'), /Permission granted/);
@@ -172,6 +259,7 @@ try {
   await panel.waitForSelector(termsReady);
   assert.match(await panel.textContent('#panel'), stepOf('terms'));
   assert.match(await panel.textContent('#panel'), /Terms and privacy[\s\S]*never your Facebook login[\s\S]*not affiliated with Meta Platforms, Inc\./);
+  assert.equal(await panel.textContent('#termsSummary'), termsSummary(configured), 'the summary names the sync only in a copy with accounts');
   if (!hosted) {
     assert.match(await panel.textContent('#legalPending'), /being finalised/);
     assert.match(await panel.textContent('#legalPending'), /accept them in Settings/, 'says where the acceptance will happen');
@@ -234,7 +322,17 @@ try {
   await popup.screenshot({ path: join(shots, 'wizard-5-badge-todo.png') });
   await popup.click('button[data-action="takenDown"]');
   await popup.waitForFunction(() => document.querySelector('.tabs button[data-view="todo"] .count').textContent === '0');
-  await popup.waitForFunction(async () => (await chrome.action.getBadgeText({})) === '');
+  await until(popup, async () => (await chrome.action.getBadgeText({})) === '', undefined, { what: 'the badge cleared' });
+
+  // ---- 5. Settings, Account: a sign-in only in a copy with accounts ----
+  await popup.click('#settingsBtn');
+  await popup.waitForSelector('.settings');
+  if (configured) {
+    assert.ok(await popup.$('input[name="accountEmail"]'), 'Settings offers sign-in');
+  } else {
+    assert.equal((await popup.textContent('#accountStatus')).trim(), NOT_CONFIGURED, 'Settings shows one line about accounts');
+    assert.equal(await popup.$('input[name="accountEmail"]'), null, 'and no sign-in');
+  }
   await popup.close();
   await panel.close();
 

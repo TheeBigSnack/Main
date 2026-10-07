@@ -973,3 +973,19 @@ test('every end-to-end flow scripts only the local mocks and refuses the real Fa
     assert.match(src, /facebook\.assertNone\(\);\s*console\.log\('[^']*E2E passed/, `${name}: fails if Facebook was asked for`);
   }
 });
+
+// Playwright's waitForFunction does not await a check that returns a promise
+// (the promise is truthy, so the wait ends at once), and a flow that waits on
+// chrome.storage that way passes or fails on how fast the machine is: such
+// waits go through until() in test/e2e/until.mjs.
+test('no end-to-end flow waits on an async check with waitForFunction', () => {
+  const ASYNC_WAIT = /waitForFunction\(\s*async\b/;
+  assert.match('await panel.waitForFunction(\n    async (o) => true,', ASYNC_WAIT);
+  assert.doesNotMatch('await popup.waitForFunction(() => document.title === \'x\');', ASYNC_WAIT);
+  const dir = new URL('./e2e/', import.meta.url);
+  const files = readdirSync(dir).filter((f) => f.endsWith('.mjs'));
+  assert.ok(files.includes('until.mjs'), 'the polling wait is found');
+  for (const name of files) {
+    assert.doesNotMatch(readFileSync(new URL(name, dir), 'utf8'), ASYNC_WAIT, `${name}: waits on an async check with waitForFunction; use until() from until.mjs`);
+  }
+});

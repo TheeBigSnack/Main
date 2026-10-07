@@ -13,8 +13,9 @@
 // page again and never says it posted). For the second car the test presses
 // "Saved as draft" (as if the person used Facebook's Save draft), and the
 // queue finishes with 1 posted, 1 draft. Then the website drops the draft's
-// car $1,500: the draft's pill says so, and Mark posted records the price
-// the draft shows, with the drop listed under Update price.
+// car $1,500: the draft's pill says so, and Mark posted (after that scan)
+// records the price the draft shows, with the drop listed under Update price
+// and on My listings, where Updated offers the website's price.
 //
 // The real facebook.com is never automated. Run: npm run test:e2e:queue
 
@@ -274,9 +275,11 @@ try {
 
   // ---- 6. At the daily cap nothing more can be selected or posted; the form saved as a draft counts ----
   // The cap counts the local day's posts, and a run can cross midnight after the post in step 3. So
-  // the post, its entry in the day's log and the draft are stamped with one moment, and the popups
-  // from here on read the clock at that moment: all of them fall on one day, whenever the run is.
+  // the post, its entry in the day's log and the draft are stamped with one moment, noon today, and the
+  // popups from here on read the clock at that moment or a moment after it: all of them fall on one day,
+  // whenever the run is.
   const capDay = new Date();
+  capDay.setHours(12, 0, 0, 0);
   await popup.evaluate(async ({ o, at }) => {
     const k = `settings:${o}`;
     const s = (await chrome.storage.local.get(k))[k];
@@ -313,6 +316,11 @@ try {
   assert.match(await draftPill.getAttribute('class'), /\bbad\b/);
   assert.match(await draftPill.getAttribute('title'), /^Change the price on the draft to \$36,883 before you publish it\./);
   await popup.screenshot({ path: join(shots, 'queue-6-draft-price-changed.png') });
+  await popup.close();
+  // published since that scan and marked posted a moment later: the listing got its price when the draft was filled,
+  // no later than the scan (src/drafts.js markDraftPosted, src/rescan.js scanCar), so the scan's price is the one to take now
+  popup = await openPopup({ at: new Date(capDay.getTime() + 1) });
+  await tab(popup, 'ready').click();
   await popup.click(`button[data-action="post"][data-vin="${WAGONEER}"]`);
   await popup.waitForFunction(() => /^Recorded at/.test(document.querySelector('#status').textContent));
   assert.equal(await popup.textContent('#status'), 'Recorded at $38,383, the price the draft was filled with. The website now shows $36,883: update the price on the listing (To do, Update price).');
@@ -322,6 +330,10 @@ try {
   const todo = await popup.textContent('.panel');
   assert.match(todo, /Update price\s*1[\s\S]*Jeep Wagoneer[\s\S]*Your listing[\s\S]*\$38,383 → \$36,883/);
   assert.equal(await popup.locator(`button[data-action="upkeep"][data-kind="price"][data-vin="${WAGONEER}"]`).count(), 1, 'Open & update price is offered');
+  await tab(popup, 'mine').click();
+  const mine = popup.locator('.row', { hasText: 'Wagoneer' });
+  assert.match(await mine.textContent(), /Website price changed[\s\S]*Listed \$38,383\s*Website \$36,883/, 'My listings shows the drop To do lists');
+  assert.equal(await mine.locator('button[data-action="priceUpdated"][data-price="36883"]').count(), 1, 'with Updated at the website\'s price');
   await popup.close();
   // and the next rescan still lists it, until the listing is updated
   popup = await openPopup({ at: capDay });

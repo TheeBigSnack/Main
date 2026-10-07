@@ -124,6 +124,28 @@ try {
   assert.equal(await tab(popup, 'todo').locator('.count').textContent(), '2');
   await popup.screenshot({ path: join(shots, 'upkeep-1-todo.png'), fullPage: true });
 
+  // ---- 1b. The Wagoneer's listing updated after that scan on another computer (a sync brings it, and settles no to-do list): To do says what My listings says, the price is compared at the next scan, and offers nothing to fill or record from that scan (src/rescan.js priceItemWaits); then the listing is put back as it was ----
+  const postedKey = `posted:${origin}`;
+  const postedBefore = await popup.evaluate(async (k) => (await chrome.storage.local.get(k))[k], postedKey);
+  await popup.evaluate(async ({ k, vin }) => {
+    const posted = (await chrome.storage.local.get(k))[k];
+    posted[vin] = { ...posted[vin], price: 36383, updatedAt: new Date().toISOString() };
+    await chrome.storage.local.set({ [k]: posted });
+  }, { k: postedKey, vin: WAGONEER });
+  await popup.close();
+  popup = await openPopup();
+  const waitingRow = popup.locator('.row', { hasText: 'Wagoneer' });
+  assert.match(await waitingRow.textContent(), /Price compared at the next scan[\s\S]*Listed \$36,383/);
+  assert.doesNotMatch(await waitingRow.textContent(), /\$38,383|\$36,883/, 'neither price of that scan');
+  assert.equal(await waitingRow.locator('button').count(), 0, 'no Open & update price, no Updated');
+  await tab(popup, 'mine').click();
+  assert.match(await popup.locator('.row', { hasText: 'Wagoneer' }).textContent(), /Price compared at the next scan/);
+  assert.equal(await popup.locator('.row', { hasText: 'Wagoneer' }).locator('button[data-action="priceUpdated"]').count(), 0);
+  await popup.evaluate(async ({ k, value }) => chrome.storage.local.set({ [k]: value }), { k: postedKey, value: postedBefore });
+  await popup.close();
+  popup = await openPopup();
+  assert.equal(await popup.locator('.row', { hasText: 'Wagoneer' }).locator('button[data-action="priceUpdated"]').count(), 1, 'back as it was: the item offers Updated');
+
   // ---- 2a. Before the person gets to it, the website puts the Wagoneer back at the listing's price: Open & update price reads the car on the website again first, stops there and says why, and opens no listing ----
   await dealer.request.get(`${origin}/scenario?name=day1`);
   await popup.click('button[data-action="upkeep"][data-kind="price"]');
@@ -182,6 +204,8 @@ try {
   assert.doesNotMatch(await popup.textContent('.panel'), /Update price/);
   await tab(popup, 'mine').click();
   assert.match(await popup.textContent('.panel'), /Wagoneer[\s\S]*Listed \$36,883/);
+  // its price is newer than the last scan, and that scan shows the same price: it matches (src/rescan.js listingLine)
+  assert.match(await popup.locator('.row', { hasText: 'Wagoneer' }).textContent(), /Matches the website/);
 
   // ---- 3. Take the Ram down, its listing link forgotten (as for a car marked posted by hand), with a second Ram of the same name and price posted too: Your listings opens, nothing is ticked off there or on the other Ram's listing; the person opens this Ram's listing and clicks Mark as sold; Lot Current notices ----
   await popup.evaluate(async ({ o, vin, twin }) => {

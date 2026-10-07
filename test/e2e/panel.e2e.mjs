@@ -6,7 +6,10 @@
 // whose price dropped (posted at the website's new price), the MOCK form
 // filled, the test clicking Publish as the salesperson would (the extension
 // never does), Post another car, Rescan the website from the panel, "Post the
-// next N" as a queue, and the daily cap taking the Post buttons away.
+// next N" as a queue, a copy of a post another window's side panel changed
+// since (the save refused here is said, the text typed here kept to copy,
+// and Back to the list leaves that window's post), and the daily cap taking
+// the Post buttons away.
 //
 // The real facebook.com is never automated. Screenshots go to test/e2e/screenshots/.
 // Run: npm run test:e2e:panel   (needs Playwright + Chromium installed)
@@ -20,6 +23,7 @@ import assert from 'node:assert/strict';
 import { startMockSite } from './mock-dealer-site.mjs';
 import { startMockMarketplace, INITIAL_LISTINGS } from './mock-marketplace.mjs';
 import { blockFacebook } from './noFacebook.mjs';
+import { until } from './until.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const shots = join(root, 'test/e2e/screenshots');
@@ -148,12 +152,14 @@ try {
   // saving the order, redrawing and putting the focus back on the menu land in
   // turns of their own, and the first row can be the same under the old order:
   // wait for all three rather than read any of them once
-  await panel.waitForFunction(
+  await until(
+    panel,
     async (o) =>
       document.activeElement?.id === 'panelSort' &&
       document.querySelector('#panelList .row .name')?.textContent.trim() === '2019 Ram 1500 Classic Express' &&
       (await chrome.storage.local.get(`settings:${o}`))[`settings:${o}`]?.readySort === 'name',
     origin,
+    { what: 'the order by name saved, drawn and focused' },
   );
 
   // another website in the registry: the choice appears, and a website with no scan says how to start
@@ -284,7 +290,88 @@ try {
   assert.equal(await publishCount(), '1', 'nothing was published but the salesperson\'s own click');
   for (const p of context.pages()) if (p.url().startsWith(marketOrigin)) await p.close();
 
-  // ---- 8. At the daily cap the list keeps its cars and loses its Post buttons ----
+  // ---- 8. A copy of another window's post, changed there since: the save refused here is said, the typed text kept ----
+  // A second Chrome window stands in for the first window's side panel. Its
+  // post of the car is written into storage as that window's, and the panel
+  // here is reloaded, so it brings that post back as a side panel opened in a
+  // second window does. A photo unticked here while the copy is the post as
+  // it stands is saved; then the other window opens the car's form (its
+  // newer post, without that pick, written over the copy's), and text typed
+  // here can't be saved: the panel says so, keeps the text to copy, names
+  // the photo pick, writes nothing over the other window's post and opens no form.
+  const flowKey = `postFlow:${origin}`;
+  const savedFlow = () => panel.evaluate(async (k) => (await chrome.storage.local.get(k))[k] ?? null, flowKey);
+  const setFlow = (v) => panel.evaluate(async ({ k, v }) => chrome.storage.local.set({ [k]: v }), { k: flowKey, v });
+  const otherWindow = await panel.evaluate(async () => {
+    const w = await chrome.windows.create({ url: 'about:blank', focused: false });
+    return { windowId: w.id, tabId: w.tabs[0].id };
+  });
+  await panel.click(`button[data-post-vin="${first}"]`);
+  await panel.waitForSelector('#openForm', { timeout: 20000 });
+  // the review's own save is waited for, so no save of this panel lands after
+  // the other window's post is written (it would take that post over, since
+  // the other window has no side panel open)
+  await until(panel, async ({ k, vin }) => {
+    const f = (await chrome.storage.local.get(k))[k] || {};
+    return f.vin === vin && f.step === 'review' && Boolean(f.description);
+  }, { k: flowKey, vin: first }, { timeout: 20000, what: 'the review saved' });
+  for (let last = null, i = 0; i < 20; i++) { // and any save after it: the post is left alone for a second
+    const now = (await savedFlow()).saveId;
+    if (now === last) break;
+    last = now;
+    await panel.waitForTimeout(1000);
+  }
+  const theirs = { ...(await savedFlow()), windowId: otherWindow.windowId };
+  assert.equal(theirs.vin, first);
+  await setFlow(theirs);
+  await panel.reload();
+  await panel.waitForSelector('#description', { timeout: 20000 });
+  assert.equal((await savedFlow()).windowId, otherWindow.windowId, 'the panel here brought back the other window\'s post');
+  await panel.click('#photo-0');
+  // the pick itself is waited for: the panel may save once on its own when it
+  // brings the post back, which renews the save mark before the pick is saved
+  await until(panel, async (k) => {
+    const f = (await chrome.storage.local.get(k))[k] || {};
+    return Array.isArray(f.photoPick);
+  }, flowKey).catch(() => {});
+  const picked = await savedFlow();
+  assert.notEqual(picked.photoPick, null, 'the pick made here saved while the copy was the post as it stood');
+  assert.notEqual(picked.saveId, theirs.saveId, 'saved as a new save of the post');
+  const newer = { ...theirs, step: 'publish', fbTabId: otherWindow.tabId, saveId: 'saved-in-the-other-window' };
+  await setFlow(newer);
+  const typed = 'Typed in this window, with my own closing line: ask for me by name.';
+  await panel.fill('#description', typed);
+  await panel.waitForSelector('#notSaved', { timeout: 10000 });
+  assert.match(await panel.textContent('#notSaved'), /'s Marketplace form is open from the side panel in another Chrome window, and the post changed there after this side panel showed it, so what was done here was not saved\. Finish the post there; opening the side panel in that window brings it back\./);
+  assert.equal(await panel.getAttribute('#notSaved', 'role'), 'alert');
+  assert.equal(await panel.inputValue('#kept-description'), typed, 'the text typed here is kept on screen');
+  assert.equal(await panel.evaluate(() => document.activeElement && document.activeElement.id), 'kept-description', 'the keyboard lands on the kept text, where the typing box was');
+  assert.equal(await panel.getAttribute('#kept-description', 'readonly'), '', 'read-only');
+  assert.equal(await panel.getAttribute('button[aria-label="Copy the description"]', 'data-copy'), typed, 'Copy copies it');
+  assert.equal(await panel.textContent('#notSavedKept'), 'The text from this side panel is below, kept on this screen only: copy it before you leave this screen.');
+  assert.equal(await panel.textContent('#notSavedEither'), 'Not saved either, so do it again in that window if you still want it: the photos picked.');
+  assert.equal(await panel.$('#openForm'), null, 'the copy is left: no form button');
+  assert.deepEqual(await savedFlow(), newer, 'the other window\'s post is not written over');
+  assert.equal(context.pages().filter((p) => p.url().startsWith(marketOrigin)).length, 0, 'no form opened');
+  await panel.screenshot({ path: join(shots, 'panel-4b-not-saved.png'), fullPage: true });
+  // the other window closes with the car's form at Publish (it may have
+  // posted from there); Back to the list here leaves that post, which this
+  // panel never held, and a side panel opened next brings it back and asks
+  // whether it posted: here it didn't, and the post is stopped
+  await panel.evaluate(async (id) => chrome.windows.remove(id), otherWindow.windowId);
+  await panel.click('#back');
+  await panel.waitForSelector('#panelReady');
+  assert.deepEqual(await savedFlow(), newer, 'Back to the list here leaves the other window\'s post');
+  await panel.reload();
+  await panel.waitForSelector('#notPosted', { timeout: 20000 });
+  assert.match(await panel.textContent('#detected'), /The Facebook tab was closed\. Did it post\?/);
+  await panel.click('#notPosted');
+  await panel.waitForSelector('#stopPost');
+  await panel.click('#stopPost');
+  await panel.waitForSelector('#panelReady');
+  assert.equal(await savedFlow(), null, 'stopped');
+
+  // ---- 9. At the daily cap the list keeps its cars and loses its Post buttons ----
   await panel.evaluate(async (o) => {
     const k = `settings:${o}`;
     const data = await chrome.storage.local.get(k);
@@ -297,7 +384,7 @@ try {
   assert.match(await panel.textContent('#capReached'), /Daily post cap reached \(1 of 1 today\)/, 'a colleague\'s post does not count against this salesperson\'s cap');
   await panel.screenshot({ path: join(shots, 'panel-5-cap.png'), fullPage: true });
 
-  // ---- 9. The pilot numbers: three attempts from the panel, one blocked as gone, one stopped at review, one posted ----
+  // ---- 10. The pilot numbers: three attempts from the panel, one blocked as gone, one stopped at review, one posted ----
   const pilot = await panel.evaluate(async (o) => (await chrome.storage.local.get(`pilot:${o}`))[`pilot:${o}`], origin);
   const outcome = (vin) => pilot.posts.filter((p) => p.vin === vin).map((p) => [p.outcome, p.reason || '']);
   assert.deepEqual(outcome(RAM), [['blocked', 'not-on-website']]);

@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { PILOT_RETENTION_DAYS } from '../extension/src/pilot.js';
+import { notSavedReport, NOT_SAVED_STEPS } from '../extension/src/notSaved.js';
 import { STORAGE_FULL } from '../extension/src/storage.js';
 import { withDefaults, profileFrom } from '../extension/src/settings.js';
 import { wizardSteps } from '../extension/src/wizardSteps.js';
@@ -27,6 +28,7 @@ import { honestyProblems } from './honesty.js';
 import { ADAPTERS, platformNames, unsupportedSiteMessage } from '../extension/adapters/index.js';
 import { LEGAL } from '../extension/src/legalLinks.js';
 import { accountsConfigured } from '../extension/src/accountConfig.js';
+import { PRICE_NOTE_WORDS } from '../extension/src/rewriteTemplate.js';
 import { FORM_MAP } from '../extension/facebook/formMap.js';
 import { runGuardrails } from '../extension/src/rewriteTemplate.js';
 
@@ -109,6 +111,7 @@ test('help.md names every state My listings can show a posted car in, as the cod
     listingStatus({ decision: 'not-ready' }, 1, null),
     listingStatus({ decision: 'ready' }, 1, 2),
     listingStatus({ decision: 'ready' }, 1, 1),
+    listingStatus({ decision: 'ready' }, 1, 2, false), // the last scan is from before the listing's price (rescan.js listingLine)
   ];
   assert.equal(new Set(states.map((s) => s.text)).size, states.length);
   for (const s of states) assert.ok(help.includes(`"${s.text}"`), `docs/help.md does not name the My listings state "${s.text}"`);
@@ -136,6 +139,19 @@ test('help.md names every abbreviation whose dot ends no sentence before the pri
   const sentence = /the dot of ((?:"[^"]+",? (?:or )?)+)ends no sentence/.exec(doc('help.md'));
   assert.ok(sentence, 'help.md says which dots end no sentence');
   assert.deepEqual([...sentence[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]).sort(), [...js].sort());
+});
+
+// A price note that says "not the dealer" (or "not the dealership", "not
+// the dealers", "not the dealerships") may hold only the words on
+// PRICE_NOTE_WORDS and the dealership's own: help.md lists them, so a
+// dealer can write a note that passes before the warning shows.
+test('help.md lists every word a "not the dealer" price note may hold, as the description checks list them', () => {
+  const help = doc('help.md');
+  const listed = /one of these words: ([a-z]+(?:, [a-z]+)*)\./.exec(help);
+  assert.ok(listed, 'help.md lists the words');
+  assert.deepEqual(listed[1].split(', ').sort(), [...PRICE_NOTE_WORDS].sort());
+  for (const phrase of ['not the dealership', 'not the dealers', 'not the dealerships']) assert.ok(help.includes(`"${phrase}"`), `help.md names "${phrase}"`);
+  assert.ok(help.includes('Your price note says "not the dealer", so it may only say where the fees go and what the price includes; take out'), 'help.md quotes the reason a dealer sees');
 });
 
 test('the adapter contract\'s PLATFORM row names every adapter and quotes no stale unsupported-page message', () => {
@@ -1686,6 +1702,33 @@ test('the help says Mark posted on a draft records the draft\'s price, or the we
   assert.match(read('../extension/popup.js'), /draft \? markDraftPosted\(/, 'the popup\'s Mark posted no longer records a draft\'s price: update the help and this test');
   const line = doc('help.md').split('\n').find((l) => l.startsWith('- A car saved as a draft shows'));
   assert.match(line, /\*\*Mark posted\*\* records the draft's price, because that is what the listing shows \(a draft saved by an older version of Lot Current kept no price: its pill reads just "Draft on Facebook", and \*\*Mark posted\*\* records the website's price/);
+  // the pill and Mark posted compare the draft only with a scan taken since it was saved (drafts.js draftScanCar)
+  const { draftScanCar } = await import('../extension/src/drafts.js');
+  const scan = (takenAt) => ({ takenAt, vehicles: { AAA: entry } });
+  const draft = { price: 19500, basis: 'website', savedAt: '2026-09-30T12:00:00.000Z' };
+  assert.deepEqual([draftScanCar(draft, scan('2026-09-30T11:00:00.000Z'), 'AAA', '2026-10-01T12:00:00.000Z'), draftScanCar(draft, scan('2026-09-30T13:00:00.000Z'), 'AAA', '2026-10-01T12:00:00.000Z')], [null, entry], 'a draft is no longer compared only with a scan taken since it was saved: update the help and this test');
+  assert.match(line, /If a scan taken since the draft was saved shows another website price, the pill says so in red[^.]*\. A scan taken before the draft was saved shows the website as it was then, so the pill names no website price from it\./);
+  assert.match(line, /when a scan taken since the draft was saved shows a different website price, the status line says so and \*\*To do\*\* lists the car under \*\*Update price\*\* at once\. Otherwise the next scan compares the two/);
+});
+
+// A scan's time is when it finished (the adapter's fetchedAt, set once every
+// page is read: scanRunner.js), and a listing's price counts from when it was
+// recorded (rescan.js scanCar). So a scan still running when a listing was
+// posted counts as taken since, even for a car it read before the side panel
+// did. The help says only what holds: a scan that finished before the post
+// is from before, one still running counts as since, and what to do then.
+test('the help says a scan counts from when it finished, so one still running when a listing got its price counts as since', async () => {
+  const { scanCar } = await import('../extension/src/rescan.js');
+  const car = { vin: 'AAA', price: 27663 }; // read at 10:00:05, before the website's cut
+  const posted = { price: 27163, basis: 'website', postedAt: '2026-10-01T10:03:00.000Z' };
+  assert.equal(scanCar(posted, { takenAt: '2026-10-01T10:04:00.000Z', vehicles: { AAA: car } }, 'AAA'), car, 'a scan no longer counts from when it finished: update the help and this test');
+  assert.equal(scanCar(posted, { takenAt: '2026-10-01T10:02:00.000Z', vehicles: { AAA: car } }, 'AAA'), null);
+  assert.match(read('../extension/src/scanRunner.js'), /diff\.takenAt = res\.fetchedAt;[\s\S]*makeSnapshot\(\{ site, takenAt: res\.fetchedAt,/, 'a scan\'s time is no longer the adapter\'s fetchedAt: update the help and this test');
+  const line = doc('help.md').split('\n').find((l) => l.startsWith('- **My listings** shows each car as'));
+  assert.match(line, /a scan that finished before the post was recorded is from before, so a price change it saw shows here and on \*\*To do\*\* at the next scan\./);
+  assert.match(line, /A scan counts from when it finished, not from when it read each car: one still running when a listing was posted, a draft saved or a price updated counts as taken since/);
+  assert.match(line, /check the car on the website before you click \*\*Updated\*\* or change the draft/);
+  assert.doesNotMatch(line, /a scan that ran while the form was open is from before/, 'not every such scan is');
 });
 
 // What has not been checked on Facebook's live pages is listed where a
@@ -1795,19 +1838,38 @@ test('the help says one post from a website goes at a time across Chrome windows
   // review: the help and the data inventory said a second window's copy never replaces the saved post, and nothing
   // said a refused save goes unsaid: typing saves without reading the answer (onInput), and once the first window's
   // panel is closed with no form open there (liveElsewhere null) the second window's save replaces the post
-  assert.match(panel, /setFormButtons\(\);\n    saveFlow\(\);\n  \}, 250\);/, 'typing in the review now reads whether its save was refused: the help can say what the panel shows');
   assert.match(panel, /other = samePost \? null : await liveElsewhere\(saved\);\n      if \(other\) return undefined;/, 'a refused save no longer writes nothing: update the help and the data inventory');
   assert.match(panel, /const panels = await chrome\.runtime\.getContexts\(\{ contextTypes: \['SIDE_PANEL'\], windowIds: \[saved\.windowId\] \}\);\n    if \(panels && panels\.length\) return found;/);
-  assert.match(help, /The second window's panel does not say when a change made there was not saved: text typed into its copy then stays only on that screen, is kept nowhere, and is gone once that side panel closes, so type in the window whose side panel has the post\./);
+  // HANDOFF 22.5: a refused save went unsaid, and what was done there was lost. The panel now says it
+  // (saveFlow, notSavedHere) from a review, a fields check or a form waiting for Publish, keeps the
+  // text typed there on screen to copy, and names the rest (src/notSaved.js)
+  assert.match(panel, /if \(other && !quiet && run === flowRun\) await notSavedHere\(other, newer\);/, 'saveFlow no longer says a refused save: update the help and the data inventory');
+  assert.match(panel, /setFormButtons\(\);\n    saveFlow\(\);\n  \}, 250\);/, 'typing saves through saveFlow, which says a refused save');
+  assert.deepEqual(NOT_SAVED_STEPS, ['review', 'probe', 'publish'], 'a refused save is said from other steps now: the help names the changes it covers');
+  // review round 1: the help and the data inventory said every step changed there is said, while a car the
+  // re-check stops there (block, step blocked) shows only why it stopped, as it does in one window
+  assert.equal(notSavedReport({ copy: { vin: 'AAA', step: 'blocked', description: 'typed' }, broughtBack: { vin: 'AAA' }, saved: null, other: { where: 'form', vin: 'AAA', name: 'A' } }), null, 'a refused save at a re-check stop is said now: drop the carve-out from the help and the data inventory');
+  assert.match(panel, /async function block\(message, code = 'blocked'\) \{\n  state\.step = 'blocked';\n  state\.message = message;\n  render\(\);\n  await saveFlow\(\);/, 'a re-check stop saves differently now: check what the help says of it');
+  const notSaved = notSavedReport({ copy: { vin: 'AAA', step: 'review', description: 'typed', descriptionSource: 'claude', photoPick: [], highlights: ['x'], colorGuess: { exterior: 'Red' }, vinCheck: { online: { ok: true } }, listingTyped: 'y' }, broughtBack: { vin: 'AAA' }, saved: null, other: { where: 'review', vin: 'AAA', name: 'A' } });
+  assert.deepEqual(notSaved.kept.map((k) => k.label), ['Description', 'Listing link'], 'the panel keeps other text now: the help says which');
+  assert.equal(notSaved.notSaved.length, 5, 'the panel names other changes as not saved now: the help says which');
+  assert.doesNotMatch(help, /The second window's panel does not say when a change made there was not saved/, 'the help still says a refused save goes unsaid');
+  // review round 1: the kept text is not always typed (a description begun or rewritten there), anything
+  // else opened in that side panel clears it too, and a pick lost to another car's post is done again
+  // when this car is posted (src/notSaved.js)
+  assert.match(help, /When a change made in the second window's copy is not saved this way \(text typed there, photos or highlights picked, a rewrite, a colour guess or VIN check, a step changed\), that side panel says so, except for a car the re-check stops there, which shows only why it stopped: it names the car under way in the other window and says to finish or stop that post there\. It then leaves its copy and opens no form, shows the description, when it was changed there, and any listing link typed there in boxes with a \*\*Copy\*\* button \(kept on that screen only: copy it before you leave that screen, since closing that side panel, clicking \*\*Back to the list\*\* or opening anything else in it clears it\), and names the photo or highlight picks, rewrite, colour guess or VIN check made there, which were not saved and can be done again in the other window \(or, when another car's post is under way there, when you post this car\)\. So type in the window whose side panel has the post\./);
+  assert.doesNotMatch(help, /until that side panel closes or you click \*\*Back to the list\*\*/, 'the help says only closing the panel or Back clears the kept text');
+  assert.match(panel, /<button type="button" class="primary wide" id="back">Back to the list<\/button>/, 'the help names the button that leaves the kept text');
   assert.match(help, /Once the first window's side panel is closed with no Marketplace form of that post open there, the side panel in the second window takes the post over: its next save replaces the saved post with its own copy as it stands/);
   const single = help.slice(help.indexOf('## Post one car'), help.indexOf('## Post several (the queue)'));
-  assert.match(single, /Side panels open in two Chrome windows: one post from a website goes at a time, and a change made in the second window's copy of a post may not be saved\. The point under "Post several \(the queue\)" that starts "Each car is recorded once" says how; it holds for a single post too\./, 'the single-post section does not point to what happens in a second window');
-  assert.match(help, /^- Each car is recorded once[^\n]*The second window's panel does not say when a change made there was not saved/m, 'the pointer names the point that says it');
+  assert.match(single, /Side panels open in two Chrome windows: one post from a website goes at a time, and a change made in the second window's copy of a post may not be saved; that side panel then says so and shows the text from there for you to copy\. The point under "Post several \(the queue\)" that starts "Each car is recorded once" says how; it holds for a single post too\./, 'the single-post section does not point to what happens in a second window');
+  assert.match(help, /^- Each car is recorded once[^\n]*When a change made in the second window's copy is not saved this way/m, 'the pointer names the point that says it');
   const flowRow = doc('data-inventory.md').split('\n').find((l) => l.startsWith('| `postFlow:<origin>` |'));
   assert.doesNotMatch(flowRow, /never replaces it/, 'the data inventory says a second window\'s copy never replaces the saved post, while it takes the post over once the first window\'s panel is closed with no form open');
   assert.doesNotMatch(flowRow, /\(in a queue, with whether its page was seen to show the car\)/, 'the data inventory says the listing page is read only in a queue, while it is read after every post');
   assert.match(flowRow, /the listing address detected, with whether its page was seen to show the car \(read after every post, in a queue or not\)/);
-  assert.match(flowRow, /a save from a second window's side panel replaces the saved post only while it is that post as last saved, or once the window that saved it has its side panel closed and no Marketplace form of it open, when that panel takes the post over; otherwise nothing is written: opening the form or starting a post there says that the post is under way in another window, while anything else done there \(text typed, photos or highlights picked, a rewritten or regenerated description, a colour guess or VIN check, a step changed\) is dropped without a word/, 'the data inventory names every second-window change that is dropped without a word: only opening the form and starting a post say why (sidepanel.js giveWay, openForm)');
+  assert.doesNotMatch(flowRow, /dropped without a word/, 'the data inventory still says a refused save goes unsaid');
+  assert.match(flowRow, /a save from a second window's side panel replaces the saved post only while it is that post as last saved, or once the window that saved it has its side panel closed and no Marketplace form of it open, when that panel takes the post over; otherwise nothing is written: opening the form or starting a post there says that the post is under way in another window, and anything else done there \(text typed, photos or highlights picked, a rewritten or regenerated description, a colour guess or VIN check, a step changed\) is dropped and that side panel says so \(a car the re-check stops there shows only why it stopped\), showing the description, when it was changed there, and any listing link typed there on its screen to copy \(held in no storage, and gone once that panel closes or shows anything else\) and naming the picks, rewrite, colour guess or VIN check made there/, 'the data inventory says what a second window\'s panel shows of a refused save, and that the kept text is stored nowhere (sidepanel.js notSavedHere, src/notSaved.js)');
 });
 
 // The help said a price "with or without $" and a mileage "however it is

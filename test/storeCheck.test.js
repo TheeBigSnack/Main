@@ -7,13 +7,16 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import * as storeCheck from '../scripts/store-check.mjs';
 import {
   LIMITS, checkImages, checkListing, checkManifest, compareZip, findMissingReferences, findRemoteCode,
   configuredSupportEmail, findStrayFiles, iconMargin, jpegSize, pngOpaqueBox, placeholders, pngSize, readZip, runChecks, section, validVersion,
 } from '../scripts/store-check.mjs';
 import { zip } from '../scripts/pack.mjs';
 import { deflateSync } from 'node:zlib';
-import { readFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { SITE } from '../site/config.js';
 
 const root = new URL('..', import.meta.url).pathname;
@@ -168,6 +171,85 @@ test('the zip pack.mjs writes reads back with the same files and bytes', () => {
   assert.match(compareZip([{ name: 'manifest.json', data: null }], new Map([['manifest.json', Buffer.from('{}')]])).join('\n'), /compression this check cannot read/);
 });
 
+// The pilot zip (npm run pack -- --pilot, docs/release.md) is for testers
+// while the pilot runs signed out: extension/'s files except
+// src/accountConfig.js, which must be what the pilot pack makes of the
+// committed file and must give accountsConfigured() false once loaded. The
+// store upload stays the normal zip.
+const COMMITTED_CONFIG = readFileSync(new URL('../extension/src/accountConfig.js', import.meta.url), 'utf8');
+
+test('dist/ has two zips of a version: the store upload and the pilot zip for testers', () => {
+  const names = ['lot-current-extension-1.2.3.zip', 'lot-current-extension-1.2.3-pilot.zip', 'lot-current-extension-1.2.2.zip', 'lot-current-extension-1.2.2-pilot.zip', 'lot-current-extension-1.2.3-pilot.zip.bak', 'notes.txt'];
+  assert.deepEqual(storeCheck.distZips(names, '1.2.3'), { store: ['lot-current-extension-1.2.3.zip'], pilot: ['lot-current-extension-1.2.3-pilot.zip'] });
+  assert.deepEqual(storeCheck.distZips([], '1.2.3'), { store: [], pilot: [] });
+});
+
+test('a pilot zip passes when only its account config differs and gives accounts off; one that still names a project, holds the config twice or differs elsewhere fails', async () => {
+  const { pilotAccountConfig, PILOT_LINE } = await import('../scripts/pilot-config.mjs');
+  const fs = files({ 'src/accountConfig.js': COMMITTED_CONFIG });
+  const entries = (over = {}) => [...fs].map(([name, data]) => ({ name, data: name in over ? Buffer.from(over[name]) : data }));
+  const check = (list) => storeCheck.checkPilotZip(readZip(zip(list), true), fs);
+  const pilot = pilotAccountConfig(COMMITTED_CONFIG);
+  assert.deepEqual(await check(entries({ 'src/accountConfig.js': pilot })), [], 'the zip npm run pack -- --pilot writes');
+  // the normal zip renamed: it still names the project, and its text is never run
+  assert.deepEqual(await check(entries()), ["its src/accountConfig.js is extension/'s own copy, which offers sign-in whenever it names an account project (the store zip renamed?): pack the pilot zip with npm run pack -- --pilot"]);
+  // the emptied copy and a second copy after it: unzipping leaves the second
+  const twice = await check([...entries({ 'src/accountConfig.js': pilot }), { name: 'src/accountConfig.js', data: Buffer.from(COMMITTED_CONFIG) }]);
+  assert.deepEqual(twice, ['the zip holds src/accountConfig.js 2 times, so unzipping it could leave the wrong one: pack it again with npm run pack -- --pilot']);
+  // another file stale, missing or added
+  const elsewhere = (await check([...entries({ 'src/accountConfig.js': pilot, 'bg.js': 'old' }).filter((e) => e.name !== 'src/a.js'), { name: 'extra.txt', data: Buffer.from('x') }])).join('\n');
+  assert.match(elsewhere, /bg\.js differs/);
+  assert.match(elsewhere, /missing src\/a\.js/);
+  assert.match(elsewhere, /holds extra\.txt/);
+  assert.doesNotMatch(elsewhere, /accountConfig/, 'the account config itself is fine');
+  // no account config at all
+  assert.match((await check(entries().filter((e) => e.name !== 'src/accountConfig.js'))).join('\n'), /missing src\/accountConfig\.js/);
+  // accounts off, but not what the pilot pack makes of today's file (an older pack, or a hand edit)
+  const other = pilot.replace(PILOT_LINE, '// emptied by hand');
+  const stale = await check(entries({ 'src/accountConfig.js': other }));
+  assert.deepEqual(stale, ['its src/accountConfig.js is not what npm run pack -- --pilot makes of extension/src/accountConfig.js: pack it again with npm run pack -- --pilot']);
+  // a committed file the rewrite no longer knows is reported, not guessed
+  const changed = files({ 'src/accountConfig.js': COMMITTED_CONFIG.replace("  functionsUrl: '',\n", "  functionsUrl: '',\n  region: '',\n") });
+  assert.match((await storeCheck.checkPilotZip(readZip(zip(entries({ 'src/accountConfig.js': pilot })), true), changed)).join('\n'), /does not have the shape the pilot pack rewrites/);
+});
+
+test('store-check over a dist/ with both zips: the normal one is the store upload, the pilot one is checked and is for testers only', async () => {
+  const { pilotEntries } = await import('../scripts/pack.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'lot-current-store-check-'));
+  try {
+    for (const p of ['extension', 'store', 'legal']) cpSync(join(root, p), join(dir, p), { recursive: true });
+    mkdirSync(join(dir, 'site'), { recursive: true });
+    cpSync(join(root, 'site/config.js'), join(dir, 'site/config.js'));
+    const ext = join(dir, 'extension');
+    const walk = (d, base = d) => readdirSync(d).sort().flatMap((n) => (statSync(join(d, n)).isDirectory() ? walk(join(d, n), base) : [join(d, n).slice(base.length + 1).split('\\').join('/')]));
+    const entries = walk(ext).filter((n) => !storeCheck.SKIP.test(n)).map((name) => ({ name, data: readFileSync(join(ext, name)) }));
+    const version = JSON.parse(readFileSync(join(ext, 'manifest.json'), 'utf8')).version;
+    const normal = `lot-current-extension-${version}.zip`;
+    const pilot = `lot-current-extension-${version}-pilot.zip`;
+    mkdirSync(join(dir, 'dist'));
+    writeFileSync(join(dir, 'dist', normal), zip(entries));
+    writeFileSync(join(dir, 'dist', pilot), zip(await pilotEntries(entries)));
+    const good = await runChecks(dir);
+    assert.deepEqual(good.failures.filter((f) => f.startsWith('dist/')), [], good.failures.join('\n'));
+    const notes = good.notes.join('\n');
+    assert.match(notes, new RegExp(`dist/${normal.replace(/\./g, '\\.')}: \\d+ KB, the same files as extension/: the zip the store upload takes`));
+    assert.match(notes, new RegExp(`dist/${pilot.replace(/\./g, '\\.')}: \\d+ KB, the same files as extension/ except src/accountConfig\\.js, left empty \\(no sign-in\\): for testers while the pilot runs signed out, never the store upload`));
+    // the normal zip copied over the pilot one: it names the project, so it fails
+    writeFileSync(join(dir, 'dist', pilot), zip(entries));
+    const named = (await runChecks(dir)).failures.join('\n');
+    assert.match(named, new RegExp(`dist/${pilot.replace(/\./g, '\\.')}: its src/accountConfig\\.js is extension/'s own copy, which offers sign-in`));
+    // a pilot zip whose other files are stale fails like a stale normal zip
+    writeFileSync(join(dir, 'dist', pilot), zip((await pilotEntries(entries)).map((e) => (e.name === 'manifest.json' ? { name: e.name, data: Buffer.from('{}') } : e))));
+    assert.match((await runChecks(dir)).failures.join('\n'), new RegExp(`dist/${pilot.replace(/\./g, '\\.')}: the zip's manifest\\.json differs from extension/manifest\\.json`));
+    // no pilot zip is not a finding: it is made only for a pilot
+    rmSync(join(dir, 'dist', pilot));
+    const none = await runChecks(dir);
+    assert.ok(!none.conditions.some((c) => /pilot/.test(c)) && !none.failures.some((f) => /pilot/.test(f)));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('the store icon\'s transparent margin is read from the pixels', () => {
   assert.deepEqual(pngOpaqueBox(rgbaPng(128, 16)), { minX: 16, minY: 16, maxX: 111, maxY: 111 });
   assert.equal(iconMargin(rgbaPng(128, 16)), 16);
@@ -283,8 +365,8 @@ test('section() reads one "## " section and nothing after it', () => {
 
 // zip: false here; CI's pack job runs npm run store-check after npm run pack,
 // which is where the packed zip is compared with extension/.
-test('the repository itself: nothing wrong with the package or the listing now', () => {
-  const { failures, conditions } = runChecks(root, { zip: false });
+test('the repository itself: nothing wrong with the package or the listing now', async () => {
+  const { failures, conditions } = await runChecks(root, { zip: false });
   assert.deepEqual(failures, [], failures.join('\n'));
   // What is left is the owner's and the attorney's, and the check says so.
   assert.ok(conditions.every((c) => typeof c === 'string' && c.length));

@@ -2,11 +2,12 @@
 // because LotSync LLC already uses that name for dealership software). This
 // test keeps the old name out of everything people can see: every text file in
 // the repo, code comments included (the owner and the testers read those), in
-// any spelling (with or without a space, hyphen, dot, underscore,
-// a non-breaking or zero-width space, an HTML entity or a JS escape, Markdown
-// emphasis or an inline HTML or SVG tag between the words, and across a
-// wrapped line), and in file names, the names of images and other binary
-// files included.
+// any case, with or without what can sit between the words (a space,
+// hyphen, dot or underscore, a non-breaking, zero-width or other invisible
+// space or mark SEP lists, any of them written plainly or as an HTML
+// entity, a JS escape or a URL escape, Markdown emphasis, an inline HTML or SVG tag, or a
+// wrapped line; SEP below lists the marks), and in file names, the names of
+// images and other binary files included.
 //
 // Some internal names keep the old spelling on purpose: renaming them would
 // break data on pilot installs, the database, CI or Stripe, and no customer
@@ -46,43 +47,109 @@ const SELF = posix(relative(root, fileURLToPath(import.meta.url)));
 
 // Anything that can sit between "lot" and "sync" on one line: whitespace other
 // than a line break (the non-breaking space included), soft hyphens,
-// zero-width spaces and joiners, the Unicode hyphens and dashes, the minus
-// sign, underscore, dot and hyphen, and Markdown's emphasis and code marks
-// (* _ ~ and the backtick).
-const SEP = '[\\t\\v\\f\\r \\u00a0\\u00ad\\u1680\\u2000-\\u200d\\u2010-\\u2015\\u2028\\u2029\\u202f\\u205f\\u2060\\u2212\\u3000\\ufeff_.*`~\\-]*';
+// zero-width spaces and joiners, the direction marks (U+200E, U+200F and
+// the Arabic letter mark U+061C), the direction embeddings, overrides and
+// isolates (U+202A to U+202E, U+2066 to U+2069), the word joiner and the
+// invisible operators (U+2060 to U+2064), the combining grapheme joiner
+// (U+034F), the Mongolian vowel separator (U+180E), the Unicode hyphens and
+// dashes, the minus sign, underscore, dot and hyphen, and Markdown's emphasis
+// and code marks (* _ ~ and the backtick). A visible mark that is none of
+// these, such as a middle dot ("Lot·Sync"), is not read as a separator.
+const SEP = '[\\t\\v\\f\\r \\u00a0\\u00ad\\u034f\\u061c\\u1680\\u180e\\u2000-\\u200f\\u2010-\\u2015\\u2028\\u2029\\u202a-\\u202f\\u205f\\u2060-\\u2064\\u2066-\\u2069\\u2212\\u3000\\ufeff_.*`~\\-]*';
 // A line break, optionally followed by the comment or quote marker that
 // starts a wrapped comment or quote line (// # * -- > ; <!--).
 const WRAP = `(?:\\n${SEP}(?:(?://|/?\\*|#|--|>|;|<!--)${SEP})?)?`;
-// "lot" where a word starts: not straight after a letter or digit ("pilot
-// sync", "ballotSync" and "slotsync" are other words), except a capital L
-// after a small letter or digit, which starts the next word of a camelCase
-// name ("initLotSync"). The case is spelled out in the classes, so the
-// expressions carry no i flag, which would make that capital L match any l.
-const LOT = '(?:(?<![A-Za-z0-9])[Ll][Oo][Tt]|(?<=[a-z0-9])L[Oo][Tt])';
+// "lot" where a word starts, by what comes just before it:
+// - anything but a letter: any "lot" (after a digit it starts a word, as in
+//   "2026lotsync.csv");
+// - a small letter: a capital L, which starts the next word of a camelCase
+//   name ("initLotSync");
+// - a capital: "Lot", the next word after an acronym ("UILotSync").
+// Any other "lot" glued after a letter, in any case, as in a domain, a
+// hashtag, a file name, a name in capitals or after an acronym
+// ("getlotsync.com", "#trylotsync", "MYLOTSYNC", "GETlotsync.com",
+// "UIlotSync"), counts too, unless the letters before it are the stem of one
+// of the English words in LOT_WORDS ("the pilot sync", "ballotSync",
+// "slotsync" and "PILOTSYNC" are other words).
+// What that leaves out: those stems include the single letters s, p, b and c
+// (slot, plot, blot, clot) and "al" and "pi" (allot, pilot), so the old name
+// glued straight after any word that ends in s, p, b, c, "al" or "pi" is not
+// reported, plurals and domains included ("carslotsync", "weblotsync.com",
+// "applotsync", "finallotsync", "ITSLOTSYNC"), nor after a word that ends in
+// another listed stem ("zea" of zealot, "came" of Camelot). Written that way
+// it cannot be told apart from "slot", "plot", "blot", "clot", "allot" or
+// "pilot" ("timeslotsync" is a time slot). That includes a common ending such
+// as "mate" (automate, estimate, of matelot), and a regular expression's \b
+// or \s right before the name, whose b or s reads as a stem letter, so a
+// pattern such as /\blotsync/ in a test is not reported. Other English words
+// that end in "lot" are reported ("backlotsync"). As the next word of a
+// camelCase name, or after a separator, it is still caught ("carsLotSync",
+// "web lotsync", "APP-LOTSYNC").
+// The case is spelled out in the classes, so the expressions carry no i
+// flag, which would make that capital L match any l.
+const LOT_WORDS = ['pilot', 'ballot', 'allot', 'slot', 'plot', 'blot', 'clot', 'zealot', 'harlot', 'shallot', 'ocelot', 'camelot', 'matelot', 'cachalot', 'polyglot'];
+const anyCase = (s) => s.replace(/[a-z]/g, (c) => `[${c.toUpperCase()}${c}]`);
+const STEMS = LOT_WORDS.map((w) => anyCase(w.slice(0, -3))).join('|');
+const LOT = `(?:(?<![A-Za-z])[Ll][Oo][Tt]|(?<=[a-z])(?:L|(?<!${STEMS})l)[Oo][Tt]|(?<=[A-Z])(?:Lot|(?<!${STEMS})[Ll][Oo][Tt]))`;
 const SYNC = '[Ss][Yy][Nn][Cc]';
 const OLD_NAME = new RegExp(`${LOT}${SEP}${WRAP}${SYNC}`, 'g');
 const OLD_NAME_ONE = new RegExp(`${LOT}${SEP}${SYNC}`);
 
-// HTML entities and JS escapes are decoded first, so "Lot&nbsp;Sync" and
-// "Lot\u00a0Sync" written as an escape are caught too. Inline tags that can
-// sit inside a name ("Lot<wbr>Sync", "Lot <strong>Sync</strong>", an SVG
-// "<tspan>") are removed when tags is true. A tag is removed with its
-// attributes, so the scan reads every line both ways: with those tags removed,
-// and with them kept, where an old name inside an attribute
-// (title="...", href="...", download="...") is still caught.
+// HTML entities, JS escapes and URL escapes are decoded first, so
+// "Lot&nbsp;Sync", "Lot\u00a0Sync" or "Lot\tSync" written as an escape
+// (\n and \r read as a space, as a page shows them), "Lot%20Sync" in an
+// address and "subject=Lot+Sync" in a mail link are caught too. A plus is read
+// as a space only in a key=value pair after a ? or & (an address's query, a
+// mail link's subject), so "lot+sync" and "x &=lot+sync" in code are left
+// alone, but so is a form body with no ? or & in front ("q=Lot+Sync"), and
+// the rare code shaped like a pair ("a?b=lot+sync") is read as one. An
+// escaped plus ("%2B") stays a plus. A run of escapes is read as UTF-8 where
+// it is and byte by byte as Latin-1 where it is not, as JavaScript's escape()
+// writes it ("Lot%A0Sync"), so a stray byte does not hide the escapes around
+// it; escape()'s "%u200B" form is read too.
+// Inline tags that can sit inside a name ("Lot<wbr>Sync",
+// "Lot <strong>Sync</strong>", an SVG "<tspan>") are removed when tags is
+// true. A tag is removed with its attributes, so the scan reads every line
+// both ways: with those tags removed, and with them kept, where an old name
+// inside an attribute (title="...", href="...", download="...") is still
+// caught.
 const INLINE_TAG = /<\/?(?:wbr|br|b|i|em|strong|span|u|s|mark|small|abbr|sup|sub|a|code|kbd|tspan|font|del|ins|q|cite|var|dfn|bdi|bdo|time|data|label)\b[^>]*>/gi;
+// HTML's names for the characters SEP allows (every one in HTML's table of
+// named characters), and for the ampersand.
 const NAMED = {
-  nbsp: '\u00a0', shy: '\u00ad', ZeroWidthSpace: '\u200b', zwnj: '\u200c', zwj: '\u200d', NoBreak: '\u2060',
-  ensp: '\u2002', emsp: '\u2003', thinsp: '\u2009', hairsp: '\u200a', hyphen: '\u2010', dash: '\u2010',
-  ndash: '\u2013', mdash: '\u2014', minus: '\u2212', period: '.', lowbar: '_', UnderBar: '_',
+  Tab: '\t', NewLine: ' ', nbsp: '\u00a0', NonBreakingSpace: '\u00a0', shy: '\u00ad',
+  ensp: '\u2002', emsp: '\u2003', emsp13: '\u2004', emsp14: '\u2005', numsp: '\u2007', puncsp: '\u2008',
+  thinsp: '\u2009', ThinSpace: '\u2009', hairsp: '\u200a', VeryThinSpace: '\u200a', MediumSpace: '\u205f', ThickSpace: '\u205f\u200a',
+  ZeroWidthSpace: '\u200b', NegativeVeryThinSpace: '\u200b', NegativeThinSpace: '\u200b', NegativeMediumSpace: '\u200b', NegativeThickSpace: '\u200b',
+  zwnj: '\u200c', zwj: '\u200d', lrm: '\u200e', rlm: '\u200f', NoBreak: '\u2060',
+  af: '\u2061', ApplyFunction: '\u2061', it: '\u2062', InvisibleTimes: '\u2062', ic: '\u2063', InvisibleComma: '\u2063',
+  hyphen: '\u2010', dash: '\u2010', ndash: '\u2013', mdash: '\u2014', horbar: '\u2015', minus: '\u2212',
+  period: '.', lowbar: '_', UnderBar: '_', ast: '*', midast: '*', grave: '`', DiacriticalGrave: '`', amp: '&', AMP: '&',
 };
+const JS_SPACE = { t: '\t', v: '\v', f: '\f', n: ' ', r: ' ' };
 const char = (n) => (n === 10 || n === 13 ? ' ' : n >= 0 && n <= 0x10ffff ? String.fromCodePoint(n) : '');
+// One run of %XX escapes: from each byte, the UTF-8 sequence its first byte
+// announces if the bytes make one, else that one byte as Latin-1.
+function urlRun(run) {
+  const bytes = run.match(/%[0-9a-f]{2}/gi);
+  let out = '';
+  for (let i = 0; i < bytes.length;) {
+    const b = parseInt(bytes[i].slice(1), 16);
+    const n = b >= 0xf0 ? 4 : b >= 0xe0 ? 3 : b >= 0xc0 ? 2 : 1;
+    try { out += decodeURIComponent(bytes.slice(i, i + n).join('')); i += n; } catch { out += char(b); i += 1; }
+  }
+  return out.replace(/[\r\n]/g, ' ');
+}
 function decode(line, { tags = true } = {}) {
   return (tags ? line.replace(INLINE_TAG, '') : line)
     .replace(/&#x([0-9a-f]{1,6});?/gi, (_, h) => char(parseInt(h, 16)))
     .replace(/&#(\d{1,7});?/g, (_, d) => char(Number(d)))
-    .replace(/&([A-Za-z]+);/g, (m, name) => NAMED[name] ?? m)
-    .replace(/\\u\{([0-9a-f]{1,6})\}|\\u([0-9a-f]{4})|\\x([0-9a-f]{2})/gi, (_, a, b, c) => char(parseInt(a || b || c, 16)));
+    .replace(/&([A-Za-z][A-Za-z0-9]*);/g, (m, name) => (Object.hasOwn(NAMED, name) ? NAMED[name] : m))
+    .replace(/\\u\{([0-9a-f]{1,6})\}|\\u([0-9a-f]{4})|\\x([0-9a-f]{2})/gi, (_, a, b, c) => char(parseInt(a || b || c, 16)))
+    .replace(/\\([tvfnr])/g, (_, c) => JS_SPACE[c])
+    .replace(/[?&][\w.~-]+=[^\s"'<>&#]*/g, (pair) => pair.replace(/\+/g, ' '))
+    .replace(/%u([0-9a-f]{4})/gi, (_, h) => char(parseInt(h, 16)))
+    .replace(/(?:%[0-9a-f]{2})+/gi, urlRun);
 }
 
 // ---------- the internal names kept on purpose ----------
@@ -171,6 +238,40 @@ function exemptLines(path, lines, problems, self) {
 // (images, PDFs, zips) as well as the ones scanFiles reads.
 const nameHits = (paths) => paths.filter((p) => OLD_NAME_ONE.test(decode(p))).map((p) => `${p}: the file name carries the old name`);
 
+// One file: its hits and its broken exemptions. removers are the KEPT
+// entries that apply to this file, each with a global copy of its pattern.
+function scanFile(path, text, removers, self) {
+  const hits = nameHits([path]);
+  const problems = [];
+  const lines = text.split(/\r?\n/);
+  const exempt = exemptLines(path, lines, problems, self);
+  const seen = new Set();
+  // Each line is read twice: with inline tags removed, then with them kept.
+  for (const tags of [true, false]) {
+    const clean = lines.map((line, i) => {
+      if (exempt[i]) return '<exempt>';
+      let s = decode(line, { tags });
+      for (const k of removers) s = s.replace(k.all, '<kept>');
+      return s;
+    });
+    const starts = [];
+    let at = 0;
+    for (const s of clean) { starts.push(at); at += s.length + 1; }
+    for (const m of clean.join('\n').matchAll(OLD_NAME)) {
+      let i = starts.length - 1;
+      while (starts[i] > m.index) i--;
+      seen.add(i);
+    }
+  }
+  for (const i of [...seen].sort((a, b) => a - b)) hits.push(`${path}:${i + 1}: ${lines[i].trim().slice(0, 200)}`);
+  return { hits, problems };
+}
+
+// Each file's result, kept for a later scan given the same file object with
+// the same KEPT list: the proofs below rescan the whole repo with one file
+// changed, so only that file is read again.
+const scanned = new WeakMap();
+
 // files: [{ path, text }] with repo-relative, forward-slash paths.
 // Returns { hits, problems }: hits are "path:line: text" for every line still
 // carrying the old name; problems are broken exemptions.
@@ -178,29 +279,15 @@ function scanFiles(files, { kept = KEPT, self = SELF } = {}) {
   const hits = [];
   const problems = [];
   const removers = kept.map((k) => ({ ...k, all: everywhere(k.re) }));
-  for (const { path, text } of files) {
-    hits.push(...nameHits([path]));
-    const lines = text.split(/\r?\n/);
-    const exempt = exemptLines(path, lines, problems, self);
-    const seen = new Set();
-    // Each line is read twice: with inline tags removed, then with them kept.
-    for (const tags of [true, false]) {
-      const clean = lines.map((line, i) => {
-        if (exempt[i]) return '<exempt>';
-        let s = decode(line, { tags });
-        for (const k of removers) if (appliesTo(k, path)) s = s.replace(k.all, '<kept>');
-        return s;
-      });
-      const starts = [];
-      let at = 0;
-      for (const s of clean) { starts.push(at); at += s.length + 1; }
-      for (const m of clean.join('\n').matchAll(OLD_NAME)) {
-        let i = starts.length - 1;
-        while (starts[i] > m.index) i--;
-        seen.add(i);
-      }
+  for (const file of files) {
+    const { path, text } = file;
+    let done = scanned.get(file);
+    if (!done || done.kept !== kept || done.self !== self || done.path !== path || done.text !== text) {
+      done = { kept, self, path, text, ...scanFile(path, text, removers.filter((k) => appliesTo(k, path)), self) };
+      scanned.set(file, done);
     }
-    for (const i of [...seen].sort((a, b) => a - b)) hits.push(`${path}:${i + 1}: ${lines[i].trim().slice(0, 200)}`);
+    hits.push(...done.hits);
+    problems.push(...done.problems);
   }
   return { hits, problems };
 }
@@ -413,12 +500,85 @@ test('the scan catches the old name in every spelling, in any file that is not e
     'see (LotSync) and x.lotsync',
     'MY_LOTSYNC_KEY',
     'lOt SyNc',
+    // glued to what comes before: the next word after a capitalised acronym, or after a digit
+    'the UILotSync panel',
+    'Download 2026lotsync.csv',
+    'v2lot-sync',
+    // glued after a small word, as in a domain, a hashtag or a file name
+    'Visit getlotsync.com',
+    '<a href="https://mylotsync.example/terms">terms</a>',
+    'Follow #trylotsync',
+    'thelotsync',
+    // and the same in all capitals
+    'GETLOTSYNC.COM',
+    'const MYLOTSYNC = 1;',
+    // glued after a capital, with "lot" in small or mixed letters
+    'MYlotsync',
+    'GETlotsync.com',
+    'the UIlotSync panel',
+    'UILOtSync',
+    'IDlotsync',
+    'XlOTsync',
+    // the spellings a careless edit is most likely to bring back
+    'Lot-Sync',
+    'lot_sync',
+    'LOTSYNC',
+    'Lot  Sync',
+    // URL escapes: in an address, a download name or a mail link's subject
+    '<a href="https://www.example.com/?q=Lot%20Sync">search</a>',
+    '<a download="Lot%2DSync%2Dpilot.csv">Download CSV</a>',
+    '<a href="mailto:x@lotcurrent.com?subject=Lot+Sync+demo">Email us</a>',
+    '<a href="mailto:x@lotcurrent.com?to=x&amp;subject=Lot+Sync">Email us</a>',
+    'https://www.example.com/Lot%C2%A0Sync',
+    'L%6F%74%53ync',
+    // an escape run that is not UTF-8 is read as Latin-1 (JavaScript's escape() writes those)
+    '<a href="/s/Lot%A0Sync">search</a>',
+    // and "&AMP;", HTML's capitalised "&amp;", in front of a query pair
+    '<a href="/s?a=1&AMP;subject=Lot+Sync">Email us</a>',
+    // escape()'s %u form, and a run that mixes a UTF-8 sequence with a stray Latin-1 byte
+    'https://www.example.com/Lot%u200BSync',
+    'https://www.example.com/Lot%E2%80%8B%A0Sync',
+    // invisible marks between the words: the direction marks, the invisible operators, the
+    // combining grapheme joiner and the Mongolian vowel separator
+    'Lot\u200eSync',
+    'Lot\u200fSync',
+    'Lot\u2061Sync',
+    'Lot\u2062Sync',
+    'Lot\u2063Sync',
+    'Lot\u2064Sync',
+    // the Arabic letter mark, a direction override and a direction isolate
+    'Lot\u061cSync',
+    'Lot\u202eSync',
+    'Lot\u2066Sync',
+    'Lot\u2069Sync',
+    'Lot\u034fSync',
+    'Lot\u180eSync',
+    // more of HTML's names for spaces and marks, and a numeric one for a direction mark
+    'Lot&ThinSpace;Sync',
+    'Lot&MediumSpace;Sync',
+    'Lot&numsp;Sync',
+    'Lot&puncsp;Sync',
+    'Lot&emsp13;Sync',
+    'Lot&lrm;Sync',
+    'Lot&rlm;Sync',
+    'Lot&#x200E;Sync',
+    // a JS escape for a tab, a line break or another white space
+    String.raw`title: 'Lot\tSync'`,
+    String.raw`title: 'Lot\nSync'`,
+    String.raw`title: 'Lot\r\nSync'`,
+    String.raw`title: 'Lot\vSync'`,
+    String.raw`title: 'Lot\fSync'`,
   ];
   for (const text of spellings) {
     for (const path of ['docs/help.md', 'extension/popup.js', 'site/index.html', 'marketing/sales-sheet.md']) {
       assert.deepEqual(hitsIn(path, `first line\n${text}\nlast line`), [`${path}:2: ${text.trim()}`], `${JSON.stringify(text)} in ${path}`);
     }
   }
+  // every HTML name in NAMED for a mark SEP allows is read as that mark
+  const onlySep = new RegExp(`^${SEP.replace(/\*$/, '+')}$`);
+  const sepNames = Object.keys(NAMED).filter((name) => onlySep.test(NAMED[name]));
+  assert.ok(sepNames.length >= 40, `only ${sepNames.length} names`);
+  for (const name of sepNames) assert.equal(hitsIn('docs/help.md', `Lot&${name};Sync`).length, 1, `&${name};`);
   // across a wrapped line, plain or in a comment, reported where it starts
   assert.deepEqual(hitsIn('docs/help.md', 'Open Lot\nSync from the toolbar.'), ['docs/help.md:1: Open Lot']);
   assert.deepEqual(hitsIn('extension/popup.js', '// the Lot\n// Sync popup'), ['extension/popup.js:1: // the Lot']);
@@ -426,9 +586,26 @@ test('the scan catches the old name in every spelling, in any file that is not e
   // a file name
   assert.deepEqual(hitsIn('docs/lot-sync-guide.md', 'clean'), ['docs/lot-sync-guide.md: the file name carries the old name']);
   // and nothing else
-  // nor a longer word that ends in "lot" ("pilot", "ballot", "slot", "allot")
-  for (const text of ['Lot Current', 'the lot is in sync with the website', 'a parking lot; sync later', 'lots synced', 'the **lot** is in `sync`', '<b>lot</b> and <i>sync</i>', 'the pilot sync runs nightly', 'ballotSync()', 'a slot-sync job', 'PILOTSYNC', 'allot_sync', 'PilotSync']) {
+  // nor a longer word that ends in "lot" ("pilot", "ballot", "slot", "allot"), however it is glued;
+  // the list holds whole words in small letters, so each stem is the word less its "lot"
+  for (const w of LOT_WORDS) assert.match(w, /^[a-z]+lot$/, `LOT_WORDS: ${w}`);
+  // nor a plus that is not in a key=value pair after a ? or & (code's "&=" and "??=" included), an
+  // escaped plus (a plus, not a space), an escaped mark that is no separator, or a broken UTF-8
+  // escape (read as Latin-1, its letters are no separator either)
+  for (const text of ['Lot Current', 'the lot is in sync with the website', 'a parking lot; sync later', 'lots synced', 'the **lot** is in `sync`', '<b>lot</b> and <i>sync</i>', 'the pilot sync runs nightly', 'ballotSync()', 'a slot-sync job', 'PILOTSYNC', 'allot_sync', 'PilotSync',
+    'autopilotsync', 'copilot-sync', 'timeslotsync', 'a subplot syncs', 'inkblot_sync', 'bloodclotSync', 'zealotsync', 'harlot sync', 'shallotsync', 'ocelotsync', 'Camelotsync', 'matelotsync', 'cachalotsync', 'polyglotSync', 'AUTOPILOTSYNC', 'TIMESLOTSYNC', 'BALLOT_SYNC',
+    'SlotSync', 'PlotSync', 'AUTOPIlotSync', 'TIMESlotsync', 'COPIlot-sync',
+    'const n = lot+sync;', '?tags=lot+%26+sync', 'x &=lot+sync;', 'a ??=lot+sync', '?q=lot%2Bsync', 'a lot%E2%80sync']) {
     assert.deepEqual(hitsIn('docs/help.md', text), [], text);
+  }
+  // What the comment on LOT says is left out, so the comment cannot drift from the rule: the old
+  // name glued straight after a word that ends in a listed stem reads like "slot", "plot", "allot"
+  // or "pilot" and is not reported; as the next word of a camelCase name, or after a separator, it is.
+  for (const text of ['carslotsync', 'weblotsync.com', 'applotsync', 'finallotsync', 'ITSLOTSYNC']) {
+    assert.deepEqual(hitsIn('docs/help.md', text), [], `${text}: the comment on LOT says this is not reported`);
+  }
+  for (const text of ['carsLotSync', 'web lotsync', 'APP-LOTSYNC']) {
+    assert.equal(hitsIn('docs/help.md', text).length, 1, text);
   }
 });
 

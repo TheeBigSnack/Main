@@ -3,11 +3,11 @@
 // from it later shows that price, whatever the website says by then. So
 // "Mark posted" on a draft's car records the draft's price, and a website
 // price that moved while the draft waited becomes a price to update (on To
-// do at once, and on every rescan after: src/rescan.js diffScans compares
-// the website with the recorded price), never a silent gap. Pure helpers;
-// no chrome.*.
+// do at once when a scan taken since the draft was filled shows it, and on
+// every rescan after: src/rescan.js diffScans compares the website with the
+// recorded price), never a silent gap. Pure helpers; no chrome.*.
 
-import { basisPrice, markPosted, postedBasis } from './rescan.js';
+import { basisPrice, markPosted, postedBasis, scanCar } from './rescan.js';
 
 const money = (n) => '$' + Math.round(n).toLocaleString('en-US');
 
@@ -31,25 +31,63 @@ const draftBasis = (draft, basis) => postedBasis(draft && typeof draft === 'obje
 // Mark posted on a car saved as a draft: the posted entry, at the draft's
 // price when the draft kept one, on the basis the draft was filled under
 // (src/rescan.js postedBasis: rescans compare the listing with the website
-// on it), else at the website's price (as for any listing marked by hand).
+// on it), and with when the draft was filled (`draftSavedAt`), else at the
+// website's price (as for any listing marked by hand). The listing got its
+// price when the draft was filled, not when it was marked posted: a scan
+// taken in between shows the website price it should take now, on My
+// listings as on To do (src/rescan.js scanCar reads the time).
 export function markDraftPosted(posted, entry, draft, basis = 'website', now = new Date().toISOString(), extra = {}) {
   const next = markPosted(posted, entry, basis, now, extra);
   const price = draftPrice(draft);
-  return price === null ? next : { ...next, [entry.vin]: { ...next[entry.vin], price, basis: draftBasis(draft, basis) } };
+  if (price === null) return next;
+  return { ...next, [entry.vin]: { ...next[entry.vin], price, basis: draftBasis(draft, basis), ...draftTimes(draft, now) } };
+}
+
+// When the draft was filled with its price, as an ISO time; null for a time
+// that is not one, or not before the moment it is marked posted (`now`):
+// then the posting time stands.
+function draftFilledAt(draft, now) {
+  const saved = draft && typeof draft === 'object' && typeof draft.savedAt === 'string' && draft.savedAt ? Date.parse(draft.savedAt) : NaN;
+  const marked = typeof now === 'string' ? Date.parse(now) : NaN;
+  return Number.isFinite(saved) && Number.isFinite(marked) && saved < marked ? new Date(saved).toISOString() : null;
+}
+
+// The times markDraftPosted adds to the entry of a draft's listing: when
+// the draft was filled, when there is one before `now`.
+function draftTimes(draft, now) {
+  const filled = draftFilledAt(draft, now);
+  return filled ? { draftSavedAt: filled } : {};
+}
+
+// The car as a scan (`snap`) shows it, to compare a draft's price with the
+// website's: read through src/rescan.js scanCar on the times of the entry
+// Mark posted would record for the draft at `now` (markDraftPosted), so only
+// a scan taken once the draft was filled shows it (a draft with no time
+// before `now` counts from `now`). A scan from before shows the website as it
+// was before the draft got its price: a price there that differs from the
+// draft's is not a change since, so the draft's pill and Mark posted name it
+// no more than My listings does (rescan.js listingLine), and the next scan
+// compares. null for such a scan and for a car the scan does not hold.
+export function draftScanCar(draft, snap, vin, now = new Date().toISOString()) {
+  return scanCar({ postedAt: now, ...draftTimes(draft, now) }, snap, vin);
 }
 
 // The price update a draft's car needs once its draft is published, shaped
-// like a diffScans price update for one of your listings. Null when the
-// draft's price and the website's agree, or either is unknown. The website's
+// like a diffScans price update for one of your listings. `entry`: the car
+// as a scan taken once the draft was filled shows it (draftScanCar, or
+// rescan.js scanCar on the listing's entry). Null when the draft's price and
+// the website's agree, or either is unknown. The website's
 // price is taken on the basis the draft was filled under, the one its
 // listing is recorded on (markDraftPosted), so a change of the setting alone
 // is never a price to update; `basis` (the setting) stands in for a draft
-// saved before drafts kept a basis.
+// saved before drafts kept a basis. The item names the basis, as diffScans
+// names it on a price item for your listing.
 export function draftPriceUpdate(draft, entry, basis = 'website') {
   const from = draftPrice(draft);
-  const to = basisPrice(entry, draftBasis(draft, basis));
+  const own = draftBasis(draft, basis);
+  const to = basisPrice(entry, own);
   if (from === null || !entry || typeof to !== 'number' || !(to > 0) || from === to) return null;
-  return { vin: entry.vin, name: entry.name, stock: entry.stock, url: entry.url, yours: true, from, to, change: to - from };
+  return { vin: entry.vin, name: entry.name, stock: entry.stock, url: entry.url, yours: true, from, to, change: to - from, basis: own };
 }
 
 // The saved to-do list (the diff) with this price update in it, in place of
@@ -65,9 +103,12 @@ export function withPriceUpdate(diff, item) {
 
 // The pill a draft's car shows in place of Post: the draft's price, and a
 // warning when the website's price moved or the car is not ready any more.
-// markWhere: where Mark posted is ('' in the popup, ' in the popup' from the
-// side panel). tone is the pill's class: 'warn', or 'bad' when the draft
-// should not be published as it is.
+// `entry`: the car as the last scan shows it when that scan was taken once
+// the draft was filled (draftScanCar), else null: a scan from before names
+// no website price here. ready: whether the last scan shows the car ready to
+// post. markWhere: where Mark posted is ('' in the popup, ' in the popup'
+// from the side panel). tone is the pill's class: 'warn', or 'bad' when the
+// draft should not be published as it is.
 export function draftPill(draft, entry, { basis = 'website', ready = true, markWhere = '' } = {}) {
   const at = draftPrice(draft);
   const already = `Already published it? Mark it posted${markWhere} so rescans watch it.`;

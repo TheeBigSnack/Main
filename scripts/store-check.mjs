@@ -13,6 +13,14 @@
 //   limit, a file the manifest names that is missing, code fetched from
 //   another host, a zip that differs from extension/, an image of the wrong
 //   size). `npm test` and CI keep these at zero.
+//
+// The zips it reads are this version's in dist/: the normal one
+// (npm run pack), which is the one the store upload takes, and, when
+// present, the pilot zip (npm run pack -- --pilot), which is for testers
+// while the pilot runs signed out and never goes to the store. The pilot
+// zip must equal extension/ except src/accountConfig.js, which must be what
+// the pilot pack makes of the committed file and must give
+// accountsConfigured() false once loaded (scripts/pilot-config.mjs).
 // - a condition is something not done yet that a submission needs (the
 //   [bracketed] placeholders, the attorney's pending answers, the draft
 //   legal pages, the placeholder legal addresses, the real screenshots).
@@ -32,6 +40,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, posix, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inflateRawSync, inflateSync } from 'node:zlib';
+import { PILOT_CONFIG_PATH, pilotAccountConfig, accountsOffProblems } from './pilot-config.mjs';
 
 export const LIMITS = Object.freeze({
   name: 75,
@@ -349,6 +358,49 @@ export function compareZip(entries, files) {
   return failures;
 }
 
+// This version's zips among dist/'s file names: the store upload
+// (<name>-extension-<version>.zip) and the pilot zip for testers
+// (<name>-extension-<version>-pilot.zip).
+export function distZips(names, version) {
+  return {
+    store: names.filter((n) => n.endsWith(`-extension-${version}.zip`)),
+    pilot: names.filter((n) => n.endsWith(`-extension-${version}-pilot.zip`)),
+  };
+}
+
+// A pilot zip against extension/'s files: every file but the account config
+// as compareZip checks it, and exactly one account config, whose text must be
+// exactly what npm run pack -- --pilot makes of the committed file. The
+// zip's own text is never run: only that expected text is loaded as a module
+// (the same check the pack ran) and must give accounts off. [] when it is
+// right.
+export async function checkPilotZip(entries, files) {
+  const others = new Map([...files].filter(([name]) => name !== PILOT_CONFIG_PATH));
+  const failures = compareZip(entries.filter((e) => e.name !== PILOT_CONFIG_PATH), others);
+  const configs = entries.filter((e) => e.name === PILOT_CONFIG_PATH);
+  if (!configs.length) return [...failures, `the zip is missing ${PILOT_CONFIG_PATH}`];
+  if (configs.length > 1) return [...failures, `the zip holds ${PILOT_CONFIG_PATH} ${configs.length} times, so unzipping it could leave the wrong one: pack it again with npm run pack -- --pilot`];
+  const [config] = configs;
+  if (!config.data) return [...failures, `the zip stores ${PILOT_CONFIG_PATH} with a compression this check cannot read: pack again with npm run pack -- --pilot`];
+  if (!files.has(PILOT_CONFIG_PATH)) return [...failures, `extension/${PILOT_CONFIG_PATH} is missing, so the zip's copy has nothing to be checked against`];
+  const text = config.data.toString('utf8');
+  const committed = files.get(PILOT_CONFIG_PATH).toString('utf8');
+  let want;
+  try {
+    want = pilotAccountConfig(committed);
+  } catch (e) {
+    return [...failures, e.message];
+  }
+  if (text === want) {
+    for (const p of await accountsOffProblems(want)) failures.push(`its ${PILOT_CONFIG_PATH} does not turn accounts off: ${p}`);
+  } else if (text === committed) {
+    failures.push(`its ${PILOT_CONFIG_PATH} is extension/'s own copy, which offers sign-in whenever it names an account project (the store zip renamed?): pack the pilot zip with npm run pack -- --pilot`);
+  } else {
+    failures.push(`its ${PILOT_CONFIG_PATH} is not what npm run pack -- --pilot makes of extension/${PILOT_CONFIG_PATH}: pack it again with npm run pack -- --pilot`);
+  }
+  return failures;
+}
+
 // The text between "## <heading>" and the next "## ", without the heading.
 export function section(md, heading) {
   const re = new RegExp(`^## ${heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'm');
@@ -449,7 +501,7 @@ function walk(dir, base = dir) {
 
 // zip: false leaves dist/ alone (the unit test runs on a tree that may hold a
 // zip packed before the last edit).
-export function runChecks(root, { zip = true } = {}) {
+export async function runChecks(root, { zip = true } = {}) {
   const read = (rel) => readFileSync(join(root, rel), 'utf8');
   const extDir = join(root, 'extension');
   const files = new Map(walk(extDir).map((rel) => [rel, readFileSync(join(extDir, rel))]));
@@ -466,7 +518,7 @@ export function runChecks(root, { zip = true } = {}) {
   notes.push(`extension/: ${files.size} files, ${(total / 1024).toFixed(0)} KB`);
 
   const distDir = join(root, 'dist');
-  const zips = !zip ? [] : existsSync(distDir) ? readdirSync(distDir).filter((n) => n.endsWith(`-extension-${manifest.version}.zip`)) : [];
+  const { store: zips, pilot: pilotZips } = distZips(zip && existsSync(distDir) ? readdirSync(distDir) : [], manifest.version);
   if (zip && !zips.length) conditions.push(`no dist/*-extension-${manifest.version}.zip yet: run npm run pack`);
   for (const z of zips) {
     const buf = readFileSync(join(distDir, z));
@@ -474,7 +526,18 @@ export function runChecks(root, { zip = true } = {}) {
     try {
       const zf = compareZip(readZip(buf, true), files);
       failures.push(...zf.map((f) => `dist/${z}: ${f}`));
-      if (!zf.length) notes.push(`dist/${z}: ${(buf.length / 1024).toFixed(0)} KB, the same files as extension/`);
+      if (!zf.length) notes.push(`dist/${z}: ${(buf.length / 1024).toFixed(0)} KB, the same files as extension/: the zip the store upload takes`);
+    } catch (e) {
+      failures.push(`dist/${z}: ${e.message}`);
+    }
+  }
+  // The pilot zip is checked when it is there; none is not a finding.
+  for (const z of pilotZips) {
+    const buf = readFileSync(join(distDir, z));
+    try {
+      const pf = await checkPilotZip(readZip(buf, true), files);
+      failures.push(...pf.map((f) => `dist/${z}: ${f}`));
+      if (!pf.length) notes.push(`dist/${z}: ${(buf.length / 1024).toFixed(0)} KB, the same files as extension/ except ${PILOT_CONFIG_PATH}, left empty (no sign-in): for testers while the pilot runs signed out, never the store upload`);
     } catch (e) {
       failures.push(`dist/${z}: ${e.message}`);
     }
@@ -510,7 +573,7 @@ export function runChecks(root, { zip = true } = {}) {
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const strict = process.argv.includes('--strict');
   const root = fileURLToPath(new URL('..', import.meta.url));
-  const { manifest, failures, conditions, notes } = runChecks(root);
+  const { manifest, failures, conditions, notes } = await runChecks(root);
   console.log(`Chrome Web Store preflight: ${manifest.name} ${manifest.version}`);
   for (const n of notes) console.log(`  ${n}`);
   if (failures.length) {
