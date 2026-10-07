@@ -22,7 +22,7 @@
 
 import { toNumber, shortLocation, conditionWordFromPath } from '../src/normalize.js';
 import { parseVehiclePage } from './schemaOrgParse.js';
-import { normalizeVehicle as normalizeStandard, GUIDE_PRICE_WORDS } from './schemaOrgNormalize.js';
+import { normalizeVehicle as normalizeStandard, GUIDE_PRICE_WORDS, LABEL_MARKS } from './schemaOrgNormalize.js';
 
 const VIN = /^[A-HJ-NPR-Z0-9]{17}$/;
 const MAX_DEPTH = 8;
@@ -207,11 +207,13 @@ const NOT_THE_PRICE = /msrp|\bwas\b|original|previous|prior|\bold\b|list ?price|
 // trademark marks a website puts after it ("Internet Price*", "Your Offer™",
 // "Market Value†", "Our Offer¹", "Best Offer!"), nor the spaces, colons and
 // full stops among them (the tests already allow one colon or full stop at
-// the end). Before, "Your Carvana Offer*" did not end in "Offer" for the
-// offer test, so "your" made it a selling price again. Read from the end one
-// character at a time, so a long label costs one pass. The label is still
-// quoted as the website writes it.
-const TRAILING_MARK = /[\s*!:.\u00a7\u00ae\u00b2\u00b3\u00b9\u2020\u2021\u2070\u2074-\u2079\u2120\u2122]/;
+// the end). The marks are the standard-data reader's own list
+// (schemaOrgNormalize.js LABEL_MARKS), so the two never drift. Before,
+// "Your Carvana Offer*" did not end in "Offer" for the offer test, so "your"
+// made it a selling price again. Read from the end one character at a time,
+// so a long label costs one pass. The label is still quoted as the website
+// writes it.
+const TRAILING_MARK = new RegExp(String.raw`[\s:.${LABEL_MARKS}]`);
 export function labelWords(label) {
   const text = String(label || '');
   let end = text.length;
@@ -230,7 +232,7 @@ const GUIDE_PRICE = new RegExp(String.raw`\b(?:${GUIDE_PRICE_WORDS})\b`, 'i');
 // REFERENCE_CUE ends them. Not "Estimated Payment" or "Trade-In Bonus": a
 // payment or an incentive named after a guide or a trade is never quoted as
 // if it might be the car's price, and a field so named is not read.
-const GUIDE_LABEL = new RegExp(String.raw`\b(?:${GUIDE_PRICE_WORDS})\b\.?(?:[\s:\-\u2013\u2014\u00ae\u2122]*(?:price|pricing|value|offer)\b)*[\s:\-\u2013\u2014\u00ae\u2122]*$`, 'i');
+const GUIDE_LABEL = new RegExp(String.raw`\b(?:${GUIDE_PRICE_WORDS})\b\.?(?:[\s:\-\u2013\u2014${LABEL_MARKS}]*(?:price|pricing|value|offer)\b)*[\s:\-\u2013\u2014${LABEL_MARKS}]*$`, 'i');
 // The base price a dealer's own price is built from on these platforms:
 // "Retail Price", "Retail Value", a "starting" price.
 const BASE_WORDS = /retail|\bbase\b|asking|starting/i;

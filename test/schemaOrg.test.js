@@ -550,6 +550,32 @@ test('price: when the page\'s only price carries a guide\'s or an old price\'s l
   assert.deepEqual(assessVehicle(v, {}).blockers.map((b) => b.text), ['No price on the website (the page labels its only price "Market Price", which Lot Current does not read as the selling price)']);
 });
 
+// The footnote and trademark marks the inventory-data reader sets aside
+// (inventoryJson.js labelWords, the marks shared as LABEL_MARKS), after a
+// guide's or an old price's words in page text ("Market Value*: $24,995",
+// "MSRP† $24,995"). Before, the mark hid the words, so a page whose only
+// price was a guide's value or an offer had it taken as the car's price
+// (PR #9, second repair cycle).
+test('price: a footnote or trademark mark after a guide\'s or an old price\'s words changes nothing', () => {
+  const at = (text, price = 24995) => priceFromOffers(car({ offers: { '@type': 'Offer', price, priceCurrency: 'USD' } }), shown(text));
+  const quoted = (label) => ({ value: null, label: `the page labels its only price "${label}", which Lot Current does not read as the selling price`, reason: `the page labels its only price "${label}", which Lot Current does not read as the selling price` });
+  for (const [text, label] of [
+    ['Market Value*: $24,995', 'Market Value'],
+    ['Market Value\u2020 $24,995', 'Market Value'],
+    ['Kelley Blue Book\u00ae Value\u00b9 $24,995', 'Kelley Blue Book\u00ae Value'],
+    ['Instant Cash Offer* $24,995', 'Cash Offer'],
+    ['KBB Value** $24,995', 'KBB Value'],
+    ['MSRP\u2021 $24,995', 'MSRP'],
+    ['Was* $24,995', 'Was'],
+  ]) assert.deepEqual(at(text), quoted(label), text);
+  // beside a current price the marked figure is a stale or guide value, and the current price is read
+  assert.deepEqual(at('Was* $24,995 Now $23,995'), { value: null, label: 'the page does not show this price', reason: 'the page does not show this price' });
+  assert.equal(at('Market Value* $26,000 Our price $24,995').value, 24995);
+  // a mark after the selling price's own words changes nothing either
+  assert.equal(at('Internet Price* $24,995').value, 24995);
+  assert.equal(at('Our Price\u2122 $24,995').value, 24995);
+});
+
 test('price: the page text comes in segments, each tied to the car whose card holds it', () => {
   const page = `<html><body><h1>Used 2019 Honda Civic EX</h1><div class="price-box"><p>Our price $20,995</p><a href="/finance/">Payments</a></div>
   <aside><a href="/inventory/used-2018-honda-accord-1hgsampl0jh000102/">2018 Accord $21,995</a><div class="tile"><a href="/inventory/used-2017-ford-escape-1fmsampl0hu000103/"><img alt="">2017 Escape</a> <span>$19,000</span></div></aside>

@@ -198,7 +198,15 @@ const AMOUNT = /(\bUSD?\s*\$|(?<![A-Za-z])\$|\bUSD\b)\s*(\d{1,3}(?:,\d{3}){1,2}|
 // phrase may be joined by a space, a hyphen or nothing ("Cash Offer",
 // "Cash-Offer", "cashoffer"), as labels and field names write them.
 export const GUIDE_PRICE_WORDS = String.raw`market[-\s]?value|market[-\s]?price|fair[-\s]?market|fair[-\s]?purchase|typical[-\s]?listing|book[-\s]?value|trade[-\s]?in(?:[-\s]?value|[-\s]?offer)?|kbb|kelley(?:[-\s]?blue[-\s]?book)?|blue[-\s]?book|black[-\s]?book|nada|j\.?\s?d\.?\s?power|cash[-\s]?offer|instant[-\s]?offer|edmunds|estimated(?:[-\s]?value)?`;
-const REFERENCE_CUE = new RegExp(String.raw`\b(?:was|msrp|m\.s\.r\.p|retail|list|compared? at|original(?:ly)?|reg(?:ular)?|previous(?:ly)?|based on|${GUIDE_PRICE_WORDS}|window sticker|sticker)\b\.?(?:[\s:\-\u2013\u2014\u00ae\u2122]*(?:price|pricing|of|a|the|at|for|value)\b)*[\s:\-\u2013\u2014\u00ae\u2122]*$`, 'i');
+// The footnote and trademark marks a website puts after a label or its
+// words ("Market Value*", "Your Offer™", "KBB Value¹", "MSRP†"), as
+// the inside of a character class. Shared with the inventory-data reader
+// (inventoryJson.js labelWords), so both read a label the same with or
+// without them: before, "Market Value*: $24,995" hid the guide's words and
+// the page's only price, a guide's value, was taken.
+export const LABEL_MARKS = String.raw`*!\u00a7\u00ae\u00b2\u00b3\u00b9\u2020\u2021\u2070\u2074-\u2079\u2120\u2122`;
+const REFERENCE_CUE = new RegExp(String.raw`\b(?:was|msrp|m\.s\.r\.p|retail|list|compared? at|original(?:ly)?|reg(?:ular)?|previous(?:ly)?|based on|${GUIDE_PRICE_WORDS}|window sticker|sticker)\b\.?(?:[\s:\-\u2013\u2014${LABEL_MARKS}]*(?:price|pricing|of|a|the|at|for|value)\b)*[\s:\-\u2013\u2014${LABEL_MARKS}]*$`, 'i');
+const CUE_END = new RegExp(String.raw`[\s:\-\u2013\u2014${LABEL_MARKS}]+$`);
 
 // Every dollar amount the page shows: its value, whether it is written with
 // a dollar sign, and whether the words before it make it a reference price
@@ -212,7 +220,7 @@ function shownPrices(pageText) {
       value: Number(m[2].replace(/,/g, '') + (m[3] ? '.' + m[3] : '')),
       dollar: m[1].includes('$'),
       reference: Boolean(cue),
-      cue: cue ? cue[0].replace(/[\s:\-\u2013\u2014\u00ae\u2122]+$/, '').replace(/\s+/g, ' ') : '',
+      cue: cue ? cue[0].replace(CUE_END, '').replace(/\s+/g, ' ') : '',
     });
   }
   return out;
