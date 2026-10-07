@@ -67,7 +67,9 @@ test('without --pilot the pack is unchanged: the same name and the same bytes as
   try {
     const r = pack(dir);
     assert.equal(r.code, 0, r.out);
-    assert.match(r.out, new RegExp(`^dist/lot-current-extension-${VERSION.replace(/\./g, '\\.')}\\.zip: \\d+ files, \\d+ KB \\(Lot Current ${VERSION.replace(/\./g, '\\.')}\\)$`, 'm'));
+    // with a committed account project, the line says the zip offers sign-in and names the pilot pack
+    const signIn = /url: 'https:/.test(COMMITTED) ? ', offers sign-in; the zip without it is npm run pack -- --pilot' : '';
+    assert.match(r.out, new RegExp(`^dist/lot-current-extension-${VERSION.replace(/\./g, '\\.')}\\.zip: \\d+ files, \\d+ KB \\(Lot Current ${VERSION.replace(/\./g, '\\.')}${signIn.replace(/[-.]/g, '\\$&')}\\)$`, 'm'));
     assert.deepEqual(readdirSync(join(dir, 'dist')), [`lot-current-extension-${VERSION}.zip`], 'one zip, the normal one');
     const src = join(dir, 'extension');
     const want = zip(walk(src).map((name) => ({ name, data: readFileSync(join(src, name)) })));

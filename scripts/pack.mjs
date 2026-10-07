@@ -16,7 +16,7 @@
 
 import { readFileSync, readdirSync, statSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { deflateRawSync } from 'node:zlib';
 import { PILOT_CONFIG_PATH, pilotAccountConfig, accountsOffProblems } from './pilot-config.mjs';
 
@@ -126,6 +126,11 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   mkdirSync(join(root, 'dist'), { recursive: true });
   const bytes = zip(entries);
   writeFileSync(target, bytes);
-  const what = pilot ? `, for a pilot without accounts: src/accountConfig.js left empty, so no sign-in; not for the store` : '';
+  // The normal zip says when it offers sign-in, so a misspelled pilot option
+  // that npm swallowed (npm_config_pilto) is not missed.
+  const { accountsConfigured } = await import(pathToFileURL(join(src, PILOT_CONFIG_PATH)).href);
+  const what = pilot
+    ? `, for a pilot without accounts: src/accountConfig.js left empty, so no sign-in; not for the store`
+    : accountsConfigured() ? `, offers sign-in; the zip without it is npm run pack -- --pilot` : '';
   console.log(`${relative(root, target)}: ${files.length} files, ${(bytes.length / 1024).toFixed(0)} KB (Lot Current ${manifest.version}${what})`);
 }

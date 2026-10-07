@@ -27,7 +27,7 @@ import { LEGAL, legalHosted } from '../../extension/src/legalLinks.js';
 import { wizardSteps, termsSummary } from '../../extension/src/wizardSteps.js';
 import { NOT_CONFIGURED } from '../../extension/src/accountFlow.js';
 import { readZip } from '../../scripts/store-check.mjs';
-import { loadAccountConfig } from '../../scripts/pilot-config.mjs';
+import { loadAccountConfig, pilotAccountConfig } from '../../scripts/pilot-config.mjs';
 import { blockFacebook } from './noFacebook.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
@@ -52,7 +52,15 @@ if (zipFile) {
 // The step numbers come from the wizard's own list and the copy's own
 // account config: the committed one names the production project (an
 // Account step after the name), the pilot zip's is empty (no Account step).
-const { accountsConfigured } = await loadAccountConfig(readFileSync(join(extDir, 'src/accountConfig.js'), 'utf8'));
+// A zip's copy is compared with what the pack makes of the committed file
+// before it is loaded, so no code from an archive runs here.
+const configText = readFileSync(join(extDir, 'src/accountConfig.js'), 'utf8');
+if (zipFile) {
+  const committed = readFileSync(join(root, 'extension/src/accountConfig.js'), 'utf8');
+  const expected = /-pilot\.zip$/.test(zipFile) ? pilotAccountConfig(committed) : committed;
+  assert.equal(configText, expected, `${zipFile} holds a src/accountConfig.js that npm run pack${/-pilot\.zip$/.test(zipFile) ? ' -- --pilot' : ''} does not make of today's file: pack it again`);
+}
+const { accountsConfigured } = await loadAccountConfig(configText);
 const configured = accountsConfigured();
 if (zipFile && /-pilot\.zip$/.test(zipFile)) assert.equal(configured, false, 'the pilot zip offers no sign-in');
 const STEPS = wizardSteps(configured);

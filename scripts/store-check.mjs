@@ -369,25 +369,34 @@ export function distZips(names, version) {
 }
 
 // A pilot zip against extension/'s files: every file but the account config
-// as compareZip checks it, and the account config loaded as a module, which
-// must give accounts off and be exactly what npm run pack -- --pilot makes of
-// the committed file. [] when it is right.
+// as compareZip checks it, and exactly one account config, whose text must be
+// exactly what npm run pack -- --pilot makes of the committed file. The
+// zip's own text is never run: only that expected text is loaded as a module
+// (the same check the pack ran) and must give accounts off. [] when it is
+// right.
 export async function checkPilotZip(entries, files) {
   const others = new Map([...files].filter(([name]) => name !== PILOT_CONFIG_PATH));
   const failures = compareZip(entries.filter((e) => e.name !== PILOT_CONFIG_PATH), others);
-  const config = entries.find((e) => e.name === PILOT_CONFIG_PATH);
-  if (!config) return [...failures, `the zip is missing ${PILOT_CONFIG_PATH}`];
+  const configs = entries.filter((e) => e.name === PILOT_CONFIG_PATH);
+  if (!configs.length) return [...failures, `the zip is missing ${PILOT_CONFIG_PATH}`];
+  if (configs.length > 1) return [...failures, `the zip holds ${PILOT_CONFIG_PATH} ${configs.length} times, so unzipping it could leave the wrong one: pack it again with npm run pack -- --pilot`];
+  const [config] = configs;
   if (!config.data) return [...failures, `the zip stores ${PILOT_CONFIG_PATH} with a compression this check cannot read: pack again with npm run pack -- --pilot`];
+  if (!files.has(PILOT_CONFIG_PATH)) return [...failures, `extension/${PILOT_CONFIG_PATH} is missing, so the zip's copy has nothing to be checked against`];
   const text = config.data.toString('utf8');
-  for (const p of await accountsOffProblems(text)) failures.push(`its ${PILOT_CONFIG_PATH} does not turn accounts off: ${p}`);
-  if (files.has(PILOT_CONFIG_PATH)) {
-    let want = null;
-    try {
-      want = pilotAccountConfig(files.get(PILOT_CONFIG_PATH).toString('utf8'));
-    } catch (e) {
-      failures.push(e.message);
-    }
-    if (want !== null && text !== want) failures.push(`its ${PILOT_CONFIG_PATH} is not what npm run pack -- --pilot makes of extension/${PILOT_CONFIG_PATH}: pack it again with npm run pack -- --pilot`);
+  const committed = files.get(PILOT_CONFIG_PATH).toString('utf8');
+  let want;
+  try {
+    want = pilotAccountConfig(committed);
+  } catch (e) {
+    return [...failures, e.message];
+  }
+  if (text === want) {
+    for (const p of await accountsOffProblems(want)) failures.push(`its ${PILOT_CONFIG_PATH} does not turn accounts off: ${p}`);
+  } else if (text === committed) {
+    failures.push(`its ${PILOT_CONFIG_PATH} is extension/'s own copy, which offers sign-in whenever it names an account project (the store zip renamed?): pack the pilot zip with npm run pack -- --pilot`);
+  } else {
+    failures.push(`its ${PILOT_CONFIG_PATH} is not what npm run pack -- --pilot makes of extension/${PILOT_CONFIG_PATH}: pack it again with npm run pack -- --pilot`);
   }
   return failures;
 }

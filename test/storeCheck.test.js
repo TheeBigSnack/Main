@@ -184,19 +184,18 @@ test('dist/ has two zips of a version: the store upload and the pilot zip for te
   assert.deepEqual(storeCheck.distZips([], '1.2.3'), { store: [], pilot: [] });
 });
 
-test('a pilot zip passes when only its account config differs and gives accounts off; one that still names a project or differs elsewhere fails', async () => {
+test('a pilot zip passes when only its account config differs and gives accounts off; one that still names a project, holds the config twice or differs elsewhere fails', async () => {
   const { pilotAccountConfig, PILOT_LINE } = await import('../scripts/pilot-config.mjs');
   const fs = files({ 'src/accountConfig.js': COMMITTED_CONFIG });
   const entries = (over = {}) => [...fs].map(([name, data]) => ({ name, data: name in over ? Buffer.from(over[name]) : data }));
   const check = (list) => storeCheck.checkPilotZip(readZip(zip(list), true), fs);
   const pilot = pilotAccountConfig(COMMITTED_CONFIG);
   assert.deepEqual(await check(entries({ 'src/accountConfig.js': pilot })), [], 'the zip npm run pack -- --pilot writes');
-  // the normal zip renamed: it still names the project
-  if (/url: 'https:/.test(COMMITTED_CONFIG)) {
-    const named = (await check(entries())).join('\n');
-    assert.match(named, /src\/accountConfig\.js does not turn accounts off: ACCOUNT\.url is "https:/);
-    assert.match(named, /accountsConfigured\(\) gives true, not false/);
-  }
+  // the normal zip renamed: it still names the project, and its text is never run
+  assert.deepEqual(await check(entries()), ["its src/accountConfig.js is extension/'s own copy, which offers sign-in whenever it names an account project (the store zip renamed?): pack the pilot zip with npm run pack -- --pilot"]);
+  // the emptied copy and a second copy after it: unzipping leaves the second
+  const twice = await check([...entries({ 'src/accountConfig.js': pilot }), { name: 'src/accountConfig.js', data: Buffer.from(COMMITTED_CONFIG) }]);
+  assert.deepEqual(twice, ['the zip holds src/accountConfig.js 2 times, so unzipping it could leave the wrong one: pack it again with npm run pack -- --pilot']);
   // another file stale, missing or added
   const elsewhere = (await check([...entries({ 'src/accountConfig.js': pilot, 'bg.js': 'old' }).filter((e) => e.name !== 'src/a.js'), { name: 'extra.txt', data: Buffer.from('x') }])).join('\n');
   assert.match(elsewhere, /bg\.js differs/);
@@ -236,11 +235,9 @@ test('store-check over a dist/ with both zips: the normal one is the store uploa
     assert.match(notes, new RegExp(`dist/${normal.replace(/\./g, '\\.')}: \\d+ KB, the same files as extension/: the zip the store upload takes`));
     assert.match(notes, new RegExp(`dist/${pilot.replace(/\./g, '\\.')}: \\d+ KB, the same files as extension/ except src/accountConfig\\.js, left empty \\(no sign-in\\): for testers while the pilot runs signed out, never the store upload`));
     // the normal zip copied over the pilot one: it names the project, so it fails
-    if (/url: 'https:/.test(COMMITTED_CONFIG)) {
-      writeFileSync(join(dir, 'dist', pilot), zip(entries));
-      const named = (await runChecks(dir)).failures.join('\n');
-      assert.match(named, new RegExp(`dist/${pilot.replace(/\./g, '\\.')}: its src/accountConfig\\.js does not turn accounts off`));
-    }
+    writeFileSync(join(dir, 'dist', pilot), zip(entries));
+    const named = (await runChecks(dir)).failures.join('\n');
+    assert.match(named, new RegExp(`dist/${pilot.replace(/\./g, '\\.')}: its src/accountConfig\\.js is extension/'s own copy, which offers sign-in`));
     // a pilot zip whose other files are stale fails like a stale normal zip
     writeFileSync(join(dir, 'dist', pilot), zip((await pilotEntries(entries)).map((e) => (e.name === 'manifest.json' ? { name: e.name, data: Buffer.from('{}') } : e))));
     assert.match((await runChecks(dir)).failures.join('\n'), new RegExp(`dist/${pilot.replace(/\./g, '\\.')}: the zip's manifest\\.json differs from extension/manifest\\.json`));

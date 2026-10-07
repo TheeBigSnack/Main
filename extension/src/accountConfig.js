@@ -9,13 +9,17 @@
 // salesperson asks for a sign-in code, and nothing syncs until one is signed
 // in. The committed values name the production project (the deploy
 // workflow refuses to run unless they name the project it deploys to), so
-// every build made from this file offers sign-in. The test drive (demo/)
-// never reaches the project: its chrome-shim.js answers every request to it.
+// every build made from this file offers sign-in, except the pilot zip
+// (npm run pack -- --pilot), which empties the values in its own copy. The
+// test drive (demo/) never reaches the project: its chrome-shim.js answers
+// every request to it.
 //
 // With every value empty, accountsConfigured() is false and the extension
 // behaves exactly as it did without accounts: the Account section in
 // Settings shows one line, nothing signs in, nothing syncs, and no request
-// leaves the browser.
+// goes to the account project. Website reads, photo downloads, the VIN
+// lookup and, when the dealer turns it on, the rewrite service still leave
+// the browser as they always did.
 //
 //   url          the project URL from Project settings, API, like
 //                https://<ref>.supabase.co
