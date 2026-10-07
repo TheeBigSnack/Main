@@ -38,7 +38,15 @@ function copy() {
 }
 
 function pack(dir, ...args) {
-  const r = spawnSync(process.execPath, [join(dir, 'scripts/pack.mjs'), ...args], { cwd: dir, encoding: 'utf8' });
+  return packWithEnv(dir, {}, ...args);
+}
+
+// npm's own settings reach the script as npm_config_* variables: a pack here
+// carries npm_config_pilot only when the test sets it.
+function packWithEnv(dir, env, ...args) {
+  const base = { ...process.env };
+  delete base.npm_config_pilot;
+  const r = spawnSync(process.execPath, [join(dir, 'scripts/pack.mjs'), ...args], { cwd: dir, encoding: 'utf8', env: { ...base, ...env } });
   return { code: r.status, out: `${r.stdout}${r.stderr}` };
 }
 
@@ -183,7 +191,7 @@ test('the pilot pack loads the rewritten copy before it writes, and refuses one 
   }
 });
 
-test('the pack refuses an option it does not know, so a typo never gives a zip with sign-in', () => {
+test('the pack refuses an option it does not know, and --pilot typed without the --, so a slip never gives a zip with sign-in', () => {
   const dir = copy();
   try {
     const r = pack(dir, '--pliot');
@@ -191,6 +199,20 @@ test('the pack refuses an option it does not know, so a typo never gives a zip w
     assert.match(r.out, /--pliot/);
     assert.match(r.out, /--pilot/, 'it names the option it takes');
     assert.ok(!existsSync(join(dir, 'dist')), 'nothing written');
+    // npm run pack --pilot, without the --: npm keeps --pilot as its own
+    // setting (npm_config_pilot "true"; --no-pilot gives "") and the script
+    // gets no option at all. That must not quietly give the zip with sign-in.
+    for (const value of ['true', '']) {
+      const slip = packWithEnv(dir, { npm_config_pilot: value });
+      assert.equal(slip.code, 1, `npm_config_pilot=${JSON.stringify(value)}: refused\n${slip.out}`);
+      assert.match(slip.out, /npm run pack -- --pilot/, 'it says how to ask for the pilot zip');
+      assert.match(slip.out, /Nothing was packed/);
+      assert.ok(!existsSync(join(dir, 'dist')), `npm_config_pilot=${JSON.stringify(value)}: nothing written`);
+    }
+    // with the -- as well, the script sees --pilot and packs the pilot zip
+    const both = packWithEnv(dir, { npm_config_pilot: 'true' }, '--pilot');
+    assert.equal(both.code, 0, both.out);
+    assert.deepEqual(readdirSync(join(dir, 'dist')), [`lot-current-extension-${VERSION}-pilot.zip`]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

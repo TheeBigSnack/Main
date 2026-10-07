@@ -10,7 +10,9 @@
 // byte for byte, except src/accountConfig.js, whose values are left empty
 // (scripts/pilot-config.mjs), so it offers no sign-in. That one entry is built
 // in memory and loaded as a module before anything is written; the committed
-// file is only read.
+// file is only read. An option it does not know is refused, and so is
+// `npm run pack --pilot` without the --, which npm takes as its own setting:
+// neither may end in the zip with sign-in.
 
 import { readFileSync, readdirSync, statSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
@@ -103,6 +105,13 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     process.exit(1);
   }
   const pilot = args.includes('--pilot');
+  // `npm run pack --pilot`, without the --: npm keeps --pilot as its own
+  // setting (npm_config_pilot; --no-pilot sets it too) and this script gets
+  // no option, so it would pack the zip with sign-in. Refused instead.
+  if (!pilot && process.env.npm_config_pilot !== undefined) {
+    console.error('pack: npm kept the pilot option for itself (typed without the --, as in npm run pack --pilot), so this script never saw it. Nothing was packed. Run npm run pack -- --pilot for the zip without sign-in, or npm run pack for the normal one.');
+    process.exit(1);
+  }
   const files = walk(src);
   let entries = files.map((rel) => ({ name: rel, data: readFileSync(join(src, rel)) }));
   if (pilot) {
