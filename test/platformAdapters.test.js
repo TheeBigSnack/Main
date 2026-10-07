@@ -908,6 +908,53 @@ test('R-3: a certified card typed Loaner, Demo or Courtesy goes to Needs a look 
   }
 });
 
+// R-3, the repair round: the certified mark counts whatever else the title
+// says. Before, it was only the title's fallback, so a title that opened
+// with any word of its own ("Loaner 2017 ...", "Sale 2017 ...") dropped it
+// and the gate skipped the car as sold as new; a "Certified Loaner" type
+// with no separate certified flag lost it too. When the title or the
+// address calls the car new, the website says new, loaner and certified at
+// once: it is skipped as sold as new (never Ready, never Certified Used),
+// and a note names the certified mark.
+test('R-3: a certified loaner or demo goes to Needs a look whatever its title opens with, and is skipped only when the website also calls it new', () => {
+  const [c] = platformCars(1, { from: 540 });
+  const car = { ...c, certified: true };
+  const bare = `/${car.year}-${car.make}-${car.model}-${car.vin}`;
+  const on = (patch, certified = true) => normalizeInventoryRecord({ ...dealerOnCard({ ...car, certified }).VehicleCard, VehicleDetailUrl: bare, ...patch }, { origin: DEALERON_ORIGIN });
+  const com = (patch, certified = true) => normalizeInventoryRecord({ ...dealerComRecord({ ...car, certified }), link: bare, ...patch }, { origin: DEALERCOM_ORIGIN });
+  const name = `${car.year} ${car.make} ${car.model}`;
+  const look = {
+    'DealerOn, a title that opens with the loaner word': on({ VehicleCondition: 'Loaner', VehicleName: `Loaner ${name}` }),
+    'DealerOn, a title that opens with another word': on({ VehicleCondition: 'Loaner', VehicleName: `Sale ${name}` }),
+    'DealerOn, a demo whose title opens with Demo': on({ VehicleCondition: 'Demo', VehicleName: `Demo ${name}` }),
+    'DealerOn, "Certified Loaner" with no certified flag': on({ VehicleCondition: 'Certified Loaner', VehicleName: name }, false),
+    'DealerOn, "CERTIFIED_SERVICE_LOANER" with no certified flag': on({ VehicleCondition: 'CERTIFIED_SERVICE_LOANER', VehicleName: name }, false),
+    'Dealer.com, a title that opens with another word': com({ inventoryType: 'Loaner', title: [`Special ${name}`, car.trim] }),
+    'Dealer.com, "Certified Demo" with no certified flag': com({ inventoryType: 'Certified Demo' }, false),
+  };
+  for (const [what, v] of Object.entries(look)) {
+    const verdict = checkPreOwned(v);
+    assert.equal(verdict.verdict, 'review', `${what}: ${verdict.reason}`);
+    assert.match(verdict.reason, /^Listed as pre-owned but also flagged as a (?:demo|loaner)\./, what);
+    assert.equal(assessVehicle(v, withDefaults({})).decision, DECISION.REVIEW, what);
+    assert.doesNotMatch(String(v.inventoryType), /certified used/i, what);
+  }
+  const fresh = {
+    'DealerOn, a title that says new': on({ VehicleCondition: 'Demo', VehicleName: `New ${name}` }),
+    'Dealer.com, an address that says new': com({ inventoryType: 'Loaner', link: `/new/${car.make}/${car.year}-${car.make}-${car.model}.htm` }),
+  };
+  for (const [what, v] of Object.entries(fresh)) {
+    const a = assessVehicle(v, withDefaults({}));
+    assert.equal(a.decision, DECISION.SKIP, `${what}: the website also calls it new: skipped as sold as new`);
+    assert.doesNotMatch(String(v.inventoryType), /certified used/i, what);
+    assert.ok(a.notes.includes('The website also lists it as "Certified".'), `${what}: a note names the certified mark (${a.notes.join(' | ')})`);
+  }
+  // a plain loaner with no certified mark anywhere, and nothing that says used, is still sold as new
+  const loaner = on({ VehicleCondition: 'Loaner', VehicleName: `Loaner ${name}` }, false);
+  assert.equal(loaner.readableType, null);
+  assert.equal(assessVehicle(loaner, withDefaults({})).decision, DECISION.SKIP);
+});
+
 // R-8: the only price a car has, labelled as a guide's value or an offer
 // for the car ("Market Price", "KBB Value", "Instant Cash Offer"). Some
 // websites label their own selling price that way, so, as the standard-data

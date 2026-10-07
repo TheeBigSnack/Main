@@ -145,6 +145,39 @@ test('listed as used but flagged demo: needs a look; flagged demo and new: skipp
   assert.equal(assess('usedNormal', { extra_fields: { title: 'Demo 2019 Ram 1500 Classic Express' } }).decision, DECISION.REVIEW);
 });
 
+// The second condition field (readableType) backs up the title when the title has no condition word. For a demo or
+// loaner it also counts when the title has words of its own: a car the website lists there as pre-owned (the
+// certified mark the DealerOn and Dealer.com readers keep beside a loaner word) goes to Needs a look, not skipped
+// without a word, unless something on the website calls it new. Nothing else about the gate changes.
+test('a demo or loaner the second condition field calls pre-owned gets a look whatever the title opens with; a new sign still skips it', () => {
+  const vin = '1C4RJFBG0RC000001';
+  const loaner = {
+    vin, year: 2024, make: 'Jeep', model: 'Grand Cherokee', trim: 'Limited', inventoryType: 'Loaner', readableType: 'Certified', isDemo: false, isLoaner: true,
+    siteTitle: 'Loaner 2024 Jeep Grand Cherokee Limited', url: `https://www.example-dealer.test/vehicle/2024-jeep-grand-cherokee-${vin.toLowerCase()}`, urlConditionWord: null,
+    carfaxUrl: null, mileage: 3120, price: 40000, photoCount: 10, availability: 'In-Stock',
+  };
+  for (const siteTitle of ['Loaner 2024 Jeep Grand Cherokee Limited', 'Sale 2024 Jeep Grand Cherokee Limited', '2024 Jeep Grand Cherokee Limited']) {
+    const a = assessVehicle({ ...loaner, siteTitle }, {});
+    assert.equal(a.decision, DECISION.REVIEW, siteTitle);
+    assert.match(a.reason, /^Listed as pre-owned but also flagged as a loaner\./, siteTitle);
+    assert.ok(a.notes.includes('The website also lists it as "Certified".'), `${siteTitle}: ${a.notes.join(' | ')}`);
+  }
+  for (const patch of [{ siteTitle: 'New 2024 Jeep Grand Cherokee Limited' }, { urlConditionWord: 'new' }]) {
+    const a = assessVehicle({ ...loaner, ...patch }, {});
+    assert.equal(a.decision, DECISION.SKIP, JSON.stringify(patch));
+    assert.ok(a.notes.includes('The website also lists it as "Certified".'), JSON.stringify(patch));
+  }
+  // a second field that says new, or nothing, leaves the loaner sold as new
+  for (const readableType of ['New', null]) assert.equal(assessVehicle({ ...loaner, readableType }, {}).decision, DECISION.SKIP, String(readableType));
+  // a car that is no demo or loaner is decided by its three signs alone, as before
+  const used = { ...loaner, inventoryType: 'Used', isLoaner: false, urlConditionWord: 'used', siteTitle: 'Sale 2024 Jeep Grand Cherokee Limited', readableType: 'Certified Pre-Owned' };
+  const plain = assessVehicle(used, {});
+  assert.equal(plain.decision, DECISION.READY);
+  assert.equal(plain.reason, 'Pre-owned: inventory type, web address agree.');
+  // the note only when nothing else calls the car pre-owned
+  assert.deepEqual(assessVehicle({ ...used, isDemo: true }, {}).notes, []);
+});
+
 test('a demo or loaner named after the model year is never Ready: in the title, the trim or the page address', () => {
   const vin = '1C4RJFBG0RC000001';
   const used = {

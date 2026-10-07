@@ -533,11 +533,15 @@ export function normalizeInventoryRecord(card, { origin, page = null } = {}) {
   // gate sees a car the website calls both certified and a loaner, and sends
   // it to Needs a look instead of Ready, or instead of skipping it as sold as
   // new without a word about the mark. A plain certified car gets no second
-  // sign from its mark: its type already says Certified Used.
+  // sign from its mark: its type already says Certified Used. A certified
+  // word in the condition itself ("Certified Loaner") is the same mark as
+  // the flag. The gate counts that mark even when the title has words of its
+  // own (classify.js checkPreOwned).
   const demoWord = DEMO_LETTERS.test(lettersOf(condition));
   const loanerWord = LOANER_LETTERS.test(lettersOf(condition));
   const inventoryType = certified && !/\bnew\b/i.test(condition) && !demoWord && !loanerWord ? 'Certified Used' : condition || null;
-  const readableType = certified && (demoWord || loanerWord) ? 'Certified' : null;
+  const marked = certified || /\b(?:certified|cpo)\b/i.test(condition);
+  const readableType = marked && (demoWord || loanerWord) ? 'Certified' : null;
   const title = textOf(pick(card, N.title));
   const location = textOf(pick(card, N.location, { nested: true })) || null;
   const prices = choosePrices(labeledPrices(card), { dealer: location || '' });
