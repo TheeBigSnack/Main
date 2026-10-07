@@ -139,6 +139,9 @@ const texts = [
   sixty('2019 Ram 1500 Big Horn. Just put on new tires\nTransmission, engine and exhaust all strong.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn. New tires, struts\nBrakes inspected at our shop.') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn. New tires brakes and rotors. New brake rotors and pads. New tires\nand brakes. + New battery\n+ Wipers') + '\nVIN TESTVIN0000000001.',
+  // "and", "&" and "plus" with spaces around them cross a line break, and "front" or "rear" after them may end its line; after a comma a line break ends the item
+  sixty('2019 Ram 1500 Big Horn with new tires &\nbrakes. New battery and front\nbrakes &\nrear\nshocks. New wipers +\nstruts.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. New tires, front\nbrakes. New battery, brake\npads. New wipers, struts\ninspected.') + '\nVIN TESTVIN0000000001.',
 ];
 const contexts = [
   { vehicle, dealer, priceNote: '', price: 28995 },

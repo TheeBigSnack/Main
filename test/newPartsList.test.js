@@ -150,6 +150,31 @@ test('a list after "new" stops at a line break: the next line\'s first word is n
   assert.deepEqual(claimed('New tires\nand brakes.', c), ['New tires\nand brakes']);
 });
 
+test('"and", "&" and "plus" with spaces around them join across a line break on either side, and "front" or "rear" after them may end its line, as before the list was read', () => {
+  const c = ctxOf(car({ descriptionRaw: 'Just put on new tires.' }));
+  for (const [sentence, claims] of [
+    ['This truck has new tires &\nbrakes.', ['new tires &\nbrakes']], ['New tires &\nbattery.', ['New tires &\nbattery']],
+    ['New tires and front\nbrakes.', ['New tires and front\nbrakes']], ['New tires and rear\nshocks.', ['New tires and rear\nshocks']],
+    ['New tires and\nfront\nbrakes.', ['New tires and\nfront\nbrakes']], ['New tires plus\nbrakes.', ['New tires plus\nbrakes']], ['New tires\n& brakes.', ['New tires\n& brakes']],
+    ['New tires &\nfront\nbrakes &\nrear\nshocks.', ['New tires &\nfront\nbrakes', 'New tires &\nfront\nbrakes &\nrear\nshocks']],
+  ]) {
+    assert.deepEqual(claimed(sentence, c), claims, JSON.stringify(sentence));
+  }
+  // "+" and "/" never crossed a line break, nor did a word before the part other than "front" or "rear"
+  for (const sentence of ['New tires +\nbrakes.', 'New tires /\nbrakes.', 'New tires and the\nbrakes.', 'New tires and front and rear\nbrakes.']) {
+    assert.deepEqual(claimed(sentence, c), [], JSON.stringify(sentence));
+  }
+});
+
+test('after a comma, a line break inside an item ends it: after "front" or "rear", between "brake" and "pads", before words about its state', () => {
+  const c = ctxOf(car({ descriptionRaw: 'Just put on new tires.' }));
+  assert.deepEqual(claimed('New tires, front\nbrakes.', c), []);
+  assert.deepEqual(claimed('New tires, rear\nshocks are original.', c), []);
+  assert.deepEqual(claimed('New tires, brake\npads.', c), ['New tires, brake']);
+  assert.deepEqual(claimed('New tires, brakes\ninspected at our shop.', c), ['New tires, brakes']);
+  assert.deepEqual(claimed('New tires, battery\nlooks good.', c), ['New tires, battery']);
+});
+
 test('a part is named in two words only when it is one part ("brake pads", "brake rotors"); two parts with nothing between them are no list', () => {
   const c = ctxOf(car({ descriptionRaw: 'Just put on new tires.' }));
   assert.deepEqual(claimed('New tires brakes and rotors.', c), []);
