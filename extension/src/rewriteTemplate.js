@@ -1003,7 +1003,7 @@ const saysWords = (text, words) => new RegExp(`\\b${escapeRe(oneLine(words)).rep
 // reason names the setting, what it says and a way to write it
 // (settingNumberProblems in runGuardrails), and set-up and Settings warn as
 // soon as the field holds such a number (settingNumberWarning). The digits of
-// a dealership's name alone ("Route 19 Motors") pass: the name is among the
+// a dealership's name alone ("1st Choice Auto") pass: the name is among the
 // facts the number check reads (sourceNumbers).
 const SMALL_NUMBERS = Object.freeze(['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty']);
 const ORDINAL_WORDS = Object.freeze(['', 'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth', 'eleventh', 'twelfth', 'thirteenth', 'fourteenth', 'fifteenth', 'sixteenth', 'seventeenth', 'eighteenth', 'nineteenth', 'twentieth']);
