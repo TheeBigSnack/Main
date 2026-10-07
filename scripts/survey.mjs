@@ -31,7 +31,7 @@ import { fileURLToPath } from 'node:url';
 import {
   DEFAULTS, USAGE, parseArgs, hostDir, parseRobots, robotsAllows, robotsVerdict, metaGenerator, assetHosts,
   pageAnatomy, jsonLdSummary, microdataTypes, carLinks, pickCarPages, paginationShape, jsonEndpoint, botSigns,
-  fingerprint, GLOBAL_NAMES, capScanLimits, surveyHostPermissions, lotSyncReading, verdictFor, findVins,
+  fingerprint, GLOBAL_NAMES, capScanLimits, capInventoryLimits, surveyHostPermissions, lotSyncReading, verdictFor, findVins,
   jsonLdExcerpt, photoHosts, renderReportMd, renderSummaryMd,
 } from './survey-lib.mjs';
 import { adapterById } from '../extension/adapters/index.js';
@@ -65,10 +65,11 @@ const scanLimits = { carPages: opts.scanCarPages, listPages: DEFAULTS.scanListPa
 
 // The survey's temporary copy of the extension: the surveyed websites as its
 // only host permissions (what the toolbar click's activeTab grants a real
-// install), no Facebook permission, no side panel, and the standard-data
-// adapter's page limits lowered so one survey reads a handful of pages.
+// install), no Facebook permission, no side panel, and the page limits of
+// the standard-data adapter and of the inventory-data reader (DealerOn,
+// Dealer.com) lowered so one survey reads a handful of pages.
 function extensionCopy(urls) {
-  const dir = mkdtempSync(join(tmpdir(), 'lot-sync-survey-ext-'));
+  const dir = mkdtempSync(join(tmpdir(), 'lot-current-survey-ext-'));
   cpSync(join(root, 'extension'), dir, { recursive: true });
   const manifestPath = join(dir, 'manifest.json');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
@@ -78,6 +79,8 @@ function extensionCopy(urls) {
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
   const adapterPath = join(dir, 'adapters', 'schemaOrg.js');
   writeFileSync(adapterPath, capScanLimits(readFileSync(adapterPath, 'utf8'), scanLimits));
+  const inventoryPath = join(dir, 'adapters', 'inventoryJson.js');
+  writeFileSync(inventoryPath, capInventoryLimits(readFileSync(inventoryPath, 'utf8'), scanLimits));
   return dir;
 }
 
@@ -105,7 +108,8 @@ function capText(pauseMs) {
   const survey = 3 + opts.maxCarPages;
   return `the survey itself asks for at most ${survey} pages per site (robots.txt, the list page, the list's server HTML once, and up to ${opts.maxCarPages} car pages), each at least ${pauseMs / 1000} s after the one before; ` +
     `Lot Current's own scan then runs as a salesperson's click would, in a copy of the extension limited to ${scanLimits.listPages} list pages, ${scanLimits.sitemaps} sitemaps and ${scanLimits.carPages} car pages ` +
-    '(as shipped: 40, 5 and 600), two at a time with no pauses, as the product does (a Dealer Inspire site is read through its inventory search instead, a few requests)';
+    '(as shipped: 40, 5 and 600), two at a time with no pauses, as the product does (a Dealer Inspire site is read through its inventory search instead, a few requests; ' +
+    `a DealerOn or Dealer.com site through the list data its page loads, at most ${scanLimits.listPages} list pages, as shipped 30)`;
 }
 
 async function surveySite(url) {
@@ -137,7 +141,7 @@ async function surveySite(url) {
   };
 
   const extDir = extensionCopy([url]);
-  const profileDir = mkdtempSync(join(tmpdir(), 'lot-sync-survey-profile-'));
+  const profileDir = mkdtempSync(join(tmpdir(), 'lot-current-survey-profile-'));
   let context;
   let phase = 'start';
   const phaseHosts = { list: new Set() };
@@ -174,7 +178,8 @@ async function surveySite(url) {
       } else if (phase === 'scan') report.requests.lotSyncScan += 1;
     });
     // JSON the page's own scripts ask for: kept only when it holds VIN-like
-    // strings, and then only its address pattern and top-level keys
+    // strings, and then only its address pattern, top-level keys, the names
+    // its request sent and the layout of its car records, never a value
     context.on('response', (res) => {
       const req = res.request();
       if ((phase !== 'list' && phase !== 'car') || !['xhr', 'fetch'].includes(req.resourceType())) return;
@@ -183,7 +188,7 @@ async function surveySite(url) {
         const contentType = (await res.allHeaders().catch(() => ({})))['content-type'] || '';
         if (!/json|javascript|text\/plain/i.test(contentType)) return;
         const body = await res.text().catch(() => '');
-        const ep = body.length <= 20000000 ? jsonEndpoint({ url: res.url(), method: req.method(), status: res.status(), contentType, body }) : null;
+        const ep = body.length <= 20000000 ? jsonEndpoint({ url: res.url(), method: req.method(), status: res.status(), contentType, body, postData: req.postData() }) : null;
         if (ep && !report.jsonEndpoints.some((x) => x.pattern === ep.pattern && x.method === ep.method)) report.jsonEndpoints.push({ ...ep, page: on });
       })();
       pending.add(p);

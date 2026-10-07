@@ -159,8 +159,8 @@ test('tests/privacy.sql checks the export, the API roles, both guards and that B
 });
 
 test('supabase/README.md: the migration count, the psql recipe and the privacy section', () => {
-  const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
-  assert.match(readme, new RegExp(`\`db push\` applies the ${WORDS[MIGRATIONS.length]} migrations in order`), `${MIGRATIONS.length} migrations`);
+  const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen'];
+  assert.match(readme, new RegExp(`\`db push\` applies the ${WORDS[MIGRATIONS.length] || MIGRATIONS.length} migrations in order`), `${MIGRATIONS.length} migrations`);
   const recipe = readme.slice(readme.indexOf('createdb lotsync_test'), readme.indexOf('```', readme.indexOf('createdb lotsync_test')));
   for (const f of MIGRATIONS) assert.ok(recipe.includes(`-f supabase/migrations/${f}`), `the plain-Postgres recipe does not apply ${f}`);
   for (const t of ['rls.sql', 'billing.sql', 'privacy.sql']) assert.ok(recipe.includes(`-f supabase/tests/${t}`), `the recipe does not run ${t}`);
@@ -235,4 +235,112 @@ test('docs/support.md: the copy of a person\'s own data reads every table that c
   assert.match(recipe, /from public\.invites i\b[^;]*where '<user id>' in \(i\.created_by, i\.used_by\)/, 'the codes they made or used');
   assert.match(recipe, /from auth\.users where id = '<user id>'/, 'their account');
   assert.match(support, /it leaves out their invite misses, sign-up attempts and demo requests/, 'what export_dealership leaves out');
+  // review: the Stripe events that carry the person's email (forget_person counts them, the policy names the
+  // billing contact's details among what we hold) were left out; matched on the whole quoted address, so a longer
+  // address that ends with theirs does not bring back someone else's events, and never billing_events_of(), which
+  // returns the whole dealership's
+  assert.match(body('forget_person'), /from public\.billing_events e where position\(lower\(their_email\) in lower\(e\.payload::text\)\) > 0/, 'forget_person no longer counts the events carrying the email: the copy changes with it');
+  assert.match(recipe, /select received_at, type, payload from public\.billing_events where position\(lower\('"' \|\| '<their email>' \|\| '"'\) in lower\(payload::text\)\) > 0;/, 'the copy leaves out the Stripe events that carry their email, or matches part of an address');
+  assert.doesNotMatch(recipe, /billing_events_of\(/, 'billing_events_of() returns the whole dealership\'s events, not the person\'s');
+  const copy = support.slice(start, support.indexOf('\n- Log each request', start));
+  assert.match(copy, /the Stripe events that carry their email/, 'the description of the copy does not name the billing events');
+  assert.match(copy, /still check that each event it returns names them/, 'the owner is not told to check each event');
+});
+
+// review: the attorney was told forget_person keeps "two things", and the README called every colleague's
+// copy out of reach, while the rows kept under the bare id were more and a colleague's sync can drop the name
+test('what forget_person keeps is put to the attorney in full, and a colleague\'s copy loses the name at its next sync', () => {
+  const questions = read('../legal/questions-for-attorney.md');
+  const item = questions.split('\n').find((l) => l.startsWith('- `forget_person`'));
+  assert.ok(item, 'questions-for-attorney.md asks about forget_person');
+  for (const kept of ['listing and post-attempt rows', 'the invite codes they used or made that were used', 'description-writer usage rows', 'the listing link on their listings still marked up', 'the Stripe webhook events']) {
+    assert.ok(item.includes(kept), `the attorney is not told forget_person keeps ${kept}`);
+  }
+  assert.doesNotMatch(item, /keeps two things/);
+  const colleague = "A colleague's extension drops the person's name from a car still listed at its next sync";
+  for (const [name, text] of [['questions-for-attorney.md', item], ['supabase/README.md', readme]]) assert.ok(text.includes(colleague), `${name} says what a colleague's copy does`);
+  assert.match(support, /a colleague's extension drops the name from a car still listed at its next sync/);
+  assert.doesNotMatch(readme, /Copies the dealership already holds \(colleagues' extensions/, 'a colleague\'s synced copy is no longer out of reach');
+});
+
+// review: the pilot agreement promises deletion within 30 days of a pilot's end, but a dealership the owner
+// made in SQL sat in `none` (served with no end, never on the retention line) and a pilot ended early on
+// notice was listed only from its original end date
+test('every pilot reaches the retention line: its clock starts when the owner makes the dealership, an early end is recorded, and dealerships with no plan are listed', () => {
+  const step5 = readme.slice(readme.indexOf('5. **The first dealership and its manager**'), readme.indexOf('Invite codes and the rules around them'));
+  // one statement for every pilot dealership, whatever its length (the agreed end; test/supabase.test.js holds billing.sql to it)
+  assert.match(step5, /insert into public\.subscriptions as s \(dealership_id, status, pilot_ends_at\)\s+values \('<the id returned above>', 'pilot', '<the agreed end[^']*>'\)/, 'step 5 starts the pilot clock from the signed agreement');
+  assert.match(step5, /its start date plus its pilot length \(the standard `pilotDays` from `marketing\/pricing\.json`, or another length the agreement names\)/, 'the end is the agreement\'s start date and length');
+  assert.match(step5, /record the standard length the same way, so every pilot dealership has its clock from the day it is made/, 'not only a pilot of another length');
+  assert.doesNotMatch(step5, /start_pilot\(/, 'not start_pilot: the SQL editor has no auth.uid(), and start_pilot refuses without a manager');
+  const retention = readme.slice(readme.indexOf('**The retention line.**'), readme.indexOf('### Forget a person'));
+  assert.match(retention, /coalesce\(s\.status, 'pilot'\) in \('pilot', 'canceled', 'incomplete_expired'\)/, 'an ended pilot is on the retention line');
+  const early = retention.slice(retention.indexOf('**A pilot ended early.**'));
+  assert.ok(early.length > 0, 'the README says how to record a pilot ended early');
+  assert.match(early, /values \('<dealership id>', 'pilot', now\(\)\)\non conflict \(dealership_id\) do update\n {2}set status = 'pilot', pilot_ends_at = excluded\.pilot_ends_at, updated_at = now\(\)\n {2}where s\.status is null or \(s\.status = 'pilot' and s\.pilot_ends_at > excluded\.pilot_ends_at\);/, 'it ends a pilot, or a dealership with no plan, and leaves a paying one alone');
+  // review: a dealership that subscribed during its pilot and cancelled still read `pilot`, and the upsert left it so
+  assert.match(early, /subscribed during its pilot and then cancelled: its row says `canceled` with the pilot's end still ahead, so it still reads `pilot`, and the statement answers `INSERT 0 0`\. End that one's pilot with:\n\n```sql\nupdate public\.subscriptions\nset pilot_ends_at = now\(\), updated_at = now\(\)\nwhere dealership_id = '<dealership id>' and status in \('canceled', 'incomplete_expired'\) and pilot_ends_at > now\(\);\n```/, 'a cancelled subscriber\'s pilot can be ended early too');
+  assert.match(early, /\*\*Dealerships with no plan\.\*\*[\s\S]*where public\.subscription_state\(d\.id\) = 'none'/, 'the weekly run lists the dealerships served with no end');
+  const pilot = read('../PILOT.md');
+  assert.match(pilot, /its pilot row with the signed agreement's start date and length/, 'PILOT.md\'s account step starts the clock');
+  assert.match(pilot, /record the end in the database that day \(`supabase\/README\.md`, "A pilot ended early"\)/, 'PILOT.md records a stop or an early end');
+  assert.match(pilot, /those records are the CSVs the owner collected and the pilot log filled in from them, and, for a dealership on accounts, its rows in the database/, 'the database rows and the pilot log are pilot records too');
+  assert.match(read('../docs/launch-checklist.md'), /an early end recorded the day the notice comes/);
+  assert.match(read('../docs/production-setup.md'), /make it again with step 5's three statements: the dealership, the manager's invite code, which you keep for the manager, and its pilot row with the signed agreement's start date and length\. If the agreement is not signed yet, run the pilot row the day it is; until then the weekly list of dealerships with no plan/, 'the production steps run the pilot row too, or the no-plan list shows the dealership until they do');
+});
+
+// review: the launch checklist copies each partner's usage_report row into the pipeline sheet every week, but
+// the data inventory did not list the sheet and no deletion step reached it, so a pilot that ended unpaid kept
+// its weekly numbers there past the pilot agreement's 30 days
+test('the pipeline sheet the weekly usage report fills is an owner\'s record in the inventory, and every deletion takes a dealership\'s weekly rows out of it', () => {
+  const checklist = read('../docs/launch-checklist.md');
+  const weekly = checklist.split('\n').find((l) => l.includes('**Run usage_report weekly and keep the partner list.**'));
+  assert.ok(weekly, 'the launch checklist has the weekly usage_report item');
+  if (!/pipeline sheet/.test(weekly)) return; // the rows are kept nowhere outside the database
+  assert.match(weekly, /has its weekly rows taken out of the sheet within the same 30 days as its database records \(pilot agreement section 6\)/, 'the weekly item does not say when a partner\'s rows leave the sheet');
+  const inventory = read('../docs/data-inventory.md');
+  const owners = inventory.slice(inventory.indexOf("\n## The owner's records\n"), inventory.indexOf('\n## Who receives data\n'));
+  assert.ok(owners.length > 40, "docs/data-inventory.md has no \"The owner's records\" section");
+  assert.match(owners, /\*\*The pipeline sheet\*\*[^\n]*`usage_report` row for each week[^\n]*its weekly rows go from the sheet within the same 30 days \(pilot agreement section 6\)/, 'the inventory does not say what the sheet holds and when a dealership\'s rows leave it');
+  const del = readme.slice(readme.indexOf('### Delete: a manager asked'), readme.indexOf('**The retention line.**'));
+  assert.match(del, /\*\*The owner's copies\.\*\* Nothing in the database reaches them either\. Take the dealership's weekly usage rows out of the pipeline sheet/, 'the delete steps leave the dealership\'s rows in the pipeline sheet');
+  const pilot = read('../PILOT.md');
+  assert.match(pilot, /and its weekly usage rows in the pipeline sheet/, 'PILOT.md does not count the sheet\'s rows among the pilot records');
+  assert.match(pilot, /its weekly rows in the pipeline sheet with them/, 'PILOT.md\'s end of a pilot leaves the sheet\'s rows');
+});
+
+// review: asking for a sign-in code creates an account for any address typed, and one that never joined a
+// dealership was kept forever, in no retention rule, with no owner list to find it
+test('accounts that never joined are listed and deleted in the weekly run, and the policy and the attorney question say so', () => {
+  const s = readme.slice(readme.indexOf('**Accounts that never joined.**'), readme.indexOf('### Forget a person'));
+  assert.ok(s.length > 30, 'the README has the weekly list of accounts that never joined');
+  assert.match(s, /where u\.created_at < now\(\) - interval '30 days'/);
+  // every account that holds anything stays: the sign-up limit, a dealership's numbers, an invite code
+  for (const table of ['memberships m', 'signup_attempts a', 'invites i', 'listings l', 'post_attempts p', 'rewrite_usage r']) {
+    assert.ok(s.includes(`and not exists (select 1 from public.${table} where `), `the list keeps an account with a row in ${table.split(' ')[0]}`);
+  }
+  assert.match(s, /lower\(u\.email\) <> lower\('<your own test address, docs\/production-setup\.md step 7, item 2>'\)/, 'the owner\'s own test account stays');
+  assert.match(s, /delete from auth\.users u where u\.id in \('<id>', '<id>'\);/);
+  assert.match(s, /Do not use `forget_person` for these/, 'not forget_person: it also deletes the demo requests');
+  assert.match(policy, /An account that was only used to ask for a sign-in code \(it never joined a dealership or tried to start one\) holds only its email address, its sign-in times and sessions, and the sign-in log's entries for it \(with the IP address\), and is deleted within a week after it is 30 days old\. \[Pending attorney answer: questions-for-attorney\.md 8\.5\]/);
+  const item = read('../legal/questions-for-attorney.md').split('\n').find((l) => l.startsWith('- **8.5**'));
+  assert.match(item, /an account that never joins a dealership or tries to start one holds only that email address, its sign-in times and sessions, and the sign-in log's entries for it \(with the IP address\), and the owner's weekly run now deletes it within a week after it is 30 days old/);
+  assert.match(read('../docs/data-inventory.md'), /deleted by the owner's weekly run within a week after it is 30 days old \(`supabase\/README\.md`, "Accounts that never joined"\)/);
+});
+
+// review: PILOT.md's pilot log has a Salesperson column and said to copy a row per week "into this file or a
+// spreadsheet"; a row committed to git outlives the pilot agreement's 30 days, and neither the inventory's
+// owner's records nor PILOT.md's Clearing named the log
+test('the pilot log is an owner\'s record kept out of the repository and deleted with the CSVs', () => {
+  const pilot = read('../PILOT.md');
+  const log = pilot.split('\n').find((l) => l.startsWith('**Pilot log'));
+  assert.ok(log, 'PILOT.md has no pilot log');
+  const table = pilot.slice(pilot.indexOf(log)).split('\n').find((l) => l.startsWith('| Week |'));
+  if (!/Salesperson/.test(table || '')) return; // the log names no one
+  assert.doesNotMatch(log, /(?<!not |never )into this file/, 'PILOT.md still lets the pilot log, which names each salesperson, be committed to git');
+  assert.match(log, /[Cc]opy a row per week into the owner's private pilot spreadsheet, never into this file[^\n]*a row committed to git outlives the 30 days in pilot agreement section 6/);
+  assert.match(pilot, /those records are the CSVs the owner collected and the pilot log filled in from them/, 'PILOT.md\'s Clearing does not count the pilot log among the pilot records');
+  const inventory = read('../docs/data-inventory.md');
+  const owners = inventory.slice(inventory.indexOf("\n## The owner's records\n"), inventory.indexOf('\n## Who receives data\n'));
+  assert.match(owners, /\*\*The pilot log\*\* \(`PILOT\.md`, "During the pilot"\): one row per salesperson per week, with their name[^\n]*never in this repository[^\n]*Deleted with the CSVs, within 30 days of the pilot's end unless the dealer subscribes/, 'the inventory\'s owner\'s records do not list the pilot log');
 });

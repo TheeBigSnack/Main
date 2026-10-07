@@ -20,6 +20,11 @@
 //   webhook   the endpoint at the billing function's /webhook, subscribed to
 //             exactly HANDLED_EVENTS
 //
+// One setting it neither reads nor sets: what Stripe does when every retry
+// of a payment fails. Every run ends with a note asking for "Cancel the
+// subscription" in the Dashboard (docs/stripe-setup.md step 3), which is
+// what lets a dealership that stops paying end and reach the retention list.
+//
 // Without apply it only reads, and a missing or different object is a FAIL
 // line saying what --apply would do. With apply it creates what is missing
 // and fixes what it safely can (the portal's features, the webhook's events).
@@ -28,12 +33,16 @@
 // reprice is also given, and then a new price takes over the lookup key
 // (existing subscriptions keep the price they were sold).
 //
-// A live key (sk_live_, rk_live_) is refused unless live is given. The key
+// A live key (sk_live_, rk_live_) is refused unless live is given, and live
+// mode is refused until pricing.json says "hypothesis": false with
+// "confirmedOn", a real date not after today: real prices wait for
+// docs/launch-checklist.md, "Pricing confirmed" (a dealer has agreed to a
+// price in writing); the refusal names what is missing. The key
 // goes out only as the bearer on calls to api.stripe.com and is never
 // printed. The webhook's signing secret is printed once, when the endpoint
 // is created, because Stripe shows it only then.
 
-import { HANDLED_EVENTS, formEncode } from '../supabase/functions/_shared/billing.mjs';
+import { HANDLED_EVENTS, formEncode, keyMode } from '../supabase/functions/_shared/billing.mjs';
 
 export const STRIPE_API = 'https://api.stripe.com';
 export const TAG = 'lotcurrent';
@@ -47,16 +56,30 @@ export const LOOKUP_KEYS = Object.freeze({ rooftop: 'lotcurrent_rooftop_monthly'
 // stays the price before tax. Stripe refuses automatic tax on a price with no
 // tax behavior, and lets an unspecified one be set once and never changed.
 export const TAX_BEHAVIOR = 'exclusive';
+// The failed-payment setting is the Dashboard's alone (docs/stripe-setup.md step 3).
+export const FAILED_PAYMENTS_NOTE = 'not read or set here: in the Stripe Dashboard set "If all retries for a payment fail" to "Cancel the subscription" (docs/stripe-setup.md step 3), so a dealership that stops paying ends and reaches the retention list instead of being kept with no end date';
 
 const isRecord = (x) => typeof x === 'object' && x !== null && !Array.isArray(x);
+// A price a dealer agreed to in writing: "hypothesis": false with "confirmedOn",
+// the real date of that agreement (docs/launch-checklist.md, "Pricing
+// confirmed"), written YYYY-MM-DD and not after today (UTC): an agreement
+// that has not happened yet confirms nothing. What is missing, or '' when
+// nothing is.
+export function pricingUnconfirmed(pricing, now = Date.now()) {
+  if (!isRecord(pricing) || pricing.hypothesis !== false) return 'it still says "hypothesis": true (anything but false counts as true)';
+  const day = pricing.confirmedOn;
+  if (day === undefined || day === null || day === '') return 'it says "hypothesis": false but has no "confirmedOn" date';
+  const t = typeof day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(day) ? Date.parse(day + 'T00:00:00Z') : NaN;
+  if (!Number.isFinite(t) || new Date(t).toISOString().slice(0, 10) !== day) return `its "confirmedOn" (${JSON.stringify(day)}) is not a real date written YYYY-MM-DD`;
+  const today = new Date(now).toISOString().slice(0, 10);
+  if (day > today) return `its "confirmedOn" (${day}) is after today (${today}), and it must be the date a dealer has already agreed to the price in writing`;
+  return '';
+}
 const cents = (dollars) => Math.round(Number(dollars) * 100);
 
 // 'test', 'live', or null for something that is not a Stripe secret or
-// restricted key.
-export function keyMode(key) {
-  const m = /^(sk|rk)_(test|live)_[A-Za-z0-9]+$/.exec(String(key || '').trim());
-  return m ? m[2] : null;
-}
+// restricted key: the billing function's own reading of a key.
+export { keyMode };
 
 // The webhook address: an https URL whose path ends in /billing/webhook (the
 // function's route), or a bare Supabase project ref, which becomes
@@ -76,6 +99,14 @@ export function webhookUrlFor(input) {
   return u.toString();
 }
 
+// The website's https origin for the portal's Terms and Privacy links, like
+// https://lotcurrent.com (a trailing slash is fine). null for anything else:
+// a bare host, http, a path, a query, a user name.
+export function siteOriginFor(input) {
+  const s = String(input || '').trim().replace(/\/+$/, '');
+  return /^https:\/\/[^/?#@\s]+$/.test(s) ? s : null;
+}
+
 // What should exist, from pricing.json. siteUrl (https origin, may be '')
 // gives the portal the Terms and Privacy addresses the website serves.
 export function wantedObjects(pricing, { productName = 'Lot Current', siteUrl = '' } = {}) {
@@ -86,8 +117,8 @@ export function wantedObjects(pricing, { productName = 'Lot Current', siteUrl = 
     if (!(typeof pricing[k] === 'number' && pricing[k] > 0)) throw new Error(`pricing.json has no positive ${k}`);
   }
   if (pricing.foundingDealerMonthly >= pricing.perRooftopMonthly) throw new Error('pricing.json: the founding-dealer rate is not below the rooftop price');
-  const site = String(siteUrl || '').replace(/\/+$/, '');
-  const legal = /^https:\/\/[^/]+$/.test(site) ? { terms_of_service_url: `${site}/legal/terms/`, privacy_policy_url: `${site}/legal/privacy/` } : null;
+  const site = siteOriginFor(siteUrl);
+  const legal = site ? { terms_of_service_url: `${site}/legal/terms/`, privacy_policy_url: `${site}/legal/privacy/` } : null;
   return {
     product: { name: productName, tax_code: SAAS_TAX_CODE, metadata: { [TAG]: 'plan' } },
     prices: [
@@ -213,13 +244,13 @@ export function webhookMismatch(endpoint, events) {
 
 // ---------- the run ----------
 
-// { key, apply, live, reprice, webhookUrl, pricing, productName, siteUrl, fetchImpl }
+// { key, apply, live, reprice, webhookUrl, pricing, productName, siteUrl, fetchImpl, now }
 // -> { ok, mode, lines: [{ check, ok, note?, detail }], secrets: { NAME: value }, webhookSecret }
 // A line is ok, FAIL (ok false) or a note (ok false, note true; does not fail
 // the run). secrets holds the ids the function needs; webhookSecret is set
 // only when this run created the endpoint.
 export async function runSetup(opts) {
-  const { key, apply = false, live = false, reprice = false, pricing, productName, siteUrl = '', fetchImpl } = opts;
+  const { key, apply = false, live = false, reprice = false, pricing, productName, siteUrl = '', fetchImpl, now = Date.now() } = opts;
   const lines = [];
   const secrets = {};
   let webhookSecret = '';
@@ -235,6 +266,18 @@ export async function runSetup(opts) {
   }
   if (mode === 'live' && !live) {
     fail('the Stripe key', 'this is a live key: nothing was read or changed. Run in test mode first; add --live only when switching billing to live mode');
+    return done();
+  }
+  // Live prices charge real money: not from a file that still calls itself a guess
+  const unconfirmed = mode === 'live' ? pricingUnconfirmed(pricing, now) : '';
+  if (unconfirmed) {
+    fail('marketing/pricing.json', `${unconfirmed}, so nothing was read or changed in live mode. Live prices wait for docs/launch-checklist.md, "Pricing confirmed": a dealer has agreed to a price in writing, pricing.json has "hypothesis": false, "confirmedOn" set to the date of that agreement (YYYY-MM-DD, not after today) and those numbers, and test/marketing.test.js passes`);
+    return done();
+  }
+  // A --site-url that is given but unusable would leave the portal with no
+  // legal links while the run blamed a missing flag
+  if (String(siteUrl || '').trim() && !siteOriginFor(siteUrl)) {
+    fail('billing portal: legal links', `--site-url ${siteUrl} is not an https origin like https://lotcurrent.com (no path), so nothing was read or changed; run again with the website's origin`);
     return done();
   }
   ok('the Stripe key', `${mode} mode${apply ? ', creating what is missing' : ', reading only'}`);
@@ -343,6 +386,7 @@ export async function runSetup(opts) {
     }
     if (portal) secrets.STRIPE_PORTAL_CONFIGURATION = portal.id;
     if (!want.portal.business_profile.terms_of_service_url) note('billing portal: legal links', 'no --site-url given, so the portal shows no Terms or Privacy link; add it once the legal pages are final, and run --apply again');
+    note('failed payments', FAILED_PAYMENTS_NOTE);
 
     // the webhook endpoint
     const url = webhookUrlFor(opts.webhookUrl);
@@ -376,12 +420,24 @@ export async function runSetup(opts) {
   return done();
 }
 
-// The commands that put the ids into the function's secrets. The secret key
-// itself is never echoed: the owner types it.
-export function secretsCommands({ secrets, webhookSecret }) {
-  const out = [];
-  const ids = Object.entries(secrets).map(([k, v]) => `${k}=${v}`);
-  if (ids.length) out.push(`supabase secrets set ${ids.join(' ')}`);
-  if (webhookSecret) out.push(`supabase secrets set STRIPE_WEBHOOK_SECRET=${webhookSecret}`);
-  return out;
+// The command that puts the ids into the function's secrets. The ids are not
+// secret. The secret key is never echoed (the owner types it), and the
+// webhook signing secret is never part of a command: a terminal keeps every
+// command typed or pasted into it in a history file (on Windows PowerShell,
+// PSReadLine's ConsoleHost_history.txt), so webhookSecretLines prints it on
+// its own for the Supabase Dashboard.
+export function secretsCommands({ secrets }) {
+  const ids = Object.entries(secrets || {}).map(([k, v]) => `${k}=${v}`);
+  return ids.length ? [`supabase secrets set ${ids.join(' ')}`] : [];
+}
+
+// What the run prints when it created the webhook endpoint: the signing
+// secret Stripe shows only this once, and where it goes.
+export function webhookSecretLines({ webhookSecret }) {
+  if (!webhookSecret) return [];
+  return [
+    `STRIPE_WEBHOOK_SECRET: ${webhookSecret}`,
+    'Stripe shows this signing secret only now. Before closing this window, add it in the Supabase Dashboard (Edge Functions, Secrets) under that name.',
+    'Not in a supabase secrets set command: the terminal would keep it in its history file. Never paste it into a chat or a file in the repository.',
+  ];
 }

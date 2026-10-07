@@ -14,10 +14,15 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingBody, subscribeSeats, seatCount, SEATS_NOT_ADDED, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT, websiteOrigin, signupOriginNote, signupProblem, signupRefusal, gettingStarted, GETTING_STARTED, ACTIVE_SALESPEOPLE, SIGNUP_WORDS, mockCreateDealership, mockNewDealership, SAMPLE_NEW_DEALERSHIP_ID, SAMPLE_PILOT_DAYS } from '../manager/data.js';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createHash } from 'node:crypto';
+import { summarize, mockData, managerCsv, csvFileName, fmtLocal, fmtLocalDate, median, hoursBetween, billingCard, billingBody, subscribeSeats, seatCount, SEATS_NOT_ADDED, billingReturnNote, inviteCard, inviteSentence, memberRole, teamCard, teamChangeNote, TEAM_HINT, TEAM_UNCHANGED, INVITE_DAYS, DEFINITIONS, OVERDUE_HOURS, WEEK_MS, DAY_MS, PLAN_STATES, BILLING_BUTTONS, INVITE_BUTTONS, INVITE_ROLES, INVITE_HINT, websiteOrigin, signupOriginNote, signupProblem, signupRefusal, gettingStarted, GETTING_STARTED, PLAN_STEP_CLOSED_TITLE, ACTIVE_SALESPEOPLE, closedBillingStatus, pilotAvailable, BILLING_CLOSED_NOTE, BILLING_CLOSED_ASK, BILLING_TEST_MODE_NOTE, SCAN_STALE_WHY, SIGNUP_WORDS, mockCreateDealership, mockNewDealership, SAMPLE_NEW_DEALERSHIP_ID, SAMPLE_PILOT_DAYS, readAll, PAGE_ROWS, clearLine, EMPTY_TAKE_DOWNS, EMPTY_PRICE_ITEMS, NOT_ON_TEAM_TITLE, NOT_ON_TEAM_HINT, NOT_ON_TEAM_UNKNOWN, FUTURE_SKEW_MS, listingHref, LISTING_URL_PATTERN, LISTING_ORIGIN, BEFORE_TODAY_COLUMN, beforeTodayNote } from '../manager/data.js';
+import { FORM_MAP } from '../extension/facebook/formMap.js';
+import { listingLink } from '../extension/facebook/detectPost.js';
 import { DEFINITIONS as PILOT_DEFINITIONS } from '../extension/src/pilot.js';
 import { CONFIG } from '../manager/config.js';
+import { AFFILIATION } from './honesty.js';
+import { lastDefinition } from './migrations.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const read = (rel) => readFileSync(join(root, rel), 'utf8');
@@ -28,18 +33,40 @@ const pricing = JSON.parse(read('marketing/pricing.json'));
 
 // ---------- the definitions ----------
 
-test('the definitions are the pilot\'s, sentence for sentence (both files read as text, and both modules)', () => {
+// The manager view never receives the records of which form fields filled
+// (they stay on each salesperson's Numbers tab, extension/src/sync.js), so
+// its CSV carries every pilot definition but the one about form fields.
+test('the definitions are the pilot\'s, sentence for sentence, less the form-fields one the manager has no numbers for (both files read as text, and both modules)', () => {
   const block = (src, file) => {
     const m = src.match(/export const DEFINITIONS = Object\.freeze\(\[([\s\S]*?)\]\);/);
     assert.ok(m, `${file} has a DEFINITIONS list`);
     return m[1].trim().split('\n').map((l) => l.trim()).filter(Boolean);
   };
+  const aboutFields = (d) => /form fields?|\bfields?\b/i.test(d);
   const manager = block(read('manager/data.js'), 'manager/data.js');
   const pilot = block(read('extension/src/pilot.js'), 'extension/src/pilot.js');
-  assert.deepEqual(manager, pilot, 'the sentences in manager/data.js must stay equal to extension/src/pilot.js');
-  assert.deepEqual([...DEFINITIONS], [...PILOT_DEFINITIONS]);
-  assert.equal(DEFINITIONS.length, 5);
+  assert.equal(pilot.filter(aboutFields).length, 1, 'the pilot has its one form-fields sentence');
+  assert.deepEqual(manager, pilot.filter((d) => !aboutFields(d)), 'the sentences in manager/data.js must stay equal to extension/src/pilot.js, less the form-fields one');
+  assert.deepEqual([...DEFINITIONS], PILOT_DEFINITIONS.filter((d) => !aboutFields(d)));
+  assert.equal(DEFINITIONS.length, 4);
+  assert.ok(!DEFINITIONS.some(aboutFields), 'nothing in the manager\'s definitions speaks of form fields');
   assert.doesNotMatch(read('manager/data.js'), /from ['"]\.\.\/extension/, 'data.js does not import the extension (the page is hosted on its own)');
+});
+
+// Background rescans run only for a website whose permission the salesperson
+// granted, with automatic rescans on in Settings: a stale scan can mean
+// either, not only that nobody had Chrome open. The website and the
+// onboarding email say so; the manager view and its CSV say so too.
+test('every rescan line on the manager view names the condition: automatic rescans allowed', () => {
+  assert.equal(SCAN_STALE_WHY, 'rescans run every 3 hours only while a salesperson\'s Chrome is open with automatic rescans allowed, and one held back as a likely website hiccup (most of the lot gone at once) is never the last scan');
+  assert.match(read('manager/manager.js'), /pill\('warn', `\$\{hrs\(s\.lastScan\.hoursAgo\)\} ago; \$\{SCAN_STALE_WHY\}`\)/);
+  assert.equal(DEFINITIONS.at(-1), 'Hours run from the flagging scan, and with automatic rescans allowed, rescans happen every 3 hours while Chrome is open.');
+  for (const file of ['manager/manager.js', 'manager/data.js', 'extension/src/pilot.js']) {
+    for (const line of read(file).split('\n').filter((l) => /every 3 hours/.test(l) && !/^\s*\/\//.test(l))) {
+      assert.match(line, /automatic rescans allowed/, `${file}: ${line.trim()}`);
+    }
+  }
+  assert.match(managerCsv(mockData(NOW), { now: NOW, timeZone: 'UTC' }), /with automatic rescans allowed, rescans happen every 3 hours/);
 });
 
 // ---------- the sample dealership ----------
@@ -74,10 +101,54 @@ test('summarize on the sample: posts per salesperson, medians, listings up', () 
   assert.equal(s.now, NOW);
   assert.deepEqual(s.salespeople.map((p) => p.name), ['Alex', 'Sam'], 'most posted this week first');
   const [alex, sam] = s.salespeople;
-  assert.deepEqual({ ...alex, userId: undefined }, { name: 'Alex', userId: undefined, postedThisWeek: 3, postedAllTime: 5, listed: 4, takenDown: 1, postedAttempts: 3, medianSeconds: 47 });
-  assert.deepEqual({ ...sam, userId: undefined }, { name: 'Sam', userId: undefined, postedThisWeek: 2, postedAllTime: 3, listed: 3, takenDown: 0, postedAttempts: 2, medianSeconds: 57.5 });
-  assert.deepEqual(s.totals, { salespeople: 2, postedThisWeek: 5, postedAllTime: 8, listed: 7, takenDown: 1, postedAttempts: 5, medianSeconds: 49 });
+  assert.deepEqual({ ...alex, userId: undefined }, { name: 'Alex', userId: undefined, postedThisWeek: 3, postedAllTime: 5, listedBefore: 0, listed: 4, takenDown: 1, postedAttempts: 3, medianSeconds: 47 });
+  assert.deepEqual({ ...sam, userId: undefined }, { name: 'Sam', userId: undefined, postedThisWeek: 2, postedAllTime: 3, listedBefore: 0, listed: 3, takenDown: 0, postedAttempts: 2, medianSeconds: 57.5 });
+  assert.deepEqual(s.totals, { salespeople: 2, postedThisWeek: 5, postedAllTime: 8, listedBefore: 0, listed: 7, takenDown: 1, postedAttempts: 5, medianSeconds: 49 });
   assert.equal(s.week.from, ago(7 * 24));
+});
+
+// A salesperson who starts with Lot Current marks the listings they made by
+// hand earlier (Mark posted, "Before today"): those rows carry listed_before,
+// and posted_at is the moment of marking. They are their listings (listings
+// up, taken down), counted apart, and no posts: not this week, not all time,
+// in the page's table and the CSV alike.
+test('summarize: listings marked as made by hand before that day are counted apart, not as posts this week or all time', () => {
+  const base = sample();
+  const alexId = base.listings.find((l) => l.salesperson === 'Alex').user_id;
+  const marked = Array.from({ length: 12 }, (_, i) => ({ id: `hand-${i}`, dealership_id: base.listings[0].dealership_id, user_id: alexId, vin: `1HGHAND0${String(i).padStart(2, '0')}0000000`.slice(0, 17), name: 'Earlier listing', price: 20000 + i, posted_at: ago(2), listing_url: null, salesperson: 'Alex', updated_at: null, taken_down_at: null, status: 'listed', listed_before: true }));
+  const before = summarize(base);
+  const after = summarize({ ...base, listings: [...base.listings, ...marked] });
+  const alex = (s) => s.salespeople.find((p) => p.name === 'Alex');
+  assert.equal(alex(after).postedThisWeek, alex(before).postedThisWeek, 'the hand-made listings are not this week\'s posts');
+  assert.equal(after.totals.postedThisWeek, before.totals.postedThisWeek);
+  assert.equal(alex(after).postedAllTime, alex(before).postedAllTime, 'nor posts all time');
+  assert.equal(after.totals.postedAllTime, before.totals.postedAllTime);
+  assert.equal(alex(after).listedBefore, 12, 'they are counted apart');
+  assert.equal(after.totals.listedBefore, 12);
+  assert.equal(alex(after).listed, alex(before).listed + 12, 'and they are still the salesperson\'s listings');
+  assert.equal(after.totals.listed, before.totals.listed + 12);
+  // the CSV counts them the same way: Posted is the posts, and the before-today ones have their own row and column
+  const csv = managerCsv({ ...base, listings: [...base.listings, ...marked] }, { now: NOW, timeZone: 'UTC' }).split('\r\n');
+  const was = managerCsv(base, { now: NOW, timeZone: 'UTC' }).split('\r\n');
+  const row = (lines, label) => lines.find((l) => l.startsWith(label + ','));
+  assert.equal(row(csv, 'Posted'), row(was, 'Posted'));
+  assert.equal(row(csv, BEFORE_TODAY_COLUMN), `${BEFORE_TODAY_COLUMN},12`);
+  const head = csv[csv.indexOf('Salespeople') + 1].split(',');
+  const cell = (lines, name, col) => row(lines, name).split(',')[head.indexOf(col)];
+  assert.equal(cell(csv, 'Alex', 'Posted'), cell(was, 'Alex', 'Posted'));
+  assert.equal(cell(csv, 'Alex', BEFORE_TODAY_COLUMN), '12');
+  // and the page says why All time leaves them out
+  assert.equal(beforeTodayNote(0), '');
+  assert.equal(beforeTodayNote(12), '"This week" and "All time" count posts only: 12 listings marked posted as "Before today" (on Facebook before they were marked) are left out of them and counted under Listings up or Taken down.');
+  assert.match(beforeTodayNote(1), /: one listing marked posted as "Before today" \(on Facebook before it was marked\) is left out/);
+  assert.match(read('manager/manager.js'), /<\/table><\/div>\$\{s\.totals\.listedBefore \? `\n\s*<p class="hint" id="beforeToday">\$\{esc\(beforeTodayNote\(s\.totals\.listedBefore\)\)\}<\/p>` : ''\}/, 'the Salespeople table carries the line right under it');
+  // the managers page and help say how they are counted
+  assert.match(read('site-src/pages/for-managers.html'), /"Before today" \(already on Facebook before they marked it\) is no post: it is left out of this week and all time, counted under listings up or taken down, and counted apart in the CSV\./);
+  assert.match(read('docs/help.md'), /the Salespeople table's \*\*Posted this week\*\* and \*\*All time\*\* leave it out/);
+  assert.ok(read('docs/help.md').includes(`"${BEFORE_TODAY_COLUMN}"`), 'help names the CSV column as the CSV writes it');
+  // a listing marked "Posted today" (listed_before false) counts as before
+  const today = summarize({ ...base, listings: [...base.listings, { ...marked[0], id: 'today', listed_before: false }] });
+  assert.equal(alex(today).postedThisWeek, alex(before).postedThisWeek + 1);
 });
 
 test('summarize on the sample: sold cars still listed, longest first, red past 24 h', () => {
@@ -118,6 +189,73 @@ test('summarize on the sample: the last scan line', () => {
   const stale = summarize({ ...sample(), scans: [{ taken_at: ago(9), cars: 1, ready: 0, take_down_count: 0, price_update_count: 0 }] });
   assert.equal(stale.lastScan.stale, true);
   assert.equal(stale.lastScan.line, 'Last scan 2026-11-16 06:00: 1 car on the website, 0 ready to post, 0 to take down, 0 price changes');
+  // a stale scan's note gives both reasons: no rescan ran, or the ones that ran looked like a website hiccup and were held back
+  assert.match(SCAN_STALE_WHY, /every 3 hours only while a salesperson's Chrome is open/);
+  assert.match(SCAN_STALE_WHY, /held back as a likely website hiccup .* never the last scan/);
+  assert.match(read('manager/manager.js'), /pill\('warn', `\$\{hrs\(s\.lastScan\.hoursAgo\)\} ago; \$\{SCAN_STALE_WHY\}`\)/);
+});
+
+test('summarize: scans held back as a likely website hiccup are told beside the last trusted scan, never as it, and nothing is called checked', () => {
+  const trusted = { taken_at: ago(2), cars: 41, ready: 29, take_down_count: 2, price_update_count: 1 };
+  const held = (hours, cars) => ({ taken_at: ago(hours), cars, ready: 3, take_down_count: 0, price_update_count: 0, withheld: true });
+  const input = { ...sample(), scans: [trusted, held(1.5, 5), held(1, 4)] };
+  const s = summarize(input);
+  assert.equal(s.lastScan.takenAt, trusted.taken_at, 'the last scan is the trusted one, not the newer short reads');
+  assert.equal(s.lastScan.cars, 41);
+  assert.deepEqual(s.lastScan.withheld, { scans: 2, newestAt: ago(1), cars: 4 });
+  assert.equal(s.lastScan.stale, true, 'two hours old, but nothing it missed has been flagged since');
+  assert.equal(s.lastScan.line, 'Last scan 2026-11-16 13:00: 41 cars on the website, 29 ready to post, 2 to take down, 1 price change. 2 later scans (the newest 2026-11-16 14:00: 4 cars on the website) were held back as a likely website hiccup, with most of the lot missing at once, so nothing they missed is flagged. If the website really lists fewer cars now, a salesperson can accept the smaller list on the extension\'s To do tab.');
+  assert.equal(s.clear.sold.tone, 'warn');
+  assert.match(s.clear.sold.line, /The scans since the last trusted one were held back as a likely website hiccup, so a car sold since then is not flagged yet\./);
+  assert.match(managerCsv(input, { now: NOW, timeZone: 'UTC' }), /Last scan.*2 later scans .*held back as a likely website hiccup/);
+  // a held-back scan older than the trusted one is history, not news
+  const after = summarize({ ...sample(), scans: [held(3, 4), trusted] });
+  assert.equal(after.lastScan.withheld, null);
+  assert.equal(after.lastScan.stale, false);
+  assert.doesNotMatch(after.lastScan.line, /held back/);
+  // only held-back scans recorded: no trusted scan is made up from them
+  const only = summarize({ ...sample(), scans: [held(1, 4)] });
+  assert.equal(only.lastScan.takenAt, null);
+  assert.equal(only.lastScan.cars, null);
+  assert.match(only.lastScan.line, /^No trusted scan is recorded yet\. One scan \(the newest 2026-11-16 14:00: 4 cars on the website\) was held back/);
+  assert.match(only.clear.price.line, /The one scan recorded was held back as a likely website hiccup, so a price that changed since then is not flagged yet\./);
+});
+
+test('summarize: held-back scans counted apart from the rows read (the page reads the newest one and a count) are told at their full count', () => {
+  const trusted = { taken_at: ago(72), cars: 40, ready: 30, take_down_count: 0, price_update_count: 0, withheld: false };
+  const newest = { taken_at: ago(1), cars: 4, ready: 3, take_down_count: 0, price_update_count: 0, withheld: true };
+  const s = summarize({ ...sample(), scans: [trusted, newest], heldScans: 73 });
+  assert.equal(s.lastScan.takenAt, trusted.taken_at);
+  assert.deepEqual(s.lastScan.withheld, { scans: 73, newestAt: newest.taken_at, cars: 4 });
+  assert.match(s.lastScan.line, /^Last scan 2026-11-13 15:00: 40 cars on the website, 30 ready to post, 0 to take down, 0 price changes\. 73 later scans \(the newest 2026-11-16 14:00: 4 cars on the website\) were held back/);
+  assert.match(s.clear.sold.line, /The scans since the last trusted one were held back/);
+  assert.match(managerCsv({ ...sample(), scans: [trusted, newest], heldScans: 73 }, { now: NOW, timeZone: 'UTC' }), /Last scan.*73 later scans/);
+  // the count never says fewer than the held-back rows read, and a count that is not one is left out
+  assert.equal(summarize({ ...sample(), scans: [trusted, newest, { ...newest, taken_at: ago(2) }], heldScans: 1 }).lastScan.withheld.scans, 2);
+  assert.equal(summarize({ ...sample(), scans: [trusted, newest], heldScans: 'many' }).lastScan.withheld.scans, 1);
+  // with no held-back row read, a count alone makes nothing up
+  assert.equal(summarize({ ...sample(), scans: [trusted], heldScans: 5 }).lastScan.withheld, null);
+  // 50 held-back rows and the trusted one before them: the trusted one is the last scan
+  const fifty = Array.from({ length: 50 }, (_, i) => ({ ...newest, taken_at: ago(1 + i) }));
+  const many = summarize({ ...sample(), scans: [...fifty, trusted] });
+  assert.equal(many.lastScan.takenAt, trusted.taken_at);
+  assert.equal(many.lastScan.withheld.scans, 50);
+});
+
+test('summarize: a scan stamped more than 5 minutes ahead of now (a machine whose clock ran ahead) does not pin the last scan line or hide its stale warning', () => {
+  const later = (hours) => ago(-hours);
+  const real = { taken_at: ago(9), cars: 1, ready: 0, take_down_count: 0, price_update_count: 0 };
+  const fromTheFuture = { taken_at: later(24 * 365), cars: 99, ready: 99, take_down_count: 0, price_update_count: 0 };
+  const s = summarize({ ...sample(), scans: [fromTheFuture, real] });
+  assert.equal(s.lastScan.takenAt, real.taken_at, 'the newest scan that ran by now');
+  assert.equal(s.lastScan.stale, true, 'nine hours without a real scan is still stale');
+  assert.equal(s.scans, 2, 'the row is still counted as read');
+  // a few minutes ahead is ordinary clock drift and still counts
+  const drift = { taken_at: later(4 / 60), cars: 2, ready: 1, take_down_count: 0, price_update_count: 0 };
+  assert.equal(summarize({ ...sample(), scans: [drift, real] }).lastScan.takenAt, drift.taken_at);
+  // only scans from the future: no last scan at all, rather than a wrong one
+  assert.equal(summarize({ ...sample(), scans: [fromTheFuture] }).lastScan, null);
+  assert.equal(FUTURE_SKEW_MS, 5 * 60 * 1000, 'the same margin /sync gives a scan');
 });
 
 // ---------- hand-built rows ----------
@@ -170,25 +308,140 @@ test('people: memberships name the account, a salesperson with nothing posted st
 
 test('a to-do item joins to the listing that is up, and the ages sort longest first across kinds', () => {
   const listings = [
-    { user_id: 'u1', vin: 'V1', name: 'Old', posted_at: ago(300), salesperson: 'Alex', status: 'taken_down', taken_down_at: ago(250), listing_url: 'https://example.test/old' },
-    { user_id: 'u2', vin: 'v1', name: 'New', posted_at: ago(20), salesperson: 'Sam', status: 'listed', listing_url: 'https://example.test/new' },
+    { user_id: 'u1', vin: 'V1', name: 'Old', posted_at: ago(300), salesperson: 'Alex', status: 'taken_down', taken_down_at: ago(250), listing_url: 'https://www.facebook.com/marketplace/item/1001/' },
+    { user_id: 'u2', vin: 'v1', name: 'New', posted_at: ago(20), salesperson: 'Sam', status: 'listed', listing_url: 'https://www.facebook.com/marketplace/item/1002/' },
   ];
   const todoItems = [
     { vin: 'V1', kind: 'takeDown', flagged_at: ago(4) },
     { vin: 'V1', kind: 'price', flagged_at: ago(25), from_price: 100, to_price: 90 },
-    { vin: 'V1', kind: 'price', flagged_at: ago(1), from_price: 100, to_price: 95 },
+    { vin: 'V2', kind: 'price', flagged_at: ago(1), from_price: 100, to_price: 95 },
   ];
   const s = summarize({ listings, todoItems, now: NOW });
   assert.equal(s.soldStillListed[0].salesperson, 'Sam');
-  assert.equal(s.soldStillListed[0].listingUrl, 'https://example.test/new');
+  assert.equal(s.soldStillListed[0].listingUrl, 'https://www.facebook.com/marketplace/item/1002/');
   assert.equal(s.soldStillListed[0].name, 'New', 'no name on the item: the listing\'s');
   assert.deepEqual(s.priceMismatches.map((o) => [o.hoursOpen, o.overdue, o.toPrice]), [[25, true, 90], [1, false, 95]]);
+});
+
+test('a car with two open items of one kind (two machines of one salesperson that each filed the same sighting) is listed and counted once, from the first sighting', () => {
+  const listings = [{ user_id: 'u1', vin: 'V1', name: 'Car', posted_at: ago(100), salesperson: 'Sam', status: 'listed' }];
+  const todoItems = [
+    { vin: 'V1', kind: 'price', flagged_at: ago(3), from_price: 100, to_price: 90 },
+    { vin: 'v1', kind: 'price', flagged_at: ago(30), from_price: 100, to_price: 90 },
+    { vin: 'V1', kind: 'takeDown', flagged_at: ago(2) },
+    { vin: 'V1', kind: 'takeDown', flagged_at: ago(26) },
+  ];
+  const s = summarize({ listings, todoItems, now: NOW });
+  assert.deepEqual(s.priceMismatches.map((o) => [o.vin, o.hoursOpen, o.overdue]), [['V1', 30, true]]);
+  assert.deepEqual(s.soldStillListed.map((o) => [o.vin, o.hoursOpen, o.overdue]), [['V1', 26, true]]);
+  assert.equal(s.priceUpdates.open, 1);
+  assert.equal(s.takeDowns.open, 1);
+  // and flagged = done + still open + cleared, as the CSV says
+  assert.deepEqual([s.priceUpdates.flagged, s.takeDowns.flagged], [1, 1]);
+  const closed = summarize({ listings, todoItems: [...todoItems, { vin: 'V1', kind: 'price', flagged_at: ago(50), done_at: ago(40), how: 'manual' }, { vin: 'V1', kind: 'price', flagged_at: ago(60), done_at: ago(55), how: 'cleared' }], now: NOW });
+  const p = closed.priceUpdates;
+  assert.deepEqual([p.flagged, p.done, p.open, p.cleared], [3, 1, 1, 1]);
+});
+
+test('closed rows of one sighting (two machines\' uploads raced in) count as one item too, so flagged, done, open and cleared all count items', () => {
+  const todoItems = [
+    // one sold car flagged on two machines, both rows closed when it came down: one item, taken down after 10 hours from the first sighting
+    { vin: 'V1', kind: 'takeDown', flagged_at: ago(30), done_at: ago(20), how: 'detected' },
+    { vin: 'V1', kind: 'takeDown', flagged_at: ago(28), done_at: ago(19), how: 'manual' },
+    // one sighting left as an open row and a cleared row: one item, still open, as the list shows it
+    { vin: 'V2', kind: 'takeDown', flagged_at: ago(10), done_at: null },
+    { vin: 'V2', kind: 'takeDown', flagged_at: ago(9), done_at: ago(5), how: 'cleared' },
+    // one sighting cleared on one machine and fixed on the other: one item, done
+    { vin: 'V3', kind: 'takeDown', flagged_at: ago(60), done_at: ago(55), how: 'cleared' },
+    { vin: 'V3', kind: 'takeDown', flagged_at: ago(59), done_at: ago(52), how: 'manual' },
+    // two price changes of one car, one after the other closed: two items
+    { vin: 'V4', kind: 'price', flagged_at: ago(100), done_at: ago(90), how: 'manual' },
+    { vin: 'V4', kind: 'price', flagged_at: ago(50), done_at: ago(45), how: 'detected' },
+  ];
+  const s = summarize({ listings: [], todoItems, now: NOW });
+  assert.deepEqual(s.takeDowns, { flagged: 3, done: 2, detected: 1, cleared: 0, open: 1, medianHours: 9, longestHours: 10 });
+  assert.deepEqual(s.priceUpdates, { flagged: 2, done: 2, detected: 1, cleared: 0, open: 0, medianHours: 7.5, longestHours: 10 });
+  for (const k of ['takeDowns', 'priceUpdates']) assert.equal(s[k].flagged, s[k].done + s[k].open + s[k].cleared, k);
+  assert.deepEqual(s.soldStillListed.map((o) => o.vin), ['V2']);
+});
+
+test('a car still listed by someone no longer on the team is listed for the manager, since no rescan looks after it; the empty to-do cards claim only what the items show', () => {
+  const memberships = [{ user_id: 'u1', role: 'salesperson', name: 'Alex' }, { user_id: 'u3', role: 'manager', name: 'Jamie' }];
+  const listings = [
+    { user_id: 'u1', vin: 'V1', name: 'Alex car', posted_at: ago(5), salesperson: 'Alex', status: 'listed' },
+    { user_id: 'u9', vin: 'V9', name: 'Left behind', posted_at: ago(72), salesperson: 'Pat', status: 'listed', price: 18995, listing_url: 'https://www.facebook.com/marketplace/item/1009/' },
+    { user_id: 'u9', vin: 'V8', name: 'Taken down', posted_at: ago(90), salesperson: 'Pat', status: 'taken_down', taken_down_at: ago(80) },
+    { user_id: 'u9', vin: 'V7', name: 'Newer', posted_at: ago(10), salesperson: 'Pat', status: 'listed' },
+  ];
+  const s = summarize({ memberships, listings, todoItems: [], role: 'manager', now: NOW });
+  assert.deepEqual(s.notOnTeam.map((o) => [o.vin, o.salesperson, o.hoursListed, o.listedPrice, o.listingUrl]), [['V9', 'Pat', 72, 18995, 'https://www.facebook.com/marketplace/item/1009/'], ['V7', 'Pat', 10, null, '']], 'listed ones only, longest listed first');
+  assert.deepEqual(s.soldStillListed, [], 'no item ever opens for them');
+  assert.equal(summarize({ listings, role: 'manager', now: NOW }).notOnTeam, null, 'without the memberships nobody can be told apart');
+  assert.deepEqual(summarize({ memberships, listings: listings.slice(0, 1), role: 'manager', now: NOW }).notOnTeam, []);
+  // the CSV carries them too
+  const lines = managerCsv({ memberships, listings }, { role: 'manager', now: NOW, timeZone: 'UTC' }).split('\r\n');
+  assert.ok(lines.includes(`${NOT_ON_TEAM_TITLE},2`));
+  const at = lines.indexOf(NOT_ON_TEAM_TITLE);
+  assert.equal(lines[at + 1], 'Posted,Car,VIN,Salesperson,Hours listed,Price,Listing link');
+  assert.equal(lines[at + 2], '2026-11-13 15:00,Left behind,V9,Pat,72,18995,https://www.facebook.com/marketplace/item/1009/');
+  // the page shows them with the reason, and its empty cards say what an item is, never that every sold car is down
+  const page = read('manager/manager.js');
+  assert.doesNotMatch(page, /Every sold car is off Marketplace|Every listing shows the website price/);
+  // an empty card's line starts with what an item is (clearLine), and the page shows that line
+  assert.equal(s.clear.sold.line.startsWith(EMPTY_TAKE_DOWNS), true);
+  assert.equal(s.clear.price.line.startsWith(EMPTY_PRICE_ITEMS), true);
+  assert.match(page, /esc\(s\.clear\.sold\.line\)/);
+  assert.match(page, /esc\(s\.clear\.price\.line\)/);
+  assert.match(page, /id="notOnTeam"/);
+  // a 0 there is no all-clear, so its pill takes clearLine's tone, which is never the green one
+  for (const [list, kind] of [['soldStillListed', 'sold'], ['priceMismatches', 'price']]) {
+    assert.match(page, new RegExp(`pill\\(s\\.${list}\\.length \\? \\(.*?\\) : s\\.clear\\.${kind}\\.tone, String\\(s\\.${list}\\.length\\)\\)`), list);
+    assert.notEqual(s.clear[kind].tone, 'good');
+  }
+  for (const line of [EMPTY_TAKE_DOWNS, EMPTY_PRICE_ITEMS]) {
+    assert.doesNotMatch(line, /\bevery\b|\ball\b/i, line);
+    assert.match(line, /poster's own computer/);
+  }
+  assert.match(NOT_ON_TEAM_HINT, /nobody is told when these cars sell or change price/);
+  assert.match(TEAM_HINT, /show under "Listed by people no longer on the team"/);
+});
+
+// a CSV cell as managerCsv writes it
+const csvQuote = (s) => (/[",\n\r']/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s);
+
+test('a salesperson who opens the manager view reads only their own membership, so no colleague\'s car is put under "no longer on the team", on the page or in the CSV', () => {
+  // what row-level security gives a salesperson (0002_rls.sql): their own membership row, and every listing of the dealership
+  const memberships = [{ user_id: 'u1', dealership_id: 'd1', role: 'salesperson', name: 'Alex' }];
+  const listings = [
+    { user_id: 'u1', vin: 'V1', name: 'Own car', posted_at: ago(5), salesperson: 'Alex', status: 'listed' },
+    { user_id: 'u2', vin: 'V2', name: 'Colleague car', posted_at: ago(30), salesperson: 'Pat', status: 'listed', price: 18995 },
+  ];
+  for (const role of ['salesperson', '', undefined]) {
+    assert.equal(summarize({ memberships, listings, role, now: NOW }).notOnTeam, null, `not known for a viewer whose role is ${JSON.stringify(role)}`);
+  }
+  assert.equal(summarize({ memberships, listings, now: NOW }).notOnTeam, null, 'no role given: not known');
+  // the CSV claims no count and lists no car under that heading
+  const lines = managerCsv({ memberships, listings }, { role: 'salesperson', now: NOW, timeZone: 'UTC' }).split('\r\n');
+  assert.ok(lines.includes(`${NOT_ON_TEAM_TITLE},`), 'the summary row is blank, not 0 or 1');
+  const at = lines.indexOf(NOT_ON_TEAM_TITLE);
+  assert.ok(at > 0);
+  assert.equal(lines[at + 1], csvQuote(NOT_ON_TEAM_UNKNOWN));
+  assert.equal(lines[at + 2], '', 'and nothing else in the section');
+  assert.match(NOT_ON_TEAM_UNKNOWN, /manager/);
+  // the same data seen by a manager, who reads every membership, lists nobody either: Pat is on the team
+  const team = [...memberships, { user_id: 'u2', dealership_id: 'd1', role: 'salesperson', name: 'Pat' }];
+  assert.deepEqual(summarize({ memberships: team, listings, role: 'manager', now: NOW }).notOnTeam, []);
+  // the page hands the viewer's role to both, and draws the card only for a list
+  const page = read('manager/manager.js');
+  assert.match(page, /summarize\(\{ \.\.\.d, role: myRole\(\),/);
+  assert.match(page, /managerCsv\(state\.data, \{ role: myRole\(\),/);
+  assert.match(page, /const gone = s\.notOnTeam && s\.notOnTeam\.length/);
 });
 
 test('empty or broken input gives zeros, not an exception', () => {
   const s = summarize({ now: NOW, timeZone: 'UTC' });
   assert.deepEqual(s.salespeople, []);
-  assert.deepEqual(s.totals, { salespeople: 0, postedThisWeek: 0, postedAllTime: 0, listed: 0, takenDown: 0, postedAttempts: 0, medianSeconds: null });
+  assert.deepEqual(s.totals, { salespeople: 0, postedThisWeek: 0, postedAllTime: 0, listedBefore: 0, listed: 0, takenDown: 0, postedAttempts: 0, medianSeconds: null });
   assert.equal(s.lastScan, null);
   assert.deepEqual(s.soldStillListed, []);
   const junk = summarize({ listings: 'nope', todoItems: [null, 3, { kind: 'takeDown', flagged_at: 'garbage' }], postAttempts: {}, scans: [{ taken_at: 'never' }], now: 'not a time' });
@@ -223,22 +476,23 @@ test('the CSV: header rows, the summary, the definitions and one section per tab
   assert.equal(row('Sold cars still listed'), 'Sold cars still listed,2');
   assert.equal(row('Price changes still open'), 'Price changes still open,1');
   assert.equal(row('Median hours from the flagging scan until taken down'), 'Median hours from the flagging scan until taken down,');
-  // the definitions, each as one quoted cell (commas inside), the same five
+  // the definitions, each as one quoted cell (commas inside), the same four
   const at = lines.indexOf('Definitions');
   assert.ok(at > 0);
   const unquote = (l) => (l.startsWith('"') ? l.slice(1, -1).replace(/""/g, '"') : l);
-  assert.deepEqual(lines.slice(at + 1, at + 6).map(unquote), [...DEFINITIONS]);
-  assert.equal(lines[at + 6], '');
+  assert.deepEqual(lines.slice(at + 1, at + 1 + DEFINITIONS.length).map(unquote), [...DEFINITIONS]);
+  assert.equal(lines[at + 1 + DEFINITIONS.length], '');
+  assert.doesNotMatch(csv, /form fields?/i, 'the manager\'s CSV has no form-field numbers and says nothing of them');
   // the sections and their header rows
   const after = (title) => lines[lines.indexOf(title) + 1];
-  assert.equal(after('Salespeople'), 'Salesperson,Posted in the last 7 days,Posted,Listings up,Taken down,Median seconds per post');
-  assert.equal(lines[lines.indexOf('Salespeople') + 2], 'Alex,3,5,4,1,47');
-  assert.equal(lines[lines.indexOf('Salespeople') + 3], 'Sam,2,3,3,0,57.5');
+  assert.equal(after('Salespeople'), `Salesperson,Posted in the last 7 days,Posted,${BEFORE_TODAY_COLUMN},Listings up,Taken down,Median seconds per post`);
+  assert.equal(lines[lines.indexOf('Salespeople') + 2], 'Alex,3,5,0,4,1,47');
+  assert.equal(lines[lines.indexOf('Salespeople') + 3], 'Sam,2,3,0,3,0,57.5');
   assert.equal(after('Sold cars still listed'), 'Flagged,Car,VIN,Salesperson,Hours open,Listing link');
   assert.match(lines[lines.indexOf('Sold cars still listed') + 2], /^2026-11-15 09:00,2021 Jeep Grand Cherokee Limited,SAMPLE00000000002,Alex,30,https:/);
   assert.equal(after('Price changes not yet updated'), 'Flagged,Car,VIN,Salesperson,Hours open,Price from,Price to,Listing link');
   assert.match(lines[lines.indexOf('Price changes not yet updated') + 2], /,21495,20995,/);
-  assert.equal(after('Listings'), 'Posted,Salesperson,Car,VIN,Price,Status,Taken down,Listing link');
+  assert.equal(after('Listings'), 'Posted,Salesperson,Car,VIN,Price,Status,Taken down,Listing link,Listed by hand before (Posted is when it was marked)');
   assert.equal(lines.filter((l) => /,(listed|taken down),/.test(l)).length, 8, 'every listing is a row');
   assert.equal(after('To-do items'), 'Flagged,Kind,Car,VIN,Salesperson,Done,How,Hours,Price from,Price to');
   assert.equal(after('Post attempts'), 'Post started,Salesperson,Car,VIN,Outcome,Seconds,In a queue,Reason');
@@ -248,6 +502,45 @@ test('the CSV: header rows, the summary, the definitions and one section per tab
   const quoted = managerCsv({ listings: [{ vin: 'V', name: 'Car, with "quotes"', posted_at: NOW, salesperson: 'A' }] }, { now: NOW, timeZone: 'UTC' });
   assert.match(quoted, /"Car, with ""quotes"""/);
   assert.equal(csvFileName(NOW, { dealer: 'Example Motors', timeZone: 'UTC' }), 'lot-current-manager-example-motors-2026-11-16.csv');
+});
+
+// The website's /for-managers/ page tells a dealership what the manager view's
+// CSV carries. Every column of every table in the CSV is either a count, a
+// time or a status word, or a detail about a car, a person, a price or a
+// link, and each of those details must be named on the page next to its
+// "Never buyers, messages ..." line (the page once said only the numbers and
+// left out the VINs, the names and the prices). A new column has to be put in
+// one list or the other. The CSV is a manager's download, the one with every
+// table (a salesperson's has a sentence in place of the cars listed by people
+// no longer on the team).
+test('the managers page names every car, person, price and link detail the CSV carries', () => {
+  const d = mockData(NOW);
+  const csv = managerCsv(d, { role: 'manager', now: NOW, dealer: d.dealership.name, origin: d.dealership.website_origin, timeZone: 'UTC' });
+  const blocks = csv.split('\r\n\r\n').map((b) => b.split('\r\n'));
+  const defs = blocks.findIndex((b) => b[0] === 'Definitions');
+  assert.ok(defs > 0, 'the CSV has its Definitions block');
+  const notOnTeam = blocks.find((b) => b[0] === NOT_ON_TEAM_TITLE);
+  assert.ok(notOnTeam && notOnTeam[1].startsWith('Posted,'), "a manager's download has the table of cars listed by people no longer on the team");
+  const columns = new Set(blocks.slice(defs + 1).filter((b) => b.length > 1).flatMap((b) => b[1].split(',')));
+  assert.ok(columns.has('VIN') && columns.has('Salesperson') && columns.has('Hours listed'), [...columns].join(', '));
+  const NUMBERS = new Set(['Posted in the last 7 days', 'Posted', BEFORE_TODAY_COLUMN, 'Listings up', 'Taken down', 'Median seconds per post', 'Flagged', 'Hours open', 'Hours listed', 'Status', 'Kind', 'Done', 'How', 'Hours', 'Post started', 'Outcome', 'Seconds', 'In a queue', 'Reason', 'Listed by hand before (Posted is when it was marked)']);
+  const DETAILS = {
+    Car: /\bthe car's name\b/,
+    VIN: /\bVIN\b/,
+    Salesperson: /\bwho posted it\b/,
+    Price: /\beach listing's price\b/,
+    'Price from': /\bthe website's old and new price\b/,
+    'Price to': /\bthe website's old and new price\b/,
+    'Listing link': /\blisting link\b/,
+  };
+  const page = read('site-src/pages/for-managers.html');
+  const said = page.split('\n').find((l) => l.includes('Never buyers, messages'));
+  assert.ok(said, 'site-src/pages/for-managers.html no longer has its "Never buyers, messages" line');
+  for (const col of columns) {
+    if (NUMBERS.has(col)) continue;
+    assert.ok(DETAILS[col], `the manager CSV has a "${col}" column: add it to NUMBERS or DETAILS here, and say it on /for-managers/ if it is a detail`);
+    assert.match(said, DETAILS[col], `/for-managers/ does not say the CSV carries the "${col}" column`);
+  }
 });
 
 // ---------- the Billing card ----------
@@ -320,6 +613,42 @@ test('billingCard: subscribed shows the seats and the renewal date; a trial says
   assert.deepEqual(card(status({ state: 'active', role: 'salesperson', canManageBilling: true, subscription: subRow({ status: 'active' }) })).buttons, [], 'a salesperson never gets a button, whatever the flags say');
 });
 
+test('billingCard: a subscription cancelled in the portal never says renews or first charge; it says when it ends', () => {
+  const paying = (over) => status({ state: 'active', canManageBilling: true, subscription: subRow({ status: 'active', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1', seats: 5, current_period_end: inDays(20), ...over }) });
+  // Stripe keeps it active until the period ends; the webhook records the date it ends in cancel_at (0009_cancel_at.sql)
+  const c = card(paying({ cancel_at: inDays(20) }));
+  assert.equal(c.state, 'active', 'still served until then');
+  assert.equal(c.label, 'Cancelled');
+  assert.equal(c.tone, 'warn');
+  assert.equal(c.line, 'Cancelled: 5 seats, ends 2026-12-06 and does not renew.');
+  assert.doesNotMatch(c.line, /renews|first charge/);
+  assert.equal(c.detail, 'Everything works as it does now until then; Manage billing can renew it.');
+  assert.deepEqual(c.buttons.map((b) => b.action), ['portal']);
+  // the row has no other cancellation column: a Stripe field the database never stores changes nothing
+  assert.equal(card(paying({ cancel_at_period_end: true })).line, 'Subscribed: 5 seats, renews 2026-12-06.', 'only cancel_at, the column the database has, says it is cancelled');
+  assert.equal(card(paying({ cancel_at: inDays(20), current_period_end: null })).line, 'Cancelled: 5 seats, ends 2026-12-06 and does not renew.');
+  // a trial cancelled before the pilot ends is never charged
+  const trial = card(paying({ status: 'trialing', pilot_ends_at: inDays(12), current_period_end: inDays(12), cancel_at: inDays(12) }));
+  assert.equal(trial.line, 'Cancelled: 5 seats, ends 2026-11-28 before the first charge.');
+  assert.doesNotMatch(trial.line, /first charge 2026/);
+  // cancelled from a date after this period: the renewal before it still happens, and the card says both
+  const later = card(paying({ cancel_at: inDays(50) }));
+  assert.equal(later.label, 'Cancelled');
+  assert.equal(later.line, 'Subscribed: 5 seats, renews 2026-12-06; cancelled from 2027-01-05.');
+  // a salesperson reads the same line, with nothing to press and no portal hint
+  const sp = card(status({ state: 'active', role: 'salesperson', subscription: subRow({ status: 'active', seats: 5, current_period_end: inDays(20), cancel_at: inDays(20) }) }));
+  assert.equal(sp.line, 'Cancelled: 5 seats, ends 2026-12-06 and does not renew.');
+  assert.equal(sp.detail, '');
+  assert.deepEqual(sp.buttons, []);
+  // renewed in the portal: the webhook writes cancel_at null, and the line is the renewal again
+  for (const undone of [null, undefined, '']) assert.equal(card(paying({ cancel_at: undone })).line, 'Subscribed: 5 seats, renews 2026-12-06.', String(undone));
+  // the end has passed and Stripe's last event has not arrived yet (the row still says active): ended, never "ends" on a past day
+  const past = card(paying({ current_period_end: inDays(-2), cancel_at: inDays(-2) }));
+  assert.equal(past.line, 'Cancelled: 5 seats, ended 2026-11-14.');
+  assert.equal(past.detail, '', 'no "until then" for a day that has passed');
+  assert.equal(card(paying({ status: 'trialing', cancel_at: inDays(-2) })).line, 'Cancelled: 5 seats, ended 2026-11-14 before the first charge.');
+});
+
 test('billingCard: lapsed says so in the agreed words, why, and offers Subscribe (and Manage billing once a customer exists)', () => {
   const words = 'The subscription has lapsed; salespeople can still post, but nothing syncs and the description writer is off until it is renewed.';
   const pilotOver = card(status({ state: 'lapsed', canSubscribe: true, subscription: subRow({ status: 'pilot', pilot_ends_at: inDays(-2) }) }));
@@ -340,6 +669,26 @@ test('billingCard: lapsed says so in the agreed words, why, and offers Subscribe
   assert.deepEqual(sp.buttons, []);
 });
 
+test('billingCard: while the billing function runs on a Stripe test-mode key, the card says so to everyone, whatever the plan', () => {
+  assert.equal(BILLING_TEST_MODE_NOTE, 'Billing is in Stripe test mode: only Stripe\'s test cards work, nothing is charged, and a subscription started now does not carry over when real billing starts.');
+  for (const st of [
+    status({ state: 'none', canStartPilot: true, canSubscribe: true }),
+    status({ state: 'pilot', canSubscribe: true, subscription: subRow({ status: 'pilot', pilot_ends_at: inDays(10) }) }),
+    status({ state: 'active', canManageBilling: true, subscription: subRow({ status: 'active', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1', current_period_end: inDays(30) }) }),
+    status({ state: 'lapsed', role: 'salesperson', subscription: subRow({ status: 'canceled' }) }),
+  ]) {
+    assert.equal(card({ ...st, testMode: true }).modeNote, BILLING_TEST_MODE_NOTE, st.state);
+    assert.equal(card(st).modeNote, '', `${st.state}: no flag, no note`);
+    assert.equal(card({ ...st, testMode: 'true' }).modeNote, '', `${st.state}: only the answer's true`);
+  }
+  // before billing opens nothing reaches Stripe at all, so there is no mode to speak of
+  assert.equal(card({ ...closedBillingStatus('none', null, { role: 'manager' }), testMode: true }).modeNote, '');
+  // the page shows it above the plan, and not over a status that could not be read
+  const js = read('manager/manager.js');
+  assert.match(js, /const mode = !error && card\.modeNote \? `<p class="banner warn">\$\{esc\(card\.modeNote\)\}<\/p>` : '';/);
+  assert.match(js, /\$\{note\}\$\{mode\}\$\{body\}/);
+});
+
 test('billingCard: no answer, a broken one, or an unknown state gives a card that says so, and never a button', () => {
   for (const bad of [null, undefined, 'nope', 42, {}, { ok: false, error: 'x' }, { state: 'gold', role: 'manager', canStartPilot: true }]) {
     const c = card(bad);
@@ -354,6 +703,45 @@ test('billingCard: no answer, a broken one, or an unknown state gives a card tha
   assert.deepEqual(Object.keys(BILLING_BUTTONS), ['pilot', 'subscribe', 'portal']);
   assert.ok(Object.isFrozen(BILLING_BUTTONS.pilot));
   assert.doesNotMatch(JSON.stringify(BILLING_BUTTONS), /\$|\d/);
+});
+
+// Before billing opens (manager/config.js billing false) the page reads the
+// plan from the database and shapes it with closedBillingStatus(). The free
+// pilot is the database's start_pilot(), so a manager still gets it; the
+// buttons that need the billing function do not show, and the card says
+// whom to ask, so the runbook's "the manager starts the standard pilot with
+// Start the free pilot" holds before Stripe exists.
+test('billingCard before billing opens: a manager with no plan can start the free pilot and nothing else; a pilot and a lapsed plan say whom to ask', () => {
+  const none = card(closedBillingStatus('none', null, { role: 'manager' }), { pricing });
+  assert.deepEqual([none.state, none.label, none.tone], ['none', 'No plan yet', '']);
+  assert.equal(none.line, `No plan yet. Start the free pilot: ${pricing.pilotDays} days, ${pricing.includedSalespeople} salespeople included, no card.`);
+  assert.equal(none.detail, BILLING_CLOSED_NOTE);
+  assert.deepEqual(none.buttons.map((b) => b.action), ['pilot']);
+  // flags the function would set never bring Subscribe or Manage billing back while it is not there
+  assert.deepEqual(card({ ...closedBillingStatus('none', null, { role: 'manager' }), canSubscribe: true, canManageBilling: true }).buttons.map((b) => b.action), ['pilot']);
+  // the shell of a row (a customer id, no status, no pilot) still allows the pilot, as start_pilot() does; a pilot or a status never
+  assert.equal(closedBillingStatus('none', subRow({ stripe_customer_id: 'cus_1' }), { role: 'manager' }).canStartPilot, true);
+  assert.equal(closedBillingStatus('lapsed', subRow({ status: 'pilot', pilot_ends_at: inDays(-2) }), { role: 'manager' }).canStartPilot, false);
+  assert.equal(closedBillingStatus('lapsed', subRow({ status: 'canceled' }), { role: 'manager' }).canStartPilot, false);
+  // a salesperson: the sentence, nothing to press, no note meant for a manager; no role known: nothing to press
+  const sp = card(closedBillingStatus('none', null, { role: 'salesperson' }));
+  assert.equal(sp.line, 'No plan yet. A manager can start the free pilot: no card.');
+  assert.deepEqual([sp.buttons, sp.detail], [[], '']);
+  assert.deepEqual(card(closedBillingStatus('none', null)).buttons, []);
+  assert.equal(closedBillingStatus('none', null, { role: 42 }).role, '');
+  // a pilot running, started here or recorded by the owner by agreement: its end, and whom to ask about what comes after
+  const pilot = card(closedBillingStatus('pilot', subRow({ status: 'pilot', pilot_ends_at: inDays(18.5) }), { role: 'manager' }));
+  assert.equal(pilot.line, 'Free pilot: 19 days left (ends 2026-12-05).');
+  assert.equal(pilot.detail, BILLING_CLOSED_NOTE, 'not "Subscribe any time"');
+  assert.deepEqual(pilot.buttons, [], 'the pilot never restarts, and Subscribe waits for billing');
+  // lapsed: why, and whom to ask, since nothing here can renew it yet
+  const lapsed = card(closedBillingStatus('lapsed', subRow({ status: 'pilot', pilot_ends_at: inDays(-2) }), { role: 'manager' }));
+  assert.equal(lapsed.detail, `The free pilot ended 2026-11-14. ${BILLING_CLOSED_ASK}`);
+  assert.deepEqual(lapsed.buttons, []);
+  assert.match(BILLING_CLOSED_NOTE, /not open yet[^]*nothing is charged[^]*ask your Lot Current contact/);
+  assert.doesNotMatch(BILLING_CLOSED_NOTE + BILLING_CLOSED_ASK, /\$|\d/, 'no price and no number');
+  // the page's rule for the pilot is the billing function's (test/billing.test.js holds the two equal)
+  assert.deepEqual([pilotAvailable(null), pilotAvailable(subRow()), pilotAvailable(subRow({ status: 'pilot', pilot_ends_at: inDays(3) }))], [true, true, false]);
 });
 
 // ---------- the seat line ----------
@@ -451,7 +839,7 @@ test('billingBody: Subscribe sends a seat per salesperson, never fewer than incl
   assert.equal(subscribeSeats(answer({ salespeople: INC + 4 })), card(answer({ salespeople: INC + 4 })).subscribeSeats);
   // the page posts billingBody's answer to billing/checkout or billing/portal, and draws the seat line and its note
   const js = read('manager/manager.js');
-  assert.match(js, /callFunction\('POST', `billing\/\$\{route\}`, billingBody\(route, state\.billing\?\.status, \{ returnUrl: pageUrl\(\), dealershipId: state\.dealershipId \}\)\)/);
+  assert.match(js, /callFunction\('POST', `billing\/\$\{route\}`, billingBody\(route, state\.billing\?\.status, \{ returnUrl: returnUrl\(state\.dealershipId\), dealershipId: state\.dealershipId \}\)\)/, 'the return address names the dealership (test/managerPage.test.js runs it)');
   assert.match(js, /card\.seatLine \? `<p class="plan">\$\{esc\(card\.seatLine\)\}<\/p>`/);
   assert.match(js, /card\.seatTone === 'warn' \? 'banner warn' : 'hint'/);
   assert.match(js, /`<p class="plan">\$\{esc\(card\.line\)\}<\/p>\$\{seatLine\}\$\{card\.detail \? [^`]*`<p class="hint">\$\{esc\(card\.detail\)\}<\/p>` : ''\}\$\{seatNote\}`/, 'the card draws the seat line under the plan line, and its note after the detail');
@@ -514,7 +902,7 @@ test('inviteCard: a manager gets the two buttons in the SQL\'s two roles; a sale
   assert.equal(c.hint, INVITE_HINT);
   assert.match(c.hint, /open codes: not used yet and not expired/);
   assert.match(c.hint, /stops working when the manager who made it leaves the dealership or stops being a manager\./, 'the rule redeem_invite and the trigger enforce');
-  assert.match(read('supabase/migrations/0002_rls.sql'), /m\.user_id = inv\.created_by[\s\S]{0,160}m\.role = 'manager'/, 'redeem_invite refuses a code whose maker is no longer a manager, not only one who left');
+  assert.match(lastDefinition('redeem_invite').sql, /m\.user_id = inv\.created_by[\s\S]{0,160}m\.role = 'manager'/, 'redeem_invite refuses a code whose maker is no longer a manager, not only one who left');
   assert.match(read('supabase/migrations/0001_schema.sql'), new RegExp(`expires_at timestamptz not null default \\(now\\(\\) \\+ interval '${INVITE_DAYS} days'\\)`), 'INVITE_DAYS is the schema\'s');
   const invites = [{ code: 'ABCDEF012345', role: 'salesperson', created_at: NOW }];
   for (const role of ['salesperson', '', undefined, 'owner']) {
@@ -612,17 +1000,30 @@ const MANAGER_FILES = readdirSync(join(root, 'manager')).filter((f) => /\.(html|
 
 test('the manager page carries no pilot-dealer value and no Meta-affiliation wording', () => {
   assert.ok(MANAGER_FILES.includes('index.html') && MANAGER_FILES.includes('manager.js') && MANAGER_FILES.includes('data.js') && MANAGER_FILES.includes('config.js'));
-  const never = [/approved by (meta|facebook)/i, /(meta|facebook) partner/i, /partner(ed|ship) with (meta|facebook)/i, /official(ly)? (meta|facebook)/i, /compliant with (meta|facebook)/i, /endorsed by (meta|facebook)/i, /affiliated with (meta|facebook)(?! Platforms, Inc\.)/i];
   for (const name of MANAGER_FILES) {
     const src = read(join('manager', name));
     const hit = src.match(/Waynesburg|Ron Lewis|Cranberry|Pleasant Hills|15370|\bRoger\b|ronlewis/i);
     assert.equal(hit, null, `manager/${name} contains "${hit && hit[0]}"`);
     // "not affiliated with Meta Platforms, Inc." is the one allowed mention
     const rest = src.replace(/not affiliated with Meta Platforms, Inc\./g, '');
-    for (const re of never) assert.doesNotMatch(rest, re, `manager/${name} matches ${re}`);
+    for (const re of AFFILIATION) assert.doesNotMatch(rest, re, `manager/${name} matches ${re}`);
     assert.doesNotMatch(src, /service_role/, `manager/${name} must never hold a service key`);
   }
   assert.match(read('manager/index.html'), /Lot Current is not affiliated with Meta Platforms, Inc\./);
+});
+
+// Any address gets an account from the sign-in form (sign-up is on, and the
+// extension's own sign-in creates the account before an invite is redeemed),
+// so the hint says what row-level security actually limits: who sees the
+// numbers, not who can sign in.
+test('the sign-in hint says any address can get a link and only people a dealership added see its numbers', () => {
+  const js = read('manager/manager.js');
+  assert.match(js, /<p class="hint">Any email address can get a link, but only people a dealership has added see its numbers\. If the link does not arrive, check the spam folder, then ask whoever set Lot Current up for your store\.<\/p>/);
+  assert.doesNotMatch(js, /can sign in\./, 'no claim that the form is closed to outsiders');
+  // the claim rests on the link request creating the account, as the extension's does
+  assert.match(js, /signInWithOtp\(\{ email, options: \{ emailRedirectTo: pageUrl\(\) \} \}\)/);
+  assert.doesNotMatch(js, /shouldCreateUser/);
+  assert.match(read('extension/src/account.js'), /create_user: true/);
 });
 
 test('the page is relative, mobile-friendly, and offers what the brief names', () => {
@@ -634,6 +1035,10 @@ test('the page is relative, mobile-friendly, and offers what the brief names', (
   const js = read('manager/manager.js');
   assert.match(js, /Download CSV/);
   assert.match(js, /Sign out/);
+  // Sign out ends this page's session only: supabase-js's default is global,
+  // which would also sign the same person out of the extension on every computer
+  assert.match(js, /auth\.signOut\(\{ scope: 'local' \}\)/);
+  assert.doesNotMatch(js, /auth\.signOut\(\)/, 'no sign-out with the global default');
   assert.match(js, /Try with sample data/);
   assert.match(js, /signInWithOtp/);
   assert.match(js, /mock=1|get\('mock'\)/);
@@ -647,7 +1052,7 @@ test('the page is relative, mobile-friendly, and offers what the brief names', (
   assert.match(js, /rpc\('start_pilot', \{ dealership_id: /);
   assert.match(js, /Authorization: `Bearer \$\{await freshToken\(\)\}`/);
   assert.match(js, /apikey: CONFIG\.supabaseAnonKey/);
-  assert.match(js, /returnUrl: pageUrl\(\)/);
+  assert.match(js, /returnUrl: returnUrl\(state\.dealershipId\)/);
   assert.match(js, /location\.assign\(answer\.url\)/);
   assert.match(js, /billingReturnNote\(params\.get\('billing'\)\)/);
   assert.match(js, /setParam\('billing', null\)/);
@@ -690,7 +1095,7 @@ test('the page makes invite codes through the client, for managers only, and nev
   assert.match(read('manager/manager.css'), /\.codes \{/);
   // the open codes and Revoke, through the two manager-only functions
   assert.match(js, /rpc\('list_invites', \{ dealership_id: dealershipId \}\)/);
-  assert.match(js, /if \(role !== 'manager'\) return \[\];/, 'a salesperson never calls list_invites');
+  assert.match(js, /if \(role !== 'manager'\) return \{ invites: \[\], error: '' \};/, 'a salesperson never calls list_invites');
   assert.match(js, /rpc\('revoke_invite', \{ code \}\)/);
   assert.match(js, />Revoke</);
   assert.match(js, /state\.inviteNote = `Sample data: "Revoke" would cancel/);
@@ -707,26 +1112,70 @@ test('sign-in comes back as a PKCE code to the page\'s own address, and the page
   const csp = (html.match(/http-equiv="Content-Security-Policy" content="([^"]+)"/) || [])[1] || '';
   assert.ok(csp, 'index.html carries a CSP');
   const script = (csp.match(/script-src ([^;]+)/) || [])[1] || '';
-  assert.match(script, /'self'/);
-  assert.doesNotMatch(script, /\*|'unsafe-inline'|'unsafe-eval'|data:/, 'no wildcard or inline script source');
-  assert.ok(script.includes(new URL(CONFIG.supabaseJs).origin), 'the CDN the client loads from is the one script host allowed');
-  assert.match(csp, /connect-src 'self' https:\/\/\*\.supabase\.co/);
+  // scripts from this origin alone: any other host that serves code of anyone's choosing (a CDN of every npm
+  // package and GitHub file) would let one missed esc() load an attacker's script with the manager's session
+  assert.equal(script.trim(), "'self'", 'scripts from the page\'s own origin only');
+  assert.match(CONFIG.supabaseJs, /^\.\/vendor\//, 'the client is served next to the page, so \'self\' covers it');
+  assert.equal((csp.match(/connect-src ([^;]+)/) || [])[1], "'self' https://*.supabase.co", 'calls only to this origin and Supabase');
+  assert.doesNotMatch(csp, /jsdelivr|unpkg|esm\.sh|cdnjs|skypack/i);
   assert.match(csp, /object-src 'none'/);
   assert.match(csp, /base-uri 'none'/);
   assert.doesNotMatch(read('manager/manager.js') + read('manager/data.js'), /style="/, 'no inline style: style-src is \'self\'');
 });
 
-test('config.js: five fields, empty means not configured, the client comes from the CDN, the functions default to the project\'s own', () => {
-  assert.deepEqual(Object.keys(CONFIG).sort(), ['functionsUrl', 'selfServeSignup', 'supabaseAnonKey', 'supabaseJs', 'supabaseUrl']);
+test('config.js: six fields, empty means not configured, the client is served next to the page, the functions default to the project\'s own', () => {
+  assert.deepEqual(Object.keys(CONFIG).sort(), ['billing', 'functionsUrl', 'selfServeSignup', 'supabaseAnonKey', 'supabaseJs', 'supabaseUrl']);
   assert.equal(CONFIG.selfServeSignup, false, 'the form stays hidden until the owner opens sign-up');
+  // billing is off until docs/stripe-setup.md step 5 deploys the function, and that step is what turns it on
+  assert.equal(CONFIG.billing, false, 'no billing function is deployed yet (docs/production-setup.md step 3: it comes with Stripe)');
+  assert.match(read('manager/config.js'), /docs\/stripe-setup\.md step 5/);
+  assert.match(read('docs/stripe-setup.md'), /`billing: true` in `manager\/config\.js`/, 'the step that deploys billing turns the card on');
+  assert.match(read('manager/manager.js'), /const billingOpen = \(\) => CONFIG\.billing === true;/, 'only a true turns the calls on');
   assert.match(read('manager/config.js'), /signup_settings\.open[\s\S]*"Self-serve sign-up"/, 'the comment names the switch in the database that is the real gate');
   assert.equal(typeof CONFIG.supabaseUrl, 'string');
   assert.equal(typeof CONFIG.supabaseAnonKey, 'string');
   assert.equal(CONFIG.functionsUrl, '', 'empty: the project\'s own /functions/v1');
-  assert.match(CONFIG.supabaseJs, /^https:\/\/cdn\.jsdelivr\.net\/npm\/@supabase\/supabase-js@2/);
+  assert.equal(CONFIG.supabaseJs, `./vendor/${SUPABASE_JS.file}`);
   const js = read('manager/manager.js');
   assert.match(js, /CONFIG\.supabaseUrl && CONFIG\.supabaseAnonKey/, 'an empty url means not configured');
   assert.match(js, /trimSlash\(CONFIG\.functionsUrl\) \|\| trimSlash\(CONFIG\.supabaseUrl\) \+ '\/functions\/v1'/, 'the function base is the configured one, else the project URL plus /functions/v1');
+});
+
+// The supabase-js the page runs: the npm package's own one-file build
+// (package/dist/umd/supabase.js of @supabase/supabase-js@2.117.2, whose
+// tarball matched the registry's integrity value), byte for byte, then one
+// line that makes it an ES module. A changed byte is a different client
+// running with the manager's session, so it fails here until the hash is
+// moved on purpose (manager/config.js says how).
+const SUPABASE_JS = Object.freeze({
+  file: 'supabase-js-2.117.2.js',
+  upstreamSha256: '59d39487c3589843b410322d8a3d562ce022aba1e5ccb16898ef3fb2a0da2ecd',
+  tail: '\n// Lot Current: the build above is a script that defines `supabase`; this line makes it the ES module manager.js imports.\nexport const { createClient } = supabase;\n',
+});
+
+test('the vendored supabase-js is the npm build unchanged plus one export line, loads as the module the page imports, and carries its licenses', async () => {
+  const bytes = readFileSync(join(root, 'manager/vendor', SUPABASE_JS.file));
+  const text = bytes.toString('utf8');
+  assert.ok(text.endsWith(SUPABASE_JS.tail), 'the one added line is the last');
+  const upstream = bytes.subarray(0, bytes.length - Buffer.byteLength(SUPABASE_JS.tail));
+  assert.equal(createHash('sha256').update(upstream).digest('hex'), SUPABASE_JS.upstreamSha256, 'the build itself is unchanged');
+  assert.doesNotMatch(text, /\bimport\s*\(|^\s*import\s/m, 'one file: it fetches no other module');
+  assert.deepEqual(readdirSync(join(root, 'manager/vendor')).sort(), ['LICENSES.txt', SUPABASE_JS.file], 'nothing else is served from vendor/');
+  // the page's import(), and the client it makes, here with a fetch that never leaves the test
+  const mod = await import(pathToFileURL(join(root, 'manager/vendor', SUPABASE_JS.file)).href);
+  assert.deepEqual(Object.keys(mod), ['createClient']);
+  const calls = [];
+  const client = mod.createClient('https://abcdefghijklmnopqrst.supabase.co', 'sb_publishable_test', { auth: { flowType: 'pkce', persistSession: false }, global: { fetch: async (url) => { calls.push(String(url)); return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }); } } });
+  const { error } = await client.auth.signInWithOtp({ email: 'manager@example.test', options: { emailRedirectTo: 'https://manage.example.test/' } });
+  assert.equal(error, null);
+  assert.deepEqual(calls.map((u) => new URL(u).pathname), ['/auth/v1/otp']);
+  assert.equal(typeof globalThis.supabase, 'undefined', 'it leaves no global behind');
+  // the licenses of what the build bundles travel with it
+  const licenses = readFileSync(join(root, 'manager/vendor/LICENSES.txt'), 'utf8');
+  for (const name of ['@supabase/supabase-js', '@supabase/auth-js', '@supabase/postgrest-js', '@supabase/realtime-js', '@supabase/storage-js', '@supabase/functions-js', '@supabase/phoenix', 'iceberg-js', 'tslib']) assert.ok(licenses.includes(name), name);
+  assert.match(licenses, /Copyright \(c\) 2020 Supabase/);
+  assert.match(licenses, /Copyright \(c\) 2014 Chris McCord/);
+  assert.match(licenses, /Copyright \(c\) Microsoft Corporation\./);
 });
 
 test('the page types no price: the pilot length and the included seats come from the status answer', () => {
@@ -802,14 +1251,15 @@ test('teamChangeNote: the Team card claims a change only when the database answe
 test('the Team card changes only a member\'s role or removes them, through the rows RLS lets a manager touch', () => {
   const js = read('manager/manager.js');
   assert.match(js, /from\('memberships'\)/);
-  assert.match(js, /q\.update\(\{ role: to \}\)\.eq\('user_id', userId\)\.eq\('dealership_id', state\.dealershipId\)\.select\('user_id'\)/, 'the update answers the changed row');
-  assert.match(js, /q\.delete\(\)\.eq\('user_id', userId\)\.eq\('dealership_id', state\.dealershipId\)\.select\('user_id'\)/, 'the delete answers the removed row');
+  assert.match(js, /q\.update\(\{ role: to \}\)\.eq\('user_id', userId\)\.eq\('dealership_id', dealershipId\)\.select\('user_id'\)/, 'the update answers the changed row');
+  assert.match(js, /q\.delete\(\)\.eq\('user_id', userId\)\.eq\('dealership_id', dealershipId\)\.select\('user_id'\)/, 'the delete answers the removed row');
   assert.match(js, /const \{ data, error \} = kind === 'remove'/);
   assert.match(js, /state\.teamNote = teamChangeNote\(kind, member && member\.name, to, data\);/, 'the sentence follows the rows that came back');
   // the reload after a change is outside the change's try: a failed read has its own sentence
   const onTeam = js.slice(js.indexOf('async function onTeam('), js.indexOf('\nfunction renderInvites('));
-  const failed = onTeam.indexOf("state.teamError = `Couldn't change the team:");
-  const reload = onTeam.indexOf('await loadLive();');
+  assert.match(onTeam, /const dealershipId = state\.dealershipId;/, 'the change is for the dealership on screen when it was pressed');
+  const failed = onTeam.indexOf("const said = `Couldn't change the team:");
+  const reload = onTeam.indexOf('await loadLive(dealershipId);');
   assert.ok(failed > 0 && reload > failed, 'loadLive runs after the change\'s catch, not inside its try');
   assert.match(onTeam.slice(failed, reload), /return renderTeam\(\);\n {2}\}\n {2}try \{\n {4}$/, 'a refused change returns; the reload has a try of its own');
   assert.match(onTeam.slice(reload), /catch \(e\) \{[\s\S]*state\.teamError = `Couldn't refresh the page afterwards: /);
@@ -968,6 +1418,46 @@ test('gettingStarted step 1: the free pilot or a subscription; none, lapsed or a
   assert.match(plan('gold').line, /could not be read/);
 });
 
+test('a lapsed plan Stripe still holds open says what renews it, Manage billing, never Subscribe, in Getting started and on the Billing card', async () => {
+  const { statusAnswer } = await import('../supabase/functions/_shared/billing.mjs');
+  const answer = (row) => ({ ...status(), ...statusAnswer(row, { role: 'manager', now: NOW }), role: 'manager' });
+  const open = (st) => answer(subRow({ status: st, stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1' }));
+  const failed = 'Update the card with Manage billing; syncing starts again once Stripe takes the payment.';
+  const expect = {
+    past_due: ['The last payment did not go through: update the card with Manage billing in the Billing card; syncing starts again once Stripe takes the payment.', `The last payment did not go through. ${failed}`],
+    unpaid: ['The last payment did not go through: update the card with Manage billing in the Billing card; syncing starts again once Stripe takes the payment.', `The last payment did not go through. ${failed}`],
+    incomplete: ['The first payment did not go through: open Manage billing in the Billing card, or ask your Lot Current contact.', 'The first payment did not go through. Open Manage billing to check the card, or ask your Lot Current contact.'],
+    paused: ['The subscription is paused: ask your Lot Current contact, or open Manage billing in the Billing card.', 'The subscription is paused. Ask your Lot Current contact, or open Manage billing.'],
+  };
+  for (const [st, [stepLine, detail]] of Object.entries(expect)) {
+    const s = open(st);
+    const c = card(s);
+    assert.equal(c.state, 'lapsed', st);
+    assert.deepEqual(c.buttons.map((b) => b.label), ['Manage billing'], `${st}: the card offers Manage billing alone`);
+    assert.equal(c.detail, detail, `${st}: the card says what Manage billing is for`);
+    const step = started({ billing: s }).steps[0];
+    assert.deepEqual([step.done, step.line, step.action], [false, stepLine, { target: 'billing', label: 'Go to Billing' }], st);
+    assert.doesNotMatch(step.line, /subscribe/i, `${st}: no Subscribe to press`);
+    if (st !== 'past_due' && st !== 'unpaid') assert.doesNotMatch(`${step.line} ${c.detail}`, /retr|starts again/, `${st}: no retry promised`);
+  }
+  // with no customer to open the portal for, both say whom to ask
+  const noPortal = { ...open('past_due'), canManageBilling: false };
+  assert.equal(card(noPortal).detail, 'The last payment did not go through. Ask your Lot Current contact.');
+  assert.equal(started({ billing: noPortal }).steps[0].line, 'The plan has lapsed: ask your Lot Current contact.');
+  // a subscription that is over (cancelled, a pilot that ran out) is renewed by Subscribe, as before
+  for (const row of [subRow({ status: 'canceled', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1' }), subRow({ status: 'pilot', pilot_ends_at: inDays(-2) })]) {
+    const s = answer(row);
+    assert.equal(s.canSubscribe, true);
+    assert.equal(started({ billing: s }).steps[0].line, 'The plan has lapsed: subscribe in the Billing card and syncing starts again.');
+    assert.ok(card(s).buttons.some((b) => b.action === 'subscribe'));
+    assert.doesNotMatch(card(s).detail, /Manage billing|contact/);
+  }
+  // an answer that offers neither never asks for Subscribe
+  assert.equal(started({ billing: { state: 'lapsed', role: 'manager', canSubscribe: false } }).steps[0].line, 'The plan has lapsed: ask your Lot Current contact.');
+  // a salesperson's card names no button
+  assert.equal(card({ ...open('past_due'), role: 'salesperson' }).detail, 'The last payment did not go through.');
+});
+
 test('gettingStarted step 2: an open invite code of this dealership, or a second member', () => {
   const invite = (over) => started(over).steps[1];
   assert.equal(invite({ invites: [{ code: 'ABCDEF012345', role: 'salesperson', dealership_id: D1, created_at: ago(1) }] }).done, true);
@@ -991,6 +1481,32 @@ test('gettingStarted step 3: any listing of this dealership, taken down or not',
   assert.match(started().steps[2].line, /^No car yet\./);
 });
 
+// A listing marked as made by hand before that day (listed_before) is not a
+// post: summarize leaves it out of posted this week, and the Getting started
+// card agreed with it only in part. Before, 2 salespeople marking 6 old
+// listings each read "12 cars posted and synced so far" and "2 salespeople
+// posted in the past 7 days" beside a posted this week of 0.
+test('gettingStarted: listings marked as made by hand before that day are no car posted and nobody posting, as posted this week says', () => {
+  const people = [member('m1', 'manager'), member('s1', 'salesperson'), member('s2', 'salesperson')];
+  const marked = ['s1', 's2'].flatMap((who) => Array.from({ length: 6 }, (_, i) => listing(who, 1 + i, { vin: `VHAND${who}${i}`, listed_before: true })));
+  const g = started({ memberships: people, listings: marked });
+  assert.equal(summarize({ listings: marked, memberships: people, now: NOW }).totals.postedThisWeek, 0, 'posted this week');
+  assert.deepEqual([g.steps[2].done, g.steps[2].line], [false, 'No car yet. Each car a signed-in salesperson posts shows here after their extension syncs. 12 listings marked as made by hand before they were marked posted are not counted.']);
+  assert.deepEqual([g.steps[3].done, g.steps[3].line], [false, 'No salesperson has posted in the past 7 days.']);
+  // one real post beside them: one car, one salesperson
+  const one = started({ memberships: people, listings: [...marked.slice(0, 1), listing('s2', 3)] });
+  assert.equal(one.steps[2].line, '1 car posted and synced so far. 1 listing marked as made by hand before it was marked posted is not counted.');
+  assert.equal(one.steps[3].line, 'One salesperson posted in the past 7 days; this step needs 2.');
+  // a row with listed_before false, or none, is a post
+  assert.equal(started({ memberships: people, listings: [listing('s1', 2, { listed_before: false }), listing('s2', 2)] }).steps[3].done, true);
+  // the CSV's Listings table flags them: their Posted time is when they were marked
+  const csv = managerCsv({ listings: [marked[0], listing('s2', 3)], memberships: people }, { role: 'manager', now: NOW, timeZone: 'UTC' }).split('\r\n');
+  const at = csv.indexOf('Listings');
+  assert.match(csv[at + 1], /,Listed by hand before \(Posted is when it was marked\)$/);
+  assert.deepEqual(csv.slice(at + 2, at + 4).map((l) => l.split(',').pop()), ['yes', ''], 'newest first: the listing marked an hour ago, then the post made 3 hours ago');
+  assert.match(read('docs/help.md'), /\*\*First car posted and synced\*\* \(any car a signed-in salesperson posted; a listing marked posted as \*\*Before today\*\* is not counted/);
+});
+
 test('gettingStarted step 4: two different salespeople with a post in the past 7 days; a manager\'s own posts do not count', () => {
   const people = [member('m1', 'manager'), member('s1', 'salesperson'), member('s2', 'salesperson')];
   const four = (list) => started({ memberships: people, listings: list }).steps[3];
@@ -1002,6 +1518,13 @@ test('gettingStarted step 4: two different salespeople with a post in the past 7
   assert.equal(four([listing('s1', 5), listing('s2', 7 * 24 + 1)]).done, false, 'older than 7 days');
   assert.equal(four([listing('s1', 5), listing('s2', -2)]).done, false, 'stamped in the future');
   assert.equal(four([]).line, 'No salesperson has posted in the past 7 days.');
+  // someone removed from the dealership is not one of its salespeople posting, as in usage_report's active_salespeople
+  const afterRemoval = started({ memberships: [member('m1', 'manager'), member('s1', 'salesperson')], listings: [listing('s1', 5), listing('s2', 30)] });
+  assert.deepEqual([afterRemoval.steps[3].done, afterRemoval.steps[3].line], [false, 'One salesperson posted in the past 7 days; this step needs 2.'], 'a removed salesperson\'s post still counted');
+  assert.notEqual(afterRemoval.line, 'All four steps done');
+  assert.equal(four([listing('s1', 5), listing('x9', 6)]).done, false, 'an account that is not a member');
+  for (const f of ['docs/help.md', 'site-src/pages/for-managers.html']) assert.ok(read(f).includes('two different salespeople of the dealership posted in the past 7 days; a manager\'s own posts don\'t count, nor do those of someone no longer in the dealership'), `${f} defines the step as the card counts it`);
+  assert.match(lastDefinition('usage_report').sql, /join public\.memberships m on m\.dealership_id = l\.dealership_id and m\.user_id = l\.user_id and m\.role = 'salesperson'/, 'the owner\'s measure (usage_report as the database runs it) counts members with the salesperson role');
   // a row with no account counts by the name the extension recorded, as the Salespeople table does
   assert.equal(four([listing('s1', 5), listing(null, 6, { salesperson: 'Pat' })]).done, true);
   assert.equal(four([listing(null, 6, { salesperson: 'Pat' }), listing(null, 7, { salesperson: 'pat ' })]).done, false, 'the same name twice');
@@ -1019,11 +1542,27 @@ test('gettingStarted on the ?mock=1 sample: all four done, so the card is one li
   assert.equal(gettingStarted({ billing: 'x', invites: 'x', memberships: 'x', listings: 'x', now: 'not a time' }).done, 0);
 });
 
+test('gettingStarted before billing opens: step 1 is the free pilot alone, which the Billing card can still do, and a lapsed plan says whom to ask', () => {
+  const d = mockData(NOW);
+  const closed = (billing) => gettingStarted({ ...d, billing, dealershipId: d.dealership.id, now: NOW, billingOpen: false });
+  assert.deepEqual(closed(null).steps.map((s) => s.key), ['plan', 'invite', 'firstCar', 'twoPosting']);
+  const none = closed(closedBillingStatus('none', null, { role: 'manager' })).steps[0];
+  assert.deepEqual([none.title, none.done, none.line, none.action], [PLAN_STEP_CLOSED_TITLE, false, 'No plan yet: start the free pilot in the Billing card.', { target: 'billing', label: 'Go to Billing' }]);
+  assert.equal(PLAN_STEP_CLOSED_TITLE, 'Start the free pilot');
+  const pilot = closed(closedBillingStatus('pilot', { status: 'pilot', pilot_ends_at: inDays(10) }, { role: 'manager' }));
+  assert.deepEqual([pilot.steps[0].done, pilot.steps[0].line, pilot.line], [true, 'The free pilot is running.', 'All four steps done']);
+  const lapsed = closed(closedBillingStatus('lapsed', { status: 'pilot', pilot_ends_at: inDays(-2) }, { role: 'manager' })).steps[0];
+  assert.deepEqual([lapsed.done, lapsed.line], [false, 'The plan has lapsed, and billing is not open yet: ask your Lot Current contact.']);
+  assert.doesNotMatch(JSON.stringify([none, lapsed]), /subscribe/i, 'nothing asks for what the page cannot do yet');
+  // once billing is open, the step is as before
+  assert.equal(gettingStarted({ ...d, billing: closedBillingStatus('none', null), dealershipId: d.dealership.id, now: NOW }).steps[0].title, GETTING_STARTED.plan.title);
+});
+
 test('the page: the Start your dealership form behind the flag, the rpc with the three fields, a live region, and every box labelled', () => {
   const js = read('manager/manager.js');
   assert.match(js, /client\.rpc\('create_dealership', \{ name, website, your_name: yourName \}\)/, 'the database function, through the client, with the contract\'s three parameters');
   assert.match(js, /if \(CONFIG\.selfServeSignup\) return viewSignup\(\);/, 'the flag only decides whether the form shows');
-  assert.match(js, /Your account is not a member of any dealership yet\. Ask whoever set Lot Current up for your store to add you\./, 'with the flag off the page says what it said');
+  assert.match(js, /Your account is not a member of any dealership yet\. If you were given an invite code: in the Lot Current extension, sign in under Settings, Account with this same email, enter the code under Invite code and click Join, then reload this page\. Otherwise ask whoever set Lot Current up for your store to add you\./, 'with the flag off the page says where an invite code goes, then whom to ask');
   const view = js.slice(js.indexOf('function viewSignup()'), js.indexOf('function originNoteHtml('));
   assert.ok(view.length > 500, 'viewSignup moved: update this test');
   for (const [id, words] of [['suName', 'W.name'], ['suWebsite', 'W.website'], ['suYou', 'W.yourName']]) {
@@ -1039,7 +1578,7 @@ test('the page: the Start your dealership form behind the flag, the rpc with the
   assert.ok(submit.length > 500, 'onSignup moved: update this test');
   assert.doesNotMatch(submit, /viewSignup\(\)|\.reset\(\)/, 'nothing clears the boxes');
   assert.match(submit, /return signupSay\(signupRefusal\(answer && answer\.error\)\);/);
-  assert.match(submit, /state\.dealershipId = made\.dealership_id \|\| null;\s+try \{\s+await loadLive\(\);/, 'success reads the page again into the new dealership');
+  assert.match(submit, /try \{\s+await loadLive\(made\.dealership_id \|\| null\);/, 'success reads the page again into the new dealership');
   assert.match(read('manager/manager.css'), /\.signup \.banner\.error:empty \{ padding: 0; margin: 0; \}/, 'the empty live region stays in the page');
 });
 
@@ -1074,8 +1613,8 @@ test('the page: Getting started first, for managers only, redrawn with the cards
     assert.match(body, /renderGettingStarted\(\);/, `${fn} redraws Getting started too`);
   }
   // no query was added for it: the page reads the same tables as before
-  const reads = [...js.matchAll(/read\('([a-z_]+)'/g)].map((m) => m[1]);
-  assert.deepEqual(reads, ['dealerships', 'memberships', 'listings', 'todo_items', 'post_attempts', 'scan_summaries']);
+  const reads = [...new Set([...js.matchAll(/(?:read|latest|counted)\('([a-z_]+)'/g)].map((m) => m[1]))].sort();
+  assert.deepEqual(reads, ['dealerships', 'listings', 'memberships', 'post_attempts', 'scan_summaries', 'todo_items']);
   assert.match(read('manager/manager.css'), /\.steps \{/);
 });
 
@@ -1092,4 +1631,152 @@ test('help.md names the Start your dealership form and the Getting started card 
   assert.ok(section.includes(SEATS_NOT_ADDED), 'the manager view section does not quote SEATS_NOT_ADDED word for word');
   assert.match(section, /managers don't/i, 'it says who takes a seat');
   assert.match(section, /invite code/i, 'a store that already uses Lot Current asks its manager for a code');
+});
+
+// ---------- reading every row ----------
+
+// A table as the hosted API serves it: rows in order, at most `cap` per
+// request whatever the range asks, and the total when it is asked for.
+function servedTable(rows, { cap = 1000, count = true } = {}) {
+  const calls = [];
+  const page = async (from, to) => {
+    calls.push([from, to]);
+    const end = Math.min(to, from + cap - 1);
+    return { data: rows.slice(from, end + 1), error: null, count: count && from === 0 ? rows.length : null };
+  };
+  return { page, calls };
+}
+
+test('readAll: every row of a table bigger than the API\'s row cap, in order, the oldest open item included', async () => {
+  assert.equal(PAGE_ROWS, 1000, 'Supabase\'s default "Max rows"');
+  const rows = Array.from({ length: 2345 }, (_, i) => ({ id: `r${i}`, n: i }));
+  const t = servedTable(rows);
+  const got = await readAll(t.page);
+  assert.equal(got.length, 2345);
+  assert.deepEqual(got.map((r) => r.n), rows.map((r) => r.n));
+  assert.deepEqual(t.calls, [[0, 999], [1000, 1999], [2000, 2999]], 'it stops once it holds the count');
+
+  // the summary on the newest 1,000 of 1,200 to-do items would miss the oldest open take-down
+  const items = Array.from({ length: 1200 }, (_, i) => ({ id: `t${i}`, vin: `TESTVIN${String(i).padStart(10, '0')}`, kind: 'takeDown', flagged_at: ago(i + 1), done_at: i === 1199 ? null : ago(i), how: i === 1199 ? null : 'detected', name: i === 1199 ? 'Oldest open' : `Car ${i}` }));
+  const cut = summarize({ todoItems: items.slice(0, 1000), now: NOW, timeZone: 'UTC' });
+  assert.equal(cut.soldStillListed.length, 0, 'one request\'s worth loses it');
+  const whole = summarize({ todoItems: await readAll(servedTable(items).page), now: NOW, timeZone: 'UTC' });
+  assert.deepEqual(whole.soldStillListed.map((o) => o.name), ['Oldest open']);
+  assert.equal(whole.takeDowns.flagged, 1200);
+});
+
+test('readAll: a server cap below the page size, or no count in the answer, still gets every row', async () => {
+  const rows = Array.from({ length: 1234 }, (_, i) => ({ id: i }));
+  const low = servedTable(rows, { cap: 500 });
+  assert.equal((await readAll(low.page)).length, 1234);
+  assert.deepEqual(low.calls.map((c) => c[0]), [0, 500, 1000], 'each page starts where the last one ended, not a page size on');
+  const blind = servedTable(rows, { count: false });
+  assert.equal((await readAll(blind.page)).length, 1234);
+  assert.deepEqual(blind.calls.map((c) => c[0]), [0, 1000, 1234], 'without a count it reads until a page comes back empty');
+  assert.deepEqual(await readAll(servedTable([]).page), []);
+});
+
+test('readAll: a failed page is an error, never a short list; a row seen twice is kept once; it stops at maxPages', async () => {
+  let n = 0;
+  const failing = async (from) => (n++ === 0 ? { data: Array.from({ length: 1000 }, (_, i) => ({ id: from + i })), error: null, count: 1500 } : { data: null, error: { message: 'canceling statement due to statement timeout' } });
+  await assert.rejects(readAll(failing), /statement timeout/);
+  // a row added between two requests pushes the last row of page 1 onto page 2
+  const rows = Array.from({ length: 1500 }, (_, i) => ({ id: `r${i}` }));
+  const shifted = async (from, to) => (from === 0 ? { data: rows.slice(0, 1000), error: null, count: 1500 } : { data: [rows[999], ...rows.slice(1000, to)], error: null, count: null });
+  const got = await readAll(shifted);
+  assert.equal(new Set(got.map((r) => r.id)).size, got.length, 'no row twice');
+  assert.equal(got.length, 1500);
+  const endless = async (from) => ({ data: [{ id: `x${from}` }], error: null, count: null });
+  await assert.rejects(readAll(endless, { pageRows: 1, maxPages: 5 }), /more than 5 pages/);
+});
+
+// ---------- what an empty list may say ----------
+
+test('an empty sold or price list says only that nothing is flagged, and why that is worth less: no scan, an old scan, cars listed by people no longer on the team', () => {
+  const D = 'd1';
+  const members = [{ user_id: 'u-sam', dealership_id: D, role: 'salesperson', name: 'Sam' }, { user_id: 'u-jamie', dealership_id: D, role: 'manager', name: 'Jamie' }];
+  const car = (n, user, over = {}) => ({ id: `l${n}`, dealership_id: D, user_id: user, vin: `TESTVIN${String(n).padStart(10, '0')}`, name: `Car ${n}`, price: 20000, posted_at: ago(100 + n), status: 'listed', salesperson: user === 'u-sam' ? 'Sam' : 'Riley', listing_url: `https://www.facebook.com/marketplace/item/${n}/`, ...over });
+  const scan = (hoursAgo) => [{ taken_at: ago(hoursAgo), cars: 40, ready: 30, take_down_count: 0, price_update_count: 0 }];
+  const listings = [car(1, 'u-sam'), car(2, 'u-sam'), car(3, 'u-riley'), car(4, 'u-riley'), car(5, 'u-riley', { status: 'taken_down', taken_down_at: ago(5) })];
+  const never = ['Every sold car is off Marketplace', 'Every listing shows the website price'];
+  const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  // no scan yet: no all-clear, and the pill is the plain one
+  const none = summarize({ listings: listings.slice(0, 2), memberships: members, role: 'manager', now: NOW, timeZone: 'UTC' });
+  assert.equal(none.lastScan, null);
+  assert.equal(none.clear.sold.tone, '');
+  assert.match(none.clear.sold.line, new RegExp(`^${esc(EMPTY_TAKE_DOWNS)} No scan is recorded yet, so nothing has been checked\\.$`));
+  assert.equal(none.clear.price.tone, '');
+  assert.match(none.clear.price.line, new RegExp(`^${esc(EMPTY_PRICE_ITEMS)} `));
+
+  // an old scan: amber, with how old
+  const old = summarize({ listings: listings.slice(0, 2), memberships: members, scans: scan(60), role: 'manager', now: NOW, timeZone: 'UTC' });
+  assert.equal(old.lastScan.stale, true);
+  assert.equal(old.clear.sold.tone, 'warn');
+  assert.match(old.clear.sold.line, /The last scan is 60 h old, so a car sold since then is not flagged yet\./);
+  assert.match(old.clear.price.line, /so a price that changed since then is not flagged yet\./);
+
+  // a removed salesperson's cars that are listed: named, amber, even with a fresh scan; a taken-down one is not
+  const gone = summarize({ listings, memberships: members, scans: scan(1), role: 'manager', now: NOW, timeZone: 'UTC' });
+  assert.deepEqual(gone.notOnTeam.map((o) => [o.name, o.salesperson]), [['Car 4', 'Riley'], ['Car 3', 'Riley']], 'longest listed first');
+  assert.equal(gone.notOnTeam[0].listingUrl, 'https://www.facebook.com/marketplace/item/4/');
+  assert.equal(gone.clear.sold.tone, 'warn');
+  assert.match(gone.clear.sold.line, /2 cars are still listed by people no longer on the team, and no rescan checks them \(below\)\./);
+  assert.match(clearLine('sold', { stale: false, hoursAgo: 1 }, 1).line, /One car is still listed by people no longer on the team, and no rescan checks it \(below\)\./);
+  // a salesperson reads only their own membership row: nobody else's car is put on that list for them
+  assert.equal(summarize({ listings, memberships: [members[0]], scans: scan(1), role: 'salesperson', now: NOW }).notOnTeam, null);
+
+  // a fresh scan, every listed car a member's: still no all-clear, so still the plain pill, saying only what is known
+  const fine = summarize({ listings: listings.slice(0, 2), memberships: members, scans: scan(1), role: 'manager', now: NOW, timeZone: 'UTC' });
+  assert.deepEqual(fine.notOnTeam, []);
+  assert.deepEqual(fine.clear.sold, { tone: '', line: EMPTY_TAKE_DOWNS });
+  assert.deepEqual(fine.clear.price, { tone: '', line: EMPTY_PRICE_ITEMS });
+  for (const s of [none, old, gone, fine]) {
+    for (const k of ['sold', 'price']) {
+      assert.notEqual(s.clear[k].tone, 'good', 'an empty card is never green');
+      for (const w of never) assert.ok(!s.clear[k].line.includes(w));
+    }
+  }
+  const js = read('manager/manager.js');
+  for (const w of never) assert.ok(!js.includes(w), `manager.js no longer says "${w}"`);
+  assert.match(js, /summarize\(\{ \.\.\.d, role: myRole\(\),/, 'only a manager\'s read of the memberships is the whole team');
+});
+
+// A listing link saved before the extension kept only a listing's own
+// address (the Your listings page Facebook lands on after Publish, another
+// page) showed as the car's link on the to-do cards, the cars listed by
+// people no longer on the team and the CSV, until the car was posted again.
+// The page shows only a Marketplace listing's own address, by the
+// extension's rule (facebook/detectPost.js listingLink), which this file
+// holds equal without importing it.
+test('the manager page and CSV link only a Marketplace listing\'s own address, by the extension\'s rule', () => {
+  assert.equal(LISTING_URL_PATTERN, FORM_MAP.listingUrlPattern, 'the pattern the extension saves links by');
+  assert.equal(LISTING_ORIGIN, new URL(FORM_MAP.createUrl).origin, 'the form\'s own website');
+  const cases = ['https://www.facebook.com/marketplace/item/1001/', 'https://www.facebook.com/marketplace/item/1001/?ref=share', 'https://m.facebook.com/marketplace/item/2002/?ref=share', 'web.facebook.com/marketplace/item/3003', 'http://facebook.com/marketplace/item/4004/',
+    'https://www.facebook.com/marketplace/you/selling', 'https://www.facebook.com/marketplace/', 'https://www.facebook.com/marketplace/item/', 'https://example.test/marketplace/item/5/', 'javascript:alert(1)', 'not a link', '', null, undefined, 42];
+  for (const c of cases) assert.equal(listingHref(c), listingLink(typeof c === 'string' ? c : '', FORM_MAP), `${c}: as the extension keeps it`);
+  const D = 'd-links';
+  const rowsFor = (url) => ({
+    listings: [
+      { dealership_id: D, user_id: 'u1', vin: 'TESTVINLINK000001', name: 'Sold car', price: 20000, posted_at: ago(50), status: 'listed', salesperson: 'Sam', listing_url: url },
+      { dealership_id: D, user_id: 'u9', vin: 'TESTVINLINK000009', name: 'Left behind', price: 21000, posted_at: ago(60), status: 'listed', salesperson: 'Pat', listing_url: url },
+    ],
+    todoItems: [{ dealership_id: D, vin: 'TESTVINLINK000001', kind: 'takeDown', name: 'Sold car', flagged_at: ago(5), done_at: null }],
+    memberships: [{ user_id: 'u1', dealership_id: D, role: 'salesperson', name: 'Sam' }, { user_id: 'm1', dealership_id: D, role: 'manager', name: 'Lee' }],
+  });
+  const shown = (url) => {
+    const input = rowsFor(url);
+    const s = summarize({ ...input, role: 'manager', now: NOW });
+    const csv = managerCsv(input, { role: 'manager', now: NOW, timeZone: 'UTC' });
+    return { todo: s.soldStillListed[0].listingUrl, gone: s.notOnTeam[0].listingUrl, csv };
+  };
+  const bad = shown('https://www.facebook.com/marketplace/you/selling');
+  assert.deepEqual([bad.todo, bad.gone], ['', ''], 'Your listings is no car\'s link');
+  assert.doesNotMatch(bad.csv, /marketplace\/you/, 'nor in the CSV');
+  const good = shown('https://m.facebook.com/marketplace/item/2002/');
+  assert.deepEqual([good.todo, good.gone], ['https://www.facebook.com/marketplace/item/2002/', 'https://www.facebook.com/marketplace/item/2002/']);
+  assert.equal((good.csv.match(/https:\/\/www\.facebook\.com\/marketplace\/item\/2002\//g) || []).length, 4, 'the sold car still listed, the car left behind and both rows of Listings');
+  // the page links what summarize gives, never the stored column
+  const js = read('manager/manager.js');
+  assert.doesNotMatch(js, /listing_url/, 'manager.js reads no stored link itself');
 });

@@ -158,12 +158,13 @@ test('microdataVehicles reads itemprop microdata into nodes of the same shape', 
 
 // ---------- page facts ----------
 
-test('pageFacts: the title, canonical, next page, same-origin links, Carfax links and only the visible text', () => {
+test('pageFacts: the title, canonical, next and previous page, same-origin links, Carfax links and only the visible text', () => {
   const f = pageFacts(html('graph-vdp.html'), civicUrl + '?from=search');
-  assert.deepEqual(Object.keys(f), ['title', 'canonical', 'next', 'links', 'carfaxLinks', 'text']);
+  assert.deepEqual(Object.keys(f), ['title', 'canonical', 'next', 'prev', 'links', 'carfaxLinks', 'text', 'segments']);
   assert.equal(f.title, 'Used 2019 Honda Civic EX Sedan', 'the og:title, without the site name');
   assert.equal(f.canonical, civicUrl);
   assert.equal(f.next, null);
+  assert.equal(f.prev, null);
   assert.deepEqual(f.links, [SITE + '/', SITE + '/used-vehicles/', civicUrl + '?from=search'], 'absolute, once each, fragments dropped; mailto and other sites left out');
   assert.deepEqual(f.carfaxLinks, ['https://www.carfax.com/VehicleHistory/p/Report.cfx?partner=SMP_0&vin=2HGSAMPL8KH000101', 'https://www.carfax.com/value/']);
   assert.match(f.text, /Sample Motors Price \$ 19,995 41,230 miles/);
@@ -182,6 +183,8 @@ test('pageFacts: the title, canonical, next page, same-origin links, Carfax link
     SITE + '/used-vehicles/#/compare',
   ], 'the photo link and the "#photos" link are one page; a "#/" route is a page of its own');
   assert.equal(pageFacts('<a rel="next nofollow" href="p2">2</a>', SITE + '/list/').next, SITE + '/list/p2');
+  assert.equal(pageFacts('<link rel="prev" href="?page=1"><a rel="previous" href="p0">0</a>', SITE + '/list/?page=2').prev, SITE + '/list/?page=1');
+  assert.equal(pageFacts('<a rel="previous nofollow" href="p1">1</a>', SITE + '/list/').prev, SITE + '/list/p1');
   assert.equal(pageFacts(html('entities.html'), SITE + '/x/').title, 'Used 2020 GMC Sierra 1500 SLE & Z71');
   assert.match(pageFacts(html('entities.html'), SITE + '/x/').text, /Price: \$38,450 36,112 miles/, 'a non-breaking space is a space');
   // without a usable page address nothing can be called same-origin
@@ -491,6 +494,259 @@ test('price: a price the page shows only crossed out, after "Was", "MSRP" or the
   assert.equal(pageFacts('<p><span style="text-decoration: underline">$24,995</span></p>', civicUrl).text, '$24,995', 'only a line through the text crosses it out');
 });
 
+test('price: a guide or estimate value, a class that strikes the old price through, or a page style rule that does, is not the car\'s price', () => {
+  const at = (price, text) => priceFromOffers(car({ offers: { '@type': 'Offer', price, priceCurrency: 'USD' } }), shown(text)).value;
+  // a value from a price guide, an estimate or the window sticker at the stale markup amount
+  for (const label of ['KBB Fair Market Value', 'Market value', 'Sticker price', 'Book value:', 'Estimated value', 'Window sticker', 'Kelley Blue Book® Value:', 'Trade-in value', 'Edmunds True Market Value',
+    // a guide's own labels, and an offer to buy the car
+    'Kelley Blue Book® Fair Purchase Price', 'KBB Fair Purchase Price', 'Kelley Blue Book Typical Listing Price', 'Instant Cash Offer', 'NADA value', 'J.D. Power value', 'JD Power', 'Black Book', 'Average market price', 'Fair Market Price',
+    // the same words joined by a hyphen (R-8, repair round 2)
+    'Instant Cash-Offer', 'Instant-Offer', 'Market-Value', 'Kelley Blue-Book Value', 'Fair-Market Price']) {
+    assert.equal(at(26000, `${label} $26,000 Our price $24,995`), null, label);
+    assert.equal(at(24995, `${label} $26,000 Our price $24,995`), 24995, `${label}: the current price is still read`);
+  }
+  assert.equal(at(26000, 'Value Price $26,000'), 26000, 'a bare "value" is no cue');
+  for (const label of ['Our price', 'Internet price', 'Sale price', 'Listing price', 'Cash price', 'Power package. Price']) assert.equal(at(26000, `${label} $26,000`), 26000, `${label} is the car's price`);
+  // crossed out by a class named for it, word by word, never by a piece of a word
+  for (const cls of ['strike', 'price strikethrough', 'old-price', 'price-was', 'was_price', 'originalPrice', 'price--previous', 'line-through', 'is-crossed']) {
+    const facts = pageFacts(`<p><span class="${cls}">$24,995</span> <b>$23,995</b></p>`, civicUrl);
+    assert.equal(facts.text, '$23,995', cls);
+    assert.equal(at(24995, facts.text), null, cls);
+  }
+  for (const cls of ['font-bold', 'holder', 'golden', 'price', 'price-box theme-old', 'wash', 'old-school', 'original-content']) {
+    assert.equal(pageFacts(`<p><span class="${cls}">$24,995</span></p>`, civicUrl).text, '$24,995', `${cls} is not crossed out`);
+  }
+  // crossed out by the page's own style rule for a class
+  const styled = pageFacts('<html><head><style>.tag{color:red} .card .gone, .x > span.price-tag { text-decoration: gray line-through; } .keep{text-decoration:underline}</style></head><body><p><span class="gone">$24,995</span> <span class="price-tag">$24,500</span> <span class="keep">$23,995</span></p></body></html>', civicUrl);
+  assert.equal(styled.text, '$23,995');
+  assert.equal(pageFacts('<html><head><style>' + '{'.repeat(20000) + '.a{text-decoration:line-through}</style></head><body><span class="a">$1</span></body></html>', civicUrl).text, '', 'a long run of braces is read in one pass');
+});
+
+test('price: when the page\'s only price carries a guide\'s or an old price\'s label, it is still not taken, and the reason quotes the label for a person to check', () => {
+  const at = (text, price = 24995) => priceFromOffers(car({ offers: { '@type': 'Offer', price, priceCurrency: 'USD' } }), shown(text));
+  const quoted = (label) => ({ value: null, label: `the page labels its only price "${label}", which Lot Current does not read as the selling price`, reason: `the page labels its only price "${label}", which Lot Current does not read as the selling price` });
+  for (const [text, label] of [
+    ['2019 Honda Civic EX Market Price $24,995 Call us', 'Market Price'],
+    ['2019 Honda Civic EX Our Market Price: $24,995', 'Market Price'],
+    ['Fair Market Price $24,995', 'Fair Market Price'],
+    ['Dealer Cash Offer price $24,995', 'Cash Offer price'],
+    ['Market Value $24,995 \u00b7 Market Value $24,995', 'Market Value'],
+    // an offer for the car, in the list shared with the inventory-data reader (GUIDE_PRICE_WORDS)
+    ['Instant Offer $24,995', 'Instant Offer'],
+    ['Your Trade-In Offer: $24,995', 'Trade-In Offer'],
+    // the words joined by a hyphen are the same words (R-8, repair round 2)
+    ['Your Cash-Offer $24,995', 'Cash-Offer'],
+    ['Market-Price $24,995', 'Market-Price'],
+  ]) assert.deepEqual(at(text), quoted(label), text);
+  // the same label next to a current price is a stale or guide value, as before
+  const notShown = { value: null, label: 'the page does not show this price', reason: 'the page does not show this price' };
+  assert.deepEqual(at('Market Price $24,995 Our price $23,995'), notShown);
+  assert.deepEqual(at('Was $24,995 Now $23,995'), notShown);
+  assert.deepEqual(at('Our price $23,995'), notShown);
+  assert.equal(at('Market Price $26,000 Our price $24,995').value, 24995, 'the current price is still read');
+  // the car is not ready, and the To do reason says why
+  const v = flat({ offers: { '@type': 'Offer', price: 24995, priceCurrency: 'USD', availability: 'https://schema.org/InStock' } }, shown('Market Price $24,995 \u00b7 41,230 miles'));
+  assert.equal(v.price, null);
+  assert.deepEqual(assessVehicle(v, {}).blockers.map((b) => b.text), ['No price on the website (the page labels its only price "Market Price", which Lot Current does not read as the selling price)']);
+});
+
+// The footnote and trademark marks the inventory-data reader sets aside
+// (inventoryJson.js labelWords, the marks shared as LABEL_MARKS), after a
+// guide's or an old price's words in page text ("Market Value*: $24,995",
+// "MSRP† $24,995"). Before, the mark hid the words, so a page whose only
+// price was a guide's value or an offer had it taken as the car's price
+// (PR #9, repair round 3).
+test('price: a footnote or trademark mark after a guide\'s or an old price\'s words changes nothing', () => {
+  const at = (text, price = 24995) => priceFromOffers(car({ offers: { '@type': 'Offer', price, priceCurrency: 'USD' } }), shown(text));
+  const quoted = (label) => ({ value: null, label: `the page labels its only price "${label}", which Lot Current does not read as the selling price`, reason: `the page labels its only price "${label}", which Lot Current does not read as the selling price` });
+  for (const [text, label] of [
+    ['Market Value*: $24,995', 'Market Value'],
+    ['Market Value\u2020 $24,995', 'Market Value'],
+    ['Kelley Blue Book\u00ae Value\u00b9 $24,995', 'Kelley Blue Book\u00ae Value'],
+    ['Instant Cash Offer* $24,995', 'Cash Offer'],
+    ['KBB Value** $24,995', 'KBB Value'],
+    ['MSRP\u2021 $24,995', 'MSRP'],
+    ['Was* $24,995', 'Was'],
+  ]) assert.deepEqual(at(text), quoted(label), text);
+  // beside a current price the marked figure is a stale or guide value, and the current price is read
+  assert.deepEqual(at('Was* $24,995 Now $23,995'), { value: null, label: 'the page does not show this price', reason: 'the page does not show this price' });
+  assert.equal(at('Market Value* $26,000 Our price $24,995').value, 24995);
+  // a mark after the selling price's own words changes nothing either
+  assert.equal(at('Internet Price* $24,995').value, 24995);
+  assert.equal(at('Our Price\u2122 $24,995').value, 24995);
+});
+
+test('price: the page text comes in segments, each tied to the car whose card holds it', () => {
+  const page = `<html><body><h1>Used 2019 Honda Civic EX</h1><div class="price-box"><p>Our price $20,995</p><a href="/finance/">Payments</a></div>
+  <aside><a href="/inventory/used-2018-honda-accord-1hgsampl0jh000102/">2018 Accord $21,995</a><div class="tile"><a href="/inventory/used-2017-ford-escape-1fmsampl0hu000103/"><img alt="">2017 Escape</a> <span>$19,000</span></div></aside>
+  <a href="${civicUrl}">This car</a> <a href="https://www.carfax.com/x">Carfax</a></body></html>`;
+  // without a carKey, every address on this website is a car of its own
+  const f = pageFacts(page, civicUrl);
+  assert.equal(f.text, 'Used 2019 Honda Civic EX Our price $20,995 Payments 2018 Accord $21,995 2017 Escape $19,000 This car Carfax');
+  assert.deepEqual(f.segments, [
+    { car: null, text: 'Used 2019 Honda Civic EX' },
+    { car: SITE + '/finance/', text: 'Our price $20,995 Payments' },
+    { car: SITE + '/inventory/used-2018-honda-accord-1hgsampl0jh000102/', text: '2018 Accord $21,995' },
+    { car: SITE + '/inventory/used-2017-ford-escape-1fmsampl0hu000103/', text: '2017 Escape $19,000' },
+    { car: null, text: 'This car Carfax' },
+  ], 'a link to this page or another website is no card');
+  // with one, a link to no car shapes no card
+  const byVin = () => (href) => (href.match(/\b[a-z0-9]{17}\b/i) || [null])[0];
+  assert.deepEqual(pageFacts(page, civicUrl, { carKey: byVin }).segments, [
+    { car: null, text: 'Used 2019 Honda Civic EX Our price $20,995 Payments' },
+    { car: '1hgsampl0jh000102', text: '2018 Accord $21,995' },
+    { car: '1fmsampl0hu000103', text: '2017 Escape $19,000' },
+    { car: null, text: 'This car Carfax' },
+  ]);
+});
+
+test('price: a card holds all of its car\'s links, so a contact, finance or "Check availability" link does not split it, and the car\'s own title and price are never another car\'s card', () => {
+  const byVin = () => (href) => {
+    const vins = href.match(/\b[a-z0-9]{17}\b/gi) || [];
+    return vins.length === 1 ? vins[0].toUpperCase() : null; // several VINs: a comparison, no one car
+  };
+  const A = '1HGSAMPL0JH000102';
+  const B = '1FMSAMPL0HU000103';
+  const C = '5XYSAMPL6MG000114';
+  const card = (vin, price, extra) => `<div class="card"><a href="/inventory/used-${vin.toLowerCase()}/"><img alt=""></a><h3><a href="/inventory/used-${vin.toLowerCase()}/">Used car ${vin.slice(-3)}</a></h3><span class="price">${price}</span> ${extra}</div>`;
+  const extras = [
+    '<a href="/contact-us/">Check availability</a>',
+    '<a href="/finance/apply/">Get pre-approved</a> <a href="/value-your-trade/">Value your trade</a>',
+    `<a href="/contact-us/?vin=VIN">Check availability</a>`,
+  ];
+  // a list: each card with its price, whatever else it links to
+  for (const extra of extras) {
+    const list = `<html><body><h1>Used vehicles</h1><nav><a href="/">Home</a> <a href="/used-vehicles/?page=2">Next page</a></nav><main>${[[A, '$15,000'], [B, '$15,500'], [C, '$16,000']].map(([vin, price]) => card(vin, price, extra.replace('VIN', vin))).join('')}</main></body></html>`;
+    const segments = pageFacts(list, SITE + '/used-vehicles/', { carKey: byVin }).segments;
+    for (const [vin, price] of [[A, '$15,000'], [B, '$15,500'], [C, '$16,000']]) {
+      const own = segments.filter((g) => g.car === vin).map((g) => g.text).join(' ');
+      assert.match(own, new RegExp(`Used car ${vin.slice(-3)} \\${price}`), `${extra}: the card of ${vin} holds its price`);
+    }
+  }
+  // a car's page with one other car's tile, the tile's price outside its link, beside a contact link:
+  // the page's own price shows outside the tile's block, so the whole block, heading and all, is the tile's
+  for (const extra of extras) {
+    const one = `<html><body><header><a href="/">Home</a></header><main><h1>Used 2021 Kia Sorento LX</h1><p>Our price $14,000</p><section><h2>You may also like</h2>${card(A, '$15,000', extra.replace('VIN', A))}</section></main><footer><a href="/about/">About</a></footer></body></html>`;
+    const segments = pageFacts(one, SITE + '/inventory/used-' + C.toLowerCase() + '/', { carKey: byVin }).segments;
+    assert.deepEqual(segments.filter((g) => g.car === null).map((g) => g.text).join(' '), 'Home Used 2021 Kia Sorento LX Our price $14,000 About', extra);
+    assert.match(segments.filter((g) => g.car === A).map((g) => g.text).join(' '), /^You may also like Used car 102 \$15,000/, extra);
+  }
+  // the car's own title, price and form link next to that tile, with no heading: still not the tile's
+  const plain = `<html><body><div><p>Our price $14,000</p><a href="/contact-us/?vin=${C}">Ask about this car</a></div>${card(A, '$15,000', '')}</body></html>`;
+  const own = pageFacts(plain, SITE + '/inventory/used-' + C.toLowerCase() + '/', { carKey: byVin }).segments;
+  assert.deepEqual(own.map((g) => [g.car, g.text]), [[C, 'Our price $14,000 Ask about this car'], [A, 'Used car 102 $15,000']]);
+  // a link naming two cars (a comparison) goes with neither
+  const compare = `<html><body><h1>t</h1><div>${card(A, '$15,000', `<a href="/compare/?vins=${A},${B}">Compare</a>`)}${card(B, '$15,500', '')}</div></body></html>`;
+  assert.match(pageFacts(compare, SITE + '/inventory/used-' + C.toLowerCase() + '/', { carKey: byVin }).segments.filter((g) => g.car === A).map((g) => g.text).join(' '), /\$15,000 Compare/);
+});
+
+test('price: beside one other car\'s tile in one block (the car\'s title in a bar of its own), the whole block is the tile\'s card, the car\'s own price box with it, however the tile is built', () => {
+  const byVin = () => (href) => {
+    const vins = href.match(/\b[a-z0-9]{17}\b/gi) || [];
+    return vins.length === 1 ? vins[0].toUpperCase() : null;
+  };
+  const A = '1HGSAMPL0JH000102';
+  const here = SITE + '/inventory/used-5xysampl6mg000114/';
+  const link = `/inventory/used-${A.toLowerCase()}/`;
+  // the car's title in a bar of its own; its price box and one similar tile side by side below it
+  const page = (main) => `<html><body><header><a href="/">Home</a></header><div class="bar"><h1>Used 2021 Kia Sorento LX</h1></div><div class="main">${main}</div><footer>Call us</footer></body></html>`;
+  const box = (price) => `<div class="price-box"><p>Our price ${price}</p><p>20,000 miles</p><a href="/contact-us/">Check availability</a> <a href="/finance/">Get financing</a></div>`;
+  const read = (main) => pageFacts(page(main), here, { carKey: byVin }).segments;
+  const own = (main) => read(main).filter((g) => g.car === null).map((g) => g.text).join(' ');
+  const tile = (main) => read(main).filter((g) => g.car === A).map((g) => g.text).join(' ');
+  const similar = (amount) => `<div class="similar"><h3>Similar</h3><a href="${link}">2018 Honda Accord ${amount}</a></div>`;
+  const split = `<div class="tile"><div class="photo"><a href="${link}"><img alt=""></a><span>Low miles</span></div><div class="info"><span>$15,000</span></div></div>`;
+  const wrapped = (beside) => `<div class="tile"><div class="head"><a href="${link}">2018 Honda Accord</a> ${beside}</div><div class="info"><span>$15,000</span></div></div>`;
+  const loose = (beside) => `<div class="head"><a href="${link}">2018 Honda Accord</a> ${beside}</div><div class="info"><span>$15,000</span></div>`;
+  // Lot Current cannot tell the car's price box from a piece of the tile, so neither amount is the page's own:
+  // the car may get no price, never the tile's
+  for (const [name, main] of [
+    ['a tile with its amount in its link', box('$15,000') + similar('$15,500')],
+    ['a tile showing no amount', box('$14,000') + similar('')],
+    ['a tile whose amount sits outside the element around its link', box('$14,000') + split],
+    ['a saving beside the tile\'s link', box('$14,000') + wrapped('<span>Save $500</span>')],
+    ['a payment beside the tile\'s link', box('$14,000') + wrapped('<span>Est. $299/mo</span>')],
+    ['the tile\'s pieces loose beside the price box', box('$14,000') + loose('<span>$16,000</span>')],
+    ['a price box that shows no amount', box('Call for price') + loose('<span>Save $500</span>')],
+  ]) {
+    assert.equal(own(main), 'Home Used 2021 Kia Sorento LX Call us', name);
+    assert.match(tile(main), /^Our price /, name);
+  }
+  // two other cars' tiles: each tile is its own card, and the price box the page's own
+  const B = '1FMSAMPL0HU000103';
+  const two = `<div class="similar"><a href="${link}">2018 Honda Accord $15,500</a><a href="/inventory/used-${B.toLowerCase()}/">2017 Ford Escape $16,000</a></div>`;
+  assert.equal(own(box('$15,000') + two), 'Home Used 2021 Kia Sorento LX Our price $15,000 20,000 miles Check availability Get financing Call us');
+});
+
+test('price: one other car\'s tile\'s own price never passes for the page\'s, whatever sits beside its link, wherever it sits, however its "$" is written and whatever the page\'s price box says or shows', () => {
+  const byVin = () => (href) => {
+    const vins = href.match(/\b[a-z0-9]{17}\b/gi) || [];
+    return vins.length === 1 ? vins[0].toUpperCase() : null;
+  };
+  const A = '1HGSAMPL0JH000102';
+  const here = SITE + '/inventory/used-5xysampl6mg000114/';
+  const L = `<a href="/inventory/used-${A.toLowerCase()}/">2018 Honda Accord</a>`;
+  const read = (body) => pageFacts(`<html><body><header><a href="/">Home</a></header>${body}<footer>Call us</footer></body></html>`, here, { carKey: byVin }).segments;
+  const own = (body) => read(body).filter((g) => g.car === null).map((g) => g.text).join(' ');
+  const tile = (body) => read(body).filter((g) => g.car === A).map((g) => g.text).join(' ');
+  const box = (price) => `<div class="price-box"><p>Our price ${price}</p><p>20,000 miles</p><a href="/contact-us/">Check availability</a></div>`;
+  const h1 = '<h1>Used 2021 Kia Sorento LX</h1>';
+  const bar = `<div class="bar">${h1}</div>`;
+  const wrapped = (beside, info = '$15,000') => `<div class="tile"><div class="head">${L} <span>${beside}</span></div><div class="info"><span>${info}</span></div></div>`;
+  // the page's title and price box together, the tile in an aside or straight in the page: whatever sits beside
+  // the tile's link, the tile's $15,000 stays the tile's
+  for (const [beside, info] of [['Save $500'], ['Price drop $500'], ['$500 dealer discount'], ['Reduced $1,000'], ['$1,000 bonus cash'], ['Est. $299/mo'], ['Low miles'], ['$16,000', 'Sale price $15,000']]) {
+    for (const [where, body] of [
+      ['in an aside', `${h1}${box('$14,000')}<aside>${wrapped(beside, info)}</aside>`],
+      ['in an aside under a heading', `${h1}${box('$14,000')}<aside><h3>You may also like</h3>${wrapped(beside, info)}</aside>`],
+      ['straight in the page', `${h1}${box('$14,000')}${wrapped(beside, info)}`],
+      ['its price first, beside a page that shows no amount', `${h1}${box('Call for price')}<aside><div class="tile"><div class="info"><span>${info || '$15,000'}</span></div><div class="head">${L} <span>${beside}</span></div></div></aside>`],
+    ]) {
+      assert.doesNotMatch(own(body), /15,000/, `${beside}, ${where}`);
+      assert.match(tile(body), /\$15,000/, `${beside}, ${where}`);
+    }
+  }
+  // the page's title in a bar of its own: a tile's price after the block that holds the price box and the
+  // tile's link is not the page's, nor is one whose "$" sits in an element of its own, nor one written as an entity
+  for (const beside of ['$16,000', 'Save $500']) {
+    assert.doesNotMatch(own(`${bar}<div class="outer"><div class="main">${box('$14,000')}<div class="head">${L} <span>${beside}</span></div></div><div class="info"><span>$15,000</span></div></div>`), /15,000/, `nested: ${beside}`);
+  }
+  assert.doesNotMatch(own(`${bar}<div class="main">${box('<sup>$</sup>14,000')}<div class="head">${L} <span>$16,000</span></div><div class="info"><sup>$</sup>15,000</div></div>`), /15,000/, 'a "$" of its own');
+  assert.doesNotMatch(own(`${bar}<div class="main">${box('&#36;14,000')}<div class="head">${L} <span>$16,000</span></div><div class="info">&#36;15,000</div></div>`), /15,000/, 'an entity');
+  // the tile before the price box, the page's own text showing an amount elsewhere, or other text between the
+  // page's title and the block: the whole block stays the tile's
+  for (const [name, body] of [
+    ['the tile first', `${bar}<div class="main">${wrapped('Low miles')}${box('$14,000')}</div>`],
+    ['an amount in the page\'s own text after the block', `${bar}<div class="main">${box('$14,000')}${wrapped('Low miles')}</div><p>Doc fee $499</p>`],
+    ['text between the title and the block', `${bar}<div class="gallery">1 of 24</div><div class="main">${box('$14,000')}${wrapped('Low miles')}</div>`],
+  ]) {
+    assert.doesNotMatch(own(body), /14,000|15,000/, name);
+    assert.match(tile(body), /Our price \$14,000.*\$15,000|\$15,000.*Our price \$14,000/, name);
+  }
+  // the tile right after the page's title, its price before its link, the page's own price box after it
+  const priceFirst = `<div class="tile"><div class="info"><span>$15,000</span></div><div class="head">${L} <span>$16,000</span></div></div>`;
+  assert.doesNotMatch(own(`${h1}<aside>${priceFirst}</aside>${box('$14,000')}`), /15,000/, 'the page\'s own price after the tile');
+  assert.match(own(`${h1}<aside>${priceFirst}</aside>${box('$14,000')}`), /Our price \$14,000/);
+  // the tile's price before its link, another amount beside the link, the page showing no amount of its own,
+  // whatever its price box says instead: after more text in the heading's block, beside the tile's pieces, after
+  // the whole tile
+  assert.doesNotMatch(own(`<div class="top">${h1}<p>20,000 miles</p><p>Automatic, one owner</p></div>${priceFirst}`), /15,000/, 'more text after the heading in its block');
+  assert.doesNotMatch(own(`<div class="top">${h1}<p>Stock SM1000</p></div><div class="main">${box('$14,000')}${wrapped('Low miles')}</div>`), /14,000|15,000/, 'a block after more text in the heading\'s block stays the tile\'s');
+  for (const says of ['Call for price', 'Contact us for today\'s pricing', 'Price on request', 'Ask for our best price', 'Get today\'s price', 'Contact dealer for price', 'Call for internet price', 'Price: Call', 'Request a quote', '']) {
+    assert.doesNotMatch(own(`${bar}<div class="main">${box(says)}<div class="info"><span>$15,000</span></div><div class="head">${L} <span>$16,000</span></div></div>`), /15,000/, says);
+    assert.doesNotMatch(own(`${h1}<aside>${priceFirst}</aside>${box(says)}`), /15,000/, `${says}, after the tile`);
+    assert.doesNotMatch(own(`${bar}${priceFirst}${box(says)}`), /15,000/, `${says}, after the whole tile`);
+  }
+  assert.doesNotMatch(own(`${bar}<div class="main"><div class="group">${box('$14,000')}<div class="info"><span>$15,000</span></div></div><div class="head">${L} <span>$16,000</span></div></div>`), /15,000/, 'the price box grouped with the tile\'s price');
+  assert.doesNotMatch(own(`${bar}<div class="main"><div class="price-box"><p>Our price $14,000</p><p>Similar cars from $15,000</p></div><div class="head">${L} <span>$16,000</span></div></div>`), /15,000/, 'a second price in the price box');
+  // the page's title in a bar, its price box and one whole tile in one block: the whole block is the tile's, so
+  // the car's own price is not read there either (no price, never the tile's)
+  for (const main of [`${box('$14,000')}${wrapped('Low miles')}`, `<div class="price-box"><p>Was $16,500</p><p>Our price $14,000</p><p>Est. $250/mo</p><p>Doc fee $499</p></div>${wrapped('Low miles')}`]) {
+    assert.doesNotMatch(own(`${bar}<div class="main">${main}</div>`), /14,000|15,000/, main);
+    assert.match(tile(`${bar}<div class="main">${main}</div>`), /Our price \$14,000.*2018 Honda Accord Low miles \$15,000/, main);
+  }
+});
+
 test('price: priceSpecification without an offer price; a strikethrough, list or MSRP entry is never the price', () => {
   const tacoma = readPage('price-specification.html').cars[0];
   assert.equal(tacoma.price, 29995, 'the StrikethroughPrice comes first in the markup and on the page, and is not the price');
@@ -523,7 +779,9 @@ test('price: no currency counts as US dollars only when the page shows that amou
   assert.deepEqual(bare('Price USD 27,163'), notDollars, 'US dollars in words, but no dollar sign');
   const notShown = { value: null, label: 'the page does not show this price', reason: 'the page does not show this price' };
   for (const text of ['Price 27,163', 'Price CA$27,163', 'Price C$27,163', 'Price $27,163.50', 'Price $127,163', 'Stock 27163', '']) assert.deepEqual(bare(text), notShown, text);
-  for (const text of ['Was $27,163 Now $25,999', 'MSRP $27,163 Sale Price $25,999', 'List Price: $27,163']) assert.deepEqual(bare(text), notShown, text);
+  for (const text of ['Was $27,163 Now $25,999', 'MSRP $27,163 Sale Price $25,999']) assert.deepEqual(bare(text), notShown, text);
+  assert.equal(bare('List Price: $27,163').value, null, 'the only price, labelled a list price');
+  assert.match(bare('List Price: $27,163').reason, /^the page labels its only price "List Price"/);
   assert.deepEqual(bare('Was $27,163 Now $27,163'), { value: 27163, label: 'Price', reason: '' }, 'shown once as the current price');
   assert.deepEqual(priceFromOffers(car({ offers: { '@type': 'Offer', price: 27163 } }), null), notShown, 'no page text');
   // an explicit currency other than US dollars is never a price, whatever the page shows
@@ -623,6 +881,83 @@ test('the gate: the same three signs, a lone sign never admits a car, damaged an
   assert.equal(assessVehicle(carousel[3], {}).decision, DECISION.SKIP, 'the new car in the carousel');
 });
 
+test('the gate: a schema.org car called a demo or loaner after its model year waits for a person', () => {
+  // schema.org has no demo or loaner flag, so the car's own words carry it
+  const carfax = { carfaxLinks: ['https://www.carfax.com/r?vin=2HGSAMPL8KH000101'] };
+  assert.equal(assessVehicle(flat({}, shown(undefined, carfax)), {}).decision, DECISION.READY, 'the plain used car is ready');
+  const demo = flat({ name: 'Used 2019 Honda Civic EX Demo' }, shown(undefined, carfax));
+  assert.equal(demo.isDemo, false, 'no flag');
+  const a = assessVehicle(demo, {});
+  assert.equal(a.decision, DECISION.REVIEW);
+  assert.match(a.reason, /its title says "Demo"/);
+  const loaner = flat({}, shown(undefined, carfax), SITE + '/inventory/used-2019-honda-civic-ex-loaner-2hgsampl8kh000101/');
+  assert.equal(assessVehicle(loaner, {}).decision, DECISION.REVIEW, 'loaner in the page address after the year');
+  // a demo word after a " - " in the name is read too
+  const dashed = flat({ name: '2019 Honda Civic EX - Demo' }, shown(undefined, carfax));
+  assert.equal(assessVehicle(dashed, {}).decision, DECISION.REVIEW, 'a " - Demo" name');
+  // the car's own name is kept when it says demo or loaner, even when the page title says Used
+  for (const name of ['2019 Honda Civic EX Demo', '2019 Honda Civic EX - Service Loaner', 'Honda Civic EX Demonstrator']) {
+    const v = flat({ name }, shown(undefined, { ...carfax, title: 'Used 2019 Honda Civic EX | Sample Motors' }));
+    assert.equal(v.siteTitle, name, `${name}: the name is the title the gate reads`);
+    const r = assessVehicle(v, {});
+    assert.equal(r.decision, DECISION.REVIEW, name);
+    assert.match(r.reason, /Demos and loaners are usually sold as new/, name);
+  }
+  // a plain name still takes the page title's condition word
+  assert.equal(flat({ name: '2019 Honda Civic EX' }, shown(undefined, { ...carfax, title: 'Used 2019 Honda Civic EX | Sample Motors' })).siteTitle, 'Used 2019 Honda Civic EX | Sample Motors');
+  // the page title's dealership part is not the car's words: a "Courtesy" store stays ready
+  const store = flat({ name: '' }, shown(undefined, { ...carfax, title: 'Used 2019 Honda Civic EX | Courtesy Honda of Springfield' }));
+  assert.equal(store.siteTitle, 'Used 2019 Honda Civic EX | Courtesy Honda of Springfield');
+  assert.equal(assessVehicle(store, {}).decision, DECISION.READY);
+});
+
+test('the gate: a demo or loaner word only the page title has is read, with the name\'s condition word kept', () => {
+  const carfax = { carfaxLinks: ['https://www.carfax.com/r?vin=2HGSAMPL8KH000101'] };
+  // the name is plain; the page title about this car says Demo
+  const plain = flat({ name: '2019 Honda Civic EX' }, shown(undefined, { ...carfax, title: '2019 Honda Civic EX Demo | Sample Motors' }));
+  assert.equal(plain.siteTitle, '2019 Honda Civic EX Demo | Sample Motors');
+  const a = assessVehicle(plain, {});
+  assert.equal(a.decision, DECISION.REVIEW);
+  assert.match(a.reason, /its title says "Demo"/);
+  // the name says Used and the page title says Courtesy Vehicle: both are read
+  const used = flat({ name: 'Used 2019 Honda Civic EX' }, shown(undefined, { ...carfax, title: '2019 Honda Civic EX - Courtesy Vehicle | Sample Motors' }));
+  assert.equal(used.siteTitle, 'Used 2019 Honda Civic EX - Courtesy Vehicle | Sample Motors');
+  const b = assessVehicle(used, {});
+  assert.equal(b.decision, DECISION.REVIEW);
+  assert.match(b.reason, /^Listed as pre-owned but its title says "Courtesy Vehicle"/);
+  // the page title's word is read as the car's own word, wherever it stands after the model year
+  for (const [title, word] of [
+    ['2019 Honda Civic EX Courtesy Vehicle for Sale | Sample Motors', 'Courtesy Vehicle'],
+    ['2019 Honda Civic EX Courtesy Car Special | Sample Motors', 'Courtesy Car'],
+    ['Sample Motors | 2019 Honda Civic EX Courtesy Loaner Sale', 'Courtesy Loaner'],
+    ['2019 Honda Civic EX Demo Special | Sample Motors', 'Demo'],
+  ]) {
+    for (const name of ['Used 2019 Honda Civic EX', '2019 Honda Civic EX', 'Certified Pre-Owned 2019 Honda Civic EX']) {
+      const v = flat({ name }, shown(undefined, { ...carfax, title }));
+      const r = assessVehicle(v, {});
+      assert.equal(r.decision, DECISION.REVIEW, `${name} / ${title}: ${v.siteTitle}`);
+      assert.match(r.reason, new RegExp(`its title says "${word}"`), `${name} / ${title}`);
+      if (name !== '2019 Honda Civic EX') assert.equal(v.siteTitle, `${name.replace(/ 2019 Honda Civic EX$/, '')} ${title}`, 'the name\'s condition words go before the page title');
+    }
+  }
+  // a demo, loaner or courtesy word before the page title's model year is read whatever condition word the name has
+  for (const title of ['Demo 2019 Honda Civic EX | Sample Motors', 'Courtesy Vehicle 2019 Honda Civic EX | Sample Motors', 'Courtesy Vehicle: 2019 Honda Civic EX | Sample Motors', 'Courtesy Vehicle - 2019 Honda Civic EX | Sample Motors', 'Sample Motors - Service Loaner 2019 Honda Civic EX']) {
+    for (const name of ['Used 2019 Honda Civic EX', '2019 Honda Civic EX', 'Certified Pre-Owned 2019 Honda Civic EX', 'New 2019 Honda Civic EX']) {
+      const v = flat({ name }, shown(undefined, { ...carfax, title }));
+      assert.equal(v.siteTitle, title, `${name} / ${title}: the page title is the title the gate reads`);
+      const r = assessVehicle(v, {});
+      assert.equal(r.decision, DECISION.REVIEW, `${name} / ${title}`);
+      assert.match(r.reason, /^Listed as pre-owned but also flagged as a demo\. Demos and loaners are usually sold as new/, `${name} / ${title}`);
+    }
+    // a name that says demo itself is kept
+    assert.equal(flat({ name: 'Demo 2019 Honda Civic EX' }, shown(undefined, { ...carfax, title })).siteTitle, 'Demo 2019 Honda Civic EX', title);
+  }
+  // a page title about another car lends no words; a plain page title changes nothing
+  assert.equal(flat({ name: 'Used 2019 Honda Civic EX' }, shown(undefined, { ...carfax, title: 'Demo 2021 Kia Sorento LX | Sample Motors' })).siteTitle, 'Used 2019 Honda Civic EX');
+  assert.equal(flat({ name: '2019 Honda Civic EX' }, shown(undefined, { ...carfax, title: '2021 Kia Sorento LX Demo | Sample Motors' })).siteTitle, '2019 Honda Civic EX');
+  assert.equal(flat({ name: '2019 Honda Civic EX' }, shown(undefined, { ...carfax, title: '2019 Honda Civic EX | Sample Motors' })).siteTitle, '2019 Honda Civic EX');
+});
+
 // ---------- parity with the Dealer Inspire reader ----------
 
 const DRIVE_MEMBERS = { '4WD': 'FourWheelDriveConfiguration', AWD: 'AllWheelDriveConfiguration', FWD: 'FrontWheelDriveConfiguration', RWD: 'RearWheelDriveConfiguration' };
@@ -711,4 +1046,30 @@ test('parity: the sandbox lot too, with its descriptions, features and single-pa
       assertParity(`${day} ${r.stock || r.vin}`, trimRecord(r, { fullRecords: true }), { myStores: ['Example Motors Springfield'] });
     }
   }
+});
+
+// R-8, PR #9's repair cycle 2 round 3: the inventory-data reader sets aside a
+// footnote written "(1)", "[1]", "*1", "(a)" or "(1, 2)" after a guide's or an
+// offer's label; this reader did not, so "Market Value (1): $24,995" as a
+// page's only price was taken as the car's price there. Both readers now read
+// the same footnotes, from one pattern (LABEL_NOTE).
+test('price: a footnote in brackets or a mark with a number after a guide\'s or an old price\'s words changes nothing', () => {
+  const at = (text, price = 24995) => priceFromOffers(car({ offers: { '@type': 'Offer', price, priceCurrency: 'USD' } }), shown(text));
+  const quoted = (label) => ({ value: null, label: `the page labels its only price "${label}", which Lot Current does not read as the selling price`, reason: `the page labels its only price "${label}", which Lot Current does not read as the selling price` });
+  for (const [text, label] of [
+    ['Market Value (1): $24,995', 'Market Value'],
+    ['Market Value [1] $24,995', 'Market Value'],
+    ['Market Value *1 $24,995', 'Market Value'],
+    ['Market Value (a) $24,995', 'Market Value'],
+    ['Market Value (1, 2) $24,995', 'Market Value'],
+    ['Market Value ⁽¹⁾ $24,995', 'Market Value'],
+    ['Instant Cash Offer (1) $24,995', 'Cash Offer'],
+    ['Was (1) $24,995', 'Was'],
+    ['MSRP [2]: $24,995', 'MSRP'],
+  ]) assert.deepEqual(at(text), quoted(label), text);
+  // beside a current price the noted figure is a guide's or an old one, and the current price is read
+  assert.equal(at('Market Value (1) $26,000 Our price $24,995').value, 24995);
+  // a footnote after the selling price's own words changes nothing either
+  assert.equal(at('Internet Price (1) $24,995').value, 24995);
+  assert.equal(at('Our Price *1 $24,995').value, 24995);
 });

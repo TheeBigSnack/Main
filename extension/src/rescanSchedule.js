@@ -3,9 +3,24 @@
 // does the work.
 
 import { adapterById, adapterForService } from '../adapters/index.js';
+import { isFacebookServer } from './photoHosts.js';
 
 export const RESCAN_ALARM = 'lot-sync-rescan';
 export const RESCAN_PERIOD_MINUTES = 180; // every 3 hours while Chrome is open
+
+// A sync the account server turned away for coming too often (its per-person
+// brake counts the last minute) is tried again a minute later, by a
+// one-shot alarm named after the website: one per website, so a second
+// refusal moves it rather than adding another.
+export const SYNC_RETRY_PREFIX = 'sync-retry:';
+export const SYNC_RETRY_MINUTES = 1;
+export const syncRetryAlarm = (origin) => SYNC_RETRY_PREFIX + String(origin || '');
+
+// The website a retry alarm is for; null for any other alarm.
+export function originOfSyncRetryAlarm(name) {
+  const n = String(name || '');
+  return n.startsWith(SYNC_RETRY_PREFIX) && n.length > SYNC_RETRY_PREFIX.length ? n.slice(SYNC_RETRY_PREFIX.length) : null;
+}
 
 // The salesperson's own to-do count from a diff: take-downs, price updates
 // and needs-a-look items on cars they posted.
@@ -58,10 +73,22 @@ export function latestOf(...isos) {
  *   the wizard and the popup pass it, the site's stored service: then the
  *   adapter named on the site (or the one that recognises the service) is
  *   asked, so nothing here reads the service itself.
+ * Never one of Facebook's servers (photoHosts.js isFacebookServer): when the
+ * site record or its service names one, the list is empty, so nothing asks
+ * Chrome for a Facebook host and the background rescan's permission check
+ * (background.js hasPermission) says no. Lot Current reads the dealer's
+ * website, never Facebook.
  */
 export function originsFor(site, needs) {
   const out = new Set();
-  const add = (u) => { try { out.add(new URL(u).origin + '/*'); } catch (e) { /* skip */ } };
+  let facebook = false;
+  // the pattern's '/' + '*' is split so the guard test's comment stripper never sees a block-comment opener
+  const add = (u) => {
+    try {
+      if (isFacebookServer(u)) facebook = true;
+      else out.add(new URL(u).origin + '/' + '*');
+    } catch (e) { /* skip */ }
+  };
   if (site && site.origin) add(site.origin);
   let list = needs;
   if (list && !Array.isArray(list) && typeof list === 'object') {
@@ -69,5 +96,5 @@ export function originsFor(site, needs) {
     list = adapter ? adapter.origins(list) : [];
   }
   for (const pattern of Array.isArray(list) ? list : []) add(pattern);
-  return [...out];
+  return facebook ? [] : [...out];
 }

@@ -20,6 +20,8 @@ import { startMockSite } from './mock-dealer-site.mjs';
 import { LEGAL, legalHosted } from '../../extension/src/legalLinks.js';
 import { wizardSteps } from '../../extension/src/wizardSteps.js';
 import { accountsConfigured } from '../../extension/src/accountConfig.js';
+import { blockFacebook } from './noFacebook.mjs';
+import { until } from './until.mjs';
 
 // The step numbers come from the wizard's own list, so filling in the
 // account config (supabase/README.md step 6) adds the Account step here too.
@@ -34,7 +36,7 @@ const root = fileURLToPath(new URL('../..', import.meta.url));
 const shots = join(root, 'test/e2e/screenshots');
 mkdirSync(shots, { recursive: true });
 
-const extDir = mkdtempSync(join(tmpdir(), 'lot-sync-ext-')); // a fresh folder, so flows can run side by side
+const extDir = mkdtempSync(join(tmpdir(), 'lot-current-ext-')); // a fresh folder, so flows can run side by side
 cpSync(join(root, 'extension'), extDir, { recursive: true });
 const manifest = JSON.parse(readFileSync(join(extDir, 'manifest.json'), 'utf8'));
 manifest.host_permissions = ['http://127.0.0.1/*'];
@@ -45,13 +47,14 @@ writeFileSync(join(extDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
 const site = await startMockSite();
 const siteUrl = `http://127.0.0.1:${site.address().port}/used-vehicles/`;
 const origin = new URL(siteUrl).origin;
-const profileDir = mkdtempSync(join(tmpdir(), 'lot-sync-profile-wizard-'));
+const profileDir = mkdtempSync(join(tmpdir(), 'lot-current-profile-wizard-'));
 const context = await chromium.launchPersistentContext(profileDir, {
   channel: process.env.LOTSYNC_E2E_CHANNEL || 'chromium',
   headless: true,
   args: [`--disable-extensions-except=${extDir}`, `--load-extension=${extDir}`],
   viewport: { width: 760, height: 900 },
 });
+const facebook = await blockFacebook(context); // the real facebook.com is never loaded (./noFacebook.mjs)
 
 const errors = [];
 let panelRef = null;
@@ -118,6 +121,7 @@ try {
   await panel.waitForSelector('#wizZip');
   assert.match(await panel.textContent('#panel'), stepOf('address'));
   assert.equal(await panel.inputValue('#wizCity'), 'Waynesburg');
+  assert.match(await panel.textContent('#wizAddressHint'), /^Read from the website \(structured data\)\. Marketplace asks/, 'the step says where the address came from');
   assert.equal(await panel.inputValue('#wizState'), 'PA');
   assert.equal(await panel.inputValue('#wizZip'), '15370', "from the website's structured data");
   await panel.click('#wizNext'); // -> price
@@ -214,6 +218,7 @@ try {
   assert.equal(await tab(popup, 'ready').locator('.count').textContent(), '1');
   await tab(popup, 'ready').click();
   await popup.click('button[data-action="post"]'); // Mark posted
+  await popup.click('button[data-action="markToday"]'); // it went up today
   await popup.waitForSelector('button[data-action="unpost"]');
 
   // ---- 4. The car sells; the service worker rescans with no tab, and the badge shows the to-do ----
@@ -230,11 +235,12 @@ try {
   await popup.screenshot({ path: join(shots, 'wizard-5-badge-todo.png') });
   await popup.click('button[data-action="takenDown"]');
   await popup.waitForFunction(() => document.querySelector('.tabs button[data-view="todo"] .count').textContent === '0');
-  await popup.waitForFunction(async () => (await chrome.action.getBadgeText({})) === '');
+  await until(popup, async () => (await chrome.action.getBadgeText({})) === '', undefined, { what: 'the badge cleared' });
   await popup.close();
   await panel.close();
 
   assert.deepEqual(errors, [], 'no console errors');
+  facebook.assertNone();
   console.log('Wizard E2E passed. Screenshots in test/e2e/screenshots/');
 } catch (e) {
   if (panelRef && !panelRef.isClosed()) {

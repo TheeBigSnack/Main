@@ -1,4 +1,4 @@
 {
   "draft": true,
-  "note": "While draft is true, npm run legal-pages marks every page it writes under site/legal/ as a draft under attorney review and not in effect. Set it to false only once the attorney has approved the Terms of Service, the Privacy Policy and the posting rules and their approved text is in legal/, then run npm run legal-pages again (scripts/legal-pages.mjs --help)."
+  "note": "While draft is true, npm run legal-pages marks every page it writes under site/legal/ as a draft under attorney review: the Terms of Service and the Privacy Policy as not in effect, and the posting rules, which the extension already asks every salesperson to follow, as wording that may change. Set it to false only once the attorney has approved the Terms of Service, the Privacy Policy and the posting rules and their approved text is in legal/, then run npm run legal-pages again (scripts/legal-pages.mjs --help)."
 }

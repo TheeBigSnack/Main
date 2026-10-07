@@ -5,12 +5,21 @@
 //     1. the inventory type from the dealer's system ("Used", "Certified Used", "New")
 //     2. the condition word in the vehicle page address ("used-2019-...", "new-2027-...")
 //     3. the condition word at the start of the listing title ("Pre-Owned 2019 ...")
-//   Demo and loaner flags always win: those units are sold as new.
-//   A Carfax report link counts as a supporting sign of pre-owned, but a missing
-//   one never blocks a car (7 of 124 used cars on the test site have none).
+//   Demo and loaner flags always win: those units are sold as new. So does a
+//   demo or loaner word after the model year in the car's own title, trim or
+//   page address (unitWordAfterYear). Such a car the website also lists as
+//   pre-owned (any sign, or the second condition field, readableType) and
+//   nowhere as new goes to "needs a look" instead, never to Ready.
+//   A Carfax report link counts as a supporting sign of pre-owned: a car two
+//   signs call pre-owned needs none (7 of 124 used cars on the test site have
+//   none), but a car with only one pre-owned sign needs the link, or it goes
+//   to "needs a look".
 //   Mileage is never used to call a car used: the test site has "New" units
 //   with 3,000-29,000 miles (demos/loaners that aren't flagged as such).
-//   When the signs disagree, or look off, the car goes to "needs a look".
+//   When the signs disagree, or look off, the car goes to "needs a look". So
+//   does a car whose two condition fields (the inventory type and the second
+//   one, readableType) disagree, one calling it new and the other pre-owned,
+//   whatever its title says, unless every sign calls it new.
 //   A website that marks a car damaged or refurbished (in its own words or
 //   with schema.org's DamagedCondition and RefurbishedCondition) sends it to
 //   "needs a look" too: a person checks what that means before it is posted.
@@ -60,12 +69,83 @@ export function titleConditionWords(title) {
   return m && m[1] ? m[1] : null;
 }
 
+// Demo and loaner words after the model year. The condition words above are
+// read only before the year (model names such as "New Beetle" come after
+// it), but a website may name a demo or a loaner after the model: "2024 Jeep
+// Grand Cherokee Limited Demo", ".../2024-jeep-grand-cherokee-demo-<vin>/".
+// The car's words are read: its title from the model year on, its trim, and
+// its page address from the model year on. "Courtesy" counts only as
+// "courtesy car", "courtesy vehicle" or "courtesy loaner": on its own it is
+// a common word in dealership names, and a page title's later parts (after
+// " | " or " - ") often hold the dealership's name ("... Limited | Courtesy
+// Motors", "... | Courtesy Cars of Springfield"). Those later parts are read
+// for demo, demonstrator and loaner, which no dealership name uses ("...
+// Limited - Demo", "... | Service Loaner"), and for a courtesy car, vehicle
+// or loaner that ends its part, or is followed only by "for sale" (and a
+// place: "for sale in Springfield, OH"): "... - Courtesy Vehicle", "... -
+// Courtesy Vehicle for Sale", "... | Courtesy Car | Example Motors"; never
+// one a name goes on from ("Courtesy Car Center", "Courtesy Cars").
+const UNIT_WORD = /\b(demo(?:nstrator)?|(?:service )?loaner|courtesy (?:car|vehicle|loaner))s?\b/i;
+const UNIT_WORD_LATER = /\b(demo(?:nstrator)?|(?:service )?loaner|courtesy (?:car|vehicle|loaner)(?=\s+for\s+sale\b(?:\s+(?:in|near)\s+[^|]*)?(?![\s'\u2019]*[a-z0-9])|(?![\s'\u2019]*[a-z0-9])))s?\b/i;
+const YEAR_WORD = /^(?:19|20)\d{2}$/;
+const TITLE_PARTS = /\s+[|–—-]\s+/;
+const wordsOf = (text) => String(text || '').split(/[^a-z0-9]+/i).filter(Boolean);
+
+// { car, later }: the words after the model year in the title's part that
+// has it (or the first part, with no year), and the parts that follow it.
+function titleCarWords(title) {
+  if (typeof title !== 'string' || !title.trim()) return { car: '', later: '' };
+  const parts = title.split(TITLE_PARTS);
+  const at = Math.max(0, parts.findIndex((p) => wordsOf(p).some((w) => YEAR_WORD.test(w))));
+  const m = /\b(?:19|20)\d{2}\b/.exec(parts[at]);
+  return { car: m ? parts[at].slice(m.index + m[0].length) : parts[at], later: parts.slice(at + 1).join(' | ') };
+}
+
+function addressCarWords(url) {
+  if (typeof url !== 'string' || !url.trim()) return '';
+  let parsed;
+  try {
+    parsed = new URL(url.trim(), 'https://address.invalid/');
+  } catch {
+    return '';
+  }
+  const route = /^#!?\//.test(parsed.hash) ? parsed.hash.replace(/^#!?/, '') : '';
+  const segments = (parsed.pathname + route).split('/').filter(Boolean).map((s) => {
+    try {
+      return decodeURIComponent(s);
+    } catch {
+      return s;
+    }
+  });
+  const at = segments.findIndex((s) => wordsOf(s).some((w) => YEAR_WORD.test(w)));
+  if (at === -1) return wordsOf(segments[segments.length - 1]).join(' ');
+  const first = wordsOf(segments[at]);
+  return [...first.slice(first.findIndex((w) => YEAR_WORD.test(w)) + 1), ...segments.slice(at + 1).flatMap(wordsOf)].join(' ');
+}
+
+// { where, word } for the first demo or loaner word after the model year, or null.
+export function unitWordAfterYear(v = {}) {
+  const title = titleCarWords(v.siteTitle);
+  const sources = [
+    ['title', title.car, UNIT_WORD],
+    ['title', title.later, UNIT_WORD_LATER],
+    ['trim', typeof v.trim === 'string' ? v.trim : '', UNIT_WORD],
+    ['web address', addressCarWords(v.url), UNIT_WORD],
+  ];
+  for (const [where, text, words] of sources) {
+    const m = words.exec(text);
+    if (m) return { where, word: m[1] };
+  }
+  return null;
+}
+
 function describe(checks) {
   return checks.map((c) => `${c.label} says ${c.says}`).join(', ');
 }
 
 export function checkPreOwned(v) {
-  const titleWords = titleConditionWords(v.siteTitle) || v.readableType || null;
+  const titleOwn = titleConditionWords(v.siteTitle);
+  const titleWords = titleOwn || v.readableType || null;
   const checks = [
     { key: 'type', label: 'Inventory type', says: readCondition(v.inventoryType), detail: v.inventoryType || 'missing' },
     { key: 'url', label: 'Web address', says: readCondition(v.urlConditionWord), detail: v.urlConditionWord || 'no condition word' },
@@ -77,10 +157,21 @@ export function checkPreOwned(v) {
   const isNew = saying('new');
   const notes = [];
 
-  if (v.isDemo || v.isLoaner || saying('demo').length) {
-    const what = v.isLoaner ? 'loaner' : 'demo';
-    if (preOwned.length && !isNew.length) {
-      return { verdict: 'review', reason: `Listed as pre-owned but also flagged as a ${what}. Demos and loaners are usually sold as new, so check before posting.`, checks, notes };
+  const unit = unitWordAfterYear(v);
+  if (v.isDemo || v.isLoaner || saying('demo').length || unit) {
+    const what = v.isLoaner || (!v.isDemo && unit && !/demo/i.test(unit.word)) ? 'loaner' : 'demo';
+    if (unit) notes.push(`The website's ${unit.where} says "${unit.word}".`);
+    // The second condition field backs up the title above; for a demo or
+    // loaner it also counts when the title has words of its own, so a car
+    // the website lists there as pre-owned (a certified mark the DealerOn
+    // and Dealer.com readers keep beside a loaner word) gets a person's
+    // look, never a silent skip. It never makes such a car Ready. When it is
+    // the only thing calling the car pre-owned, a note says so.
+    const listedThere = readCondition(v.readableType) === 'pre-owned';
+    if (listedThere && !preOwned.some((c) => c.key !== 'title' || titleOwn)) notes.push(`The website also lists it as "${v.readableType}".`);
+    if ((preOwned.length || listedThere) && !isNew.length) {
+      const flagged = v.isDemo || v.isLoaner || saying('demo').length ? `also flagged as a ${what}` : `its ${unit.where} says "${unit.word}"`;
+      return { verdict: 'review', reason: `Listed as pre-owned but ${flagged}. Demos and loaners are usually sold as new, so check before posting.`, checks, notes };
     }
     return { verdict: 'new', reason: `${what === 'demo' ? 'Demo' : 'Loaner'} unit, sold as new, so it can't go on Marketplace.`, checks, notes };
   }
@@ -88,6 +179,17 @@ export function checkPreOwned(v) {
   if (isNew.length && !preOwned.length) {
     if (v.carfaxUrl) notes.push('Has a Carfax report even though the website calls it new. If it is really used, fix its type in the inventory system.');
     return { verdict: 'new', reason: "New vehicle. Marketplace doesn't allow dealers to list new cars.", checks, notes };
+  }
+
+  // The record's two condition fields disagree: one calls the car new, the
+  // other pre-owned ("Used" and "New"). The second field is otherwise only
+  // the title's fallback; here it counts whatever the title and the address
+  // say, so the car waits on a person, never Ready, and both words are named.
+  // A car every sign calls new is skipped as new above, as before.
+  const typeSays = readCondition(v.inventoryType);
+  const secondSays = readCondition(v.readableType);
+  if ((typeSays === 'new' && secondSays === 'pre-owned') || (typeSays === 'pre-owned' && secondSays === 'new')) {
+    return { verdict: 'review', reason: `The website disagrees with itself: it lists the car as "${v.inventoryType}" and as "${v.readableType}". Check its condition before posting.`, checks, notes };
   }
 
   // Damaged or refurbished never goes straight to Ready, whatever the other

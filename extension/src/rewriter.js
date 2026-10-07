@@ -8,6 +8,7 @@
 import { DEFAULT_SALESPERSON_TITLE } from './settings.js';
 import { cleanDescription } from './description.js';
 import { buildTemplateDescription, runGuardrails, ensureVinLine, ensureClosingLine, usableClosingLine, settleHighlights } from './rewriteTemplate.js';
+import { carStore } from './listingData.js';
 
 export const REWRITE_TIMEOUT_MS = 25000;
 
@@ -38,11 +39,18 @@ export async function guessColorsWithBackend({ endpoint, key = '', photos, optio
 
 // Exactly what leaves the browser: facts about the car and the dealer (plus
 // the dealer website's origin, added by generateDescription, so the service
-// knows which store the car belongs to). No VIN, no Facebook data, nothing
-// about the salesperson beyond the sign-off (their closing line is added to
-// the draft here, like the VIN). When the salesperson picked the highlights,
-// those are the features the service sees.
+// knows which store the car belongs to). No VIN or price field, no Facebook
+// data, nothing about the salesperson beyond the sign-off (their closing line
+// is added to the draft here, like the VIN). `narrative` is the website
+// description's own sentences as the website wrote them, so a VIN, a price
+// or a phone number the dealership wrote there goes with them. It goes as
+// one text, its lines (description.js cleanDescription) joined with spaces,
+// so a sentence the website broke across lines or paragraphs reaches the
+// service whole, never as two halves; the services' own checks read it the
+// same way (they join the list with spaces). When the salesperson picked the
+// highlights, those are the features the service sees.
 export function rewriteFacts({ vehicle: v, dealer = {}, salesperson = {}, priceNote = '', narrative = [], highlights = null }) {
+  const writeUp = (Array.isArray(narrative) ? narrative : []).filter((line) => typeof line === 'string' && line.trim()).join(' ');
   return {
     year: v.year, make: v.make, model: v.model, trim: v.trim, mileage: v.mileage, stock: v.stock,
     features: Array.isArray(highlights) ? settleHighlights(highlights, v.features) : Array.isArray(v.features) ? v.features : [],
@@ -51,7 +59,7 @@ export function rewriteFacts({ vehicle: v, dealer = {}, salesperson = {}, priceN
     carfax: Boolean(v.carfaxUrl),
     exteriorColor: v.exteriorColor, interiorColor: v.interiorColor, bodyType: v.bodyType,
     engine: v.engine, transmission: v.transmission, drivetrain: v.drivetrain, fuelType: v.fuelType,
-    narrative,
+    narrative: writeUp ? [writeUp] : [],
     dealer: { name: dealer.name || '', city: dealer.city || '' },
     salesperson: { name: salesperson.name || '', title: salesperson.title || DEFAULT_SALESPERSON_TITLE },
     priceNote,
@@ -83,17 +91,29 @@ export async function rewriteWithBackend({ endpoint, key = '', facts, fetchImpl 
  * facts, so a person who belongs to two stores is billed and capped against
  * the right one. `highlights` is the salesperson's pick of the car's
  * features (null: the usual pick); `salesperson.closingLine` ends every
- * description when it passes its checks.
+ * description when it passes its checks. `lot` is the website's cars from
+ * the last scan (the snapshot's map by VIN), when known, for carStore.
  * @returns {{ text, source: 'template'|'claude', model?, guardrails, narrative, note? }}
  */
-export async function generateDescription({ vehicle, dealer = {}, salesperson = {}, priceNote = '', price = null, boilerplate = [], settings = {}, origin = '', highlights = null, fetchImpl }) {
+export async function generateDescription({ vehicle, dealer = {}, salesperson = {}, priceNote = '', price = null, boilerplate = [], settings = {}, origin = '', highlights = null, lot = null, fetchImpl }) {
+  // the write-up up to the first part it leaves out (lot-wide text, a label, an award line, a list): the rewrite
+  // service gets it; the template writes from the car's listed facts and never copies it
   const narrative = cleanDescription(vehicle.descriptionRaw, new Set(boilerplate));
   const closingLine = usableClosingLine(salesperson.closingLine);
-  const ctx = { vehicle, dealer, priceNote, price, closingLine };
-  const template = buildTemplateDescription({ vehicle, dealer, salesperson, priceNote, narrative, highlights });
+  const ctx = { vehicle, dealer, salesperson, priceNote, price, closingLine, boilerplate }; // the lot-wide text backs no claim about this car
+  const stores = Array.isArray(settings.myStores) ? settings.myStores : [];
+  const template = buildTemplateDescription({ vehicle, dealer, salesperson, priceNote, highlights, stores });
   const fallback = { text: template, source: 'template', guardrails: runGuardrails(template, ctx), narrative };
   const rw = settings.rewrite || {};
   if (!rw.enabled || !rw.endpoint) return fallback;
+  // no draft can name a dealership that has no name: the service is not asked (and not paid)
+  if (!String(dealer.name || '').trim()) return { ...fallback, note: "The dealership's name isn't set in Settings, so the rewrite service wasn't asked." };
+  // The service knows the dealership's name and town, not the car's store, so
+  // for a car the website lists at a store in another town it could only say
+  // the car is somewhere it isn't: the template, which names the car's store, is used.
+  // On a website whose cars are all at one store (lot), that store is the dealership.
+  const where = carStore(vehicle, { stores, dealer, lot });
+  if (where.away) return { ...fallback, note: `The website lists this car at ${where.store}, which may not be at your dealership's address, so the template wrote the description: it names the car's own store. If it is your store, tick it in Settings.` };
   const facts = { ...rewriteFacts({ vehicle, dealer, salesperson, priceNote, narrative, highlights }), ...(origin ? { origin: String(origin) } : {}) };
   try {
     const r = await rewriteWithBackend({ endpoint: rw.endpoint, key: rw.key, facts, fetchImpl });

@@ -12,7 +12,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import {
   DEFAULTS, parseArgs, hostDir, parseRobots, robotsAllows, robotsVerdict, metaGenerator, assetHosts, findVins,
   jsonLdSummary, jsonLdExcerpt, microdataTypes, carLinks, pickCarPages, paginationShape, pageAnatomy, photoHosts,
-  urlPattern, jsonEndpoint, botSigns, fingerprint, capScanLimits, surveyHostPermissions, lotSyncReading, verdictFor,
+  urlPattern, jsonEndpoint, scrub, botSigns, fingerprint, capScanLimits, capInventoryLimits, surveyHostPermissions, lotSyncReading, verdictFor,
   renderReportMd, renderSummaryMd, EXCERPT_LIMIT,
 } from '../scripts/survey-lib.mjs';
 import { vinCheckDigit } from '../extension/src/vin.js';
@@ -176,14 +176,105 @@ test('pageAnatomy shows a list whose cars appear only after scripts run', () => 
 
 test('jsonEndpoint keeps the address pattern, the top-level keys and the VIN count, never the body or anyone\'s search', () => {
   const body = JSON.stringify({ total: 2, vehicles: [{ vin: VIN, price: 19995 }, { vin: VIN2 }], facets: {} });
-  const ep = jsonEndpoint({ url: SITE + '/api/inventory?zip=12345&page=1', method: 'POST', status: 200, contentType: 'application/json; charset=utf-8', body });
-  assert.deepEqual(ep, { method: 'POST', pattern: SITE + '/api/inventory?zip=…&page=…', status: 200, topKeys: ['total', 'vehicles', 'facets'], vinCount: 2 });
-  assert.ok(!JSON.stringify(ep).includes('19995') && !JSON.stringify(ep).includes('12345'));
+  const ep = jsonEndpoint({ url: SITE + '/api/inventory?zip=12345&page=1', method: 'POST', status: 200, contentType: 'application/json; charset=utf-8', body, postData: '{"zip":"12345","filters":{"type":"used"}}' });
+  const { records, ...summary } = ep;
+  assert.deepEqual(summary, { method: 'POST', pattern: SITE + '/api/inventory?zip=…&page=…', status: 200, topKeys: ['total', 'vehicles', 'facets'], vinCount: 2, paging: { page: 1 }, requestKeys: { kind: 'json', keys: ['zip: string', 'filters.type: string'] } });
+  assert.equal(records.listPath, 'vehicles');
+  assert.equal(records.count, 2);
+  for (const value of ['19995', '12345', VIN, VIN2, 'used"']) assert.ok(!JSON.stringify(ep).includes(value), `no ${value} in the summary`);
   const arr = jsonEndpoint({ url: SITE + '/inv.json', body: JSON.stringify([{ vin: VIN, stock: 'A1' }]), contentType: 'application/json' });
   assert.deepEqual(arr.topKeys, ['[array of 1]', '[].vin', '[].stock']);
   assert.equal(jsonEndpoint({ url: SITE + '/menu.json', body: '{"items":[]}', contentType: 'application/json' }), null, 'no VINs, not kept');
   assert.equal(jsonEndpoint({ url: SITE + '/x', body: 'not json ' + VIN, contentType: 'text/plain' }), null);
   assert.equal(urlPattern('https://a.test/p?x=1&x=2&y='), 'https://a.test/p?x=…&y=…');
+});
+
+// SYNTHETIC: the two inventory shapes the DealerOn and Dealer.com readers
+// expect (extension/adapters/inventoryJson.js), with made-up values.
+test('jsonEndpoint lays out the car records as the platform readers see them, keeping names, kinds and counts, never values', () => {
+  const dealerCom = {
+    pageInfo: { totalCount: 41 },
+    inventory: [
+      { vin: VIN, stockNumber: 'S100', year: 2019, make: 'Honda', model: 'Civic', trim: 'EX', odometer: '31,207 miles', inventoryType: 'used', link: '/used/Honda/2019-Honda-Civic-0123456789abcdef0123456789abcdef.htm', images: [{ uri: 'https://pictures.example-cdn.test/1.jpg' }], address: { accountName: 'Sample Motors' }, pricing: { retailPrice: '$18,995', dprice: [{ typeClass: 'retailPrice', label: 'Price', value: '$18,995' }, { typeClass: 'finalPrice', label: 'Sample Motors Price', value: '$19,485', isFinalPrice: true }] } },
+      { vin: VIN2, stockNumber: 'S101', year: 2018, make: 'Toyota', model: 'RAV4', odometer: '52,001', inventoryType: 'certified', link: '/certified/Toyota/2018-Toyota-RAV4-abcdef0123456789abcdef0123456789.htm', pricing: { dprice: [{ typeClass: 'finalPrice', label: 'Sample Motors Price', value: '$24,100', isFinalPrice: true }] } },
+    ],
+    featured: [{ vin: VIN }],
+  };
+  const ep = jsonEndpoint({ url: SITE + '/apis/widget/INVENTORY_LISTING:inventory-data-bus1/getInventory?start=0&pageSize=24&zip=15301', status: 200, contentType: 'application/json', body: JSON.stringify(dealerCom) });
+  assert.deepEqual(ep.paging, { start: 0, pageSize: 24 }, 'paging numbers kept, the search value not');
+  assert.equal(ep.requestKeys, undefined, 'a GET sends no body');
+  const rs = ep.records;
+  assert.equal(rs.listPath, 'inventory', 'the lot, not the featured list beside it');
+  assert.equal(rs.count, 2);
+  assert.equal(rs.total, 41);
+  assert.equal(rs.filled.mileage, 2);
+  assert.equal(rs.filled.price, 2);
+  assert.equal(rs.filled.priceBeforeFees, 1);
+  assert.equal(rs.filled.location, 1);
+  assert.equal(rs.filled.photos, 1);
+  assert.equal(rs.filled.drivetrain, 0, 'a field the records lack shows as 0');
+  assert.deepEqual(rs.conditions, { used: 1, certified: 1 }, 'the condition words as the reader keeps them');
+  assert.deepEqual(rs.conditionFields, { inventoryType: { used: 1, certified: 1 } }, 'and each condition field\'s own words');
+  // a second condition field ("type: Loaner" beside "inventoryType: used") shows with its words, and a certified loaner is not counted as Certified Used
+  const twoFields = { inventory: [{ ...dealerCom.inventory[0], certified: true, type: 'Loaner' }, { ...dealerCom.inventory[0], vin: VIN2, attributes: [{ name: 'stockType', value: 'DEMO_UNIT' }] }] };
+  const second = jsonEndpoint({ url: SITE + '/apis/widget/INVENTORY_LISTING:inventory-data-bus1/getInventory?start=0', status: 200, contentType: 'application/json', body: JSON.stringify(twoFields) }).records;
+  assert.deepEqual(second.conditions, { used: 2 });
+  assert.deepEqual(second.conditionFields, { inventoryType: { used: 2 }, type: { Loaner: 1 }, stockType: { DEMO_UNIT: 1 } });
+  assert.ok(rs.keys.includes('pricing.dprice[].label: string'));
+  assert.ok(rs.keys.includes('address.accountName: string'));
+  assert.ok(rs.keys.includes('images[].uri: string'));
+  const final = rs.priceLabels.find((p) => p.label === 'Sample Motors Price');
+  assert.deepEqual(final, { key: 'dprice.finalPrice', label: 'Sample Motors Price', kind: 'selling', final: true, cars: 2 });
+  assert.equal(rs.priceLabels.find((p) => p.label === 'Price').kind, 'base', 'a retail typeClass makes it the base price');
+  const text = JSON.stringify(ep);
+  for (const value of [VIN, VIN2, '18,995', '19,485', '31,207', 'S100', 'Civic', '15301', 'pictures.example-cdn']) assert.ok(!text.includes(value), `no ${value} in the summary`);
+
+  // DealerOn's shape: cards nested in a display list, "Vehicle" prefixes
+  const dealerOn = { DisplayCards: [{ VehicleCard: { VehicleVin: VIN, VehicleYear: 2019, VehicleMake: 'Honda', VehicleModel: 'Civic', Mileage: 31207, VehicleInternetPrice: 18995, VehicleDetailUrl: '/used-Town-2019-Honda-Civic-EX-' + VIN } }], Paging: { TotalCount: 1 } };
+  const on = jsonEndpoint({ url: SITE + '/api/vhcliaa/vehicle-pages/cosmos/srp/vehicles/123/456?pt=2', method: 'POST', status: 200, contentType: 'application/json', body: JSON.stringify(dealerOn), postData: 'pt=2&host=www.sample-motors.test' });
+  assert.deepEqual(on.paging, { pt: 2 });
+  assert.deepEqual(on.requestKeys, { kind: 'form', keys: ['pt', 'host'] });
+  assert.equal(on.records.listPath, 'DisplayCards');
+  assert.equal(on.records.total, 1);
+  assert.deepEqual([on.records.filled.price, on.records.filled.mileage, on.records.filled.url], [1, 1, 1]);
+  assert.ok(on.records.keys.includes('VehicleCard.VehicleVin: string') || on.records.keys.includes('VehicleVin: string'));
+  assert.deepEqual(on.records.ownLabels, [], 'no record labels its price in a field of its own');
+  // a record's own label for its price (DealerOn's VehiclePriceLabel in the fixtures): what it says, and whether the reader then takes no price
+  const labelled = { DisplayCards: [
+    { VehicleCard: { ...dealerOn.DisplayCards[0].VehicleCard, VehiclePriceLabel: 'Sample Motors Price' } },
+    { VehicleCard: { ...dealerOn.DisplayCards[0].VehicleCard, VehicleVin: VIN2, VehiclePriceLabel: 'Market Value' } },
+  ] };
+  const own = jsonEndpoint({ url: SITE + '/api/vhcliaa/vehicle-pages/cosmos/srp/vehicles/123/456', status: 200, contentType: 'application/json', body: JSON.stringify(labelled) });
+  assert.deepEqual(own.records.ownLabels, [
+    { key: 'VehiclePriceLabel', label: 'Sample Motors Price', notThePrice: false, cars: 1 },
+    { key: 'VehiclePriceLabel', label: 'Market Value', notThePrice: true, cars: 1 },
+  ]);
+  assert.equal(own.records.filled.price, 1, 'the "Market Value" car has no price');
+  // a dealership whose name holds a guide's word ("Kelley"): its own "<Dealer> Price" is no guide's label, as the reader takes it
+  const kelley = { DisplayCards: [{ VehicleCard: { ...dealerOn.DisplayCards[0].VehicleCard, DealerName: 'Kelley Chevrolet', VehiclePriceLabel: 'Kelley Chevrolet Price' } }] };
+  const named = jsonEndpoint({ url: SITE + '/api/vhcliaa/vehicle-pages/cosmos/srp/vehicles/123/456', status: 200, contentType: 'application/json', body: JSON.stringify(kelley) });
+  assert.deepEqual(named.records.ownLabels, [{ key: 'VehiclePriceLabel', label: 'Kelley Chevrolet Price', notThePrice: false, cars: 1 }]);
+  assert.equal(named.records.filled.price, 1);
+  assert.equal(jsonEndpoint({ url: SITE + '/vin-lookup', body: JSON.stringify({ note: 'ask about ' + VIN }), contentType: 'application/json' }).records, undefined, 'a VIN outside a list is no car list');
+});
+
+test('the record layout never carries a value that rides in a key, a label, a condition or a search number', () => {
+  const body = JSON.stringify({
+    total: 1,
+    photosByVin: { [VIN]: ['a.jpg'] },
+    vehicles: [{ vin: VIN, inventoryType: 'Used - stock 12345 at 4500 Main St', odometer: 31207, pricing: [{ label: 'Was $25,995 now', value: '$24,995' }], [`notes_${VIN2}`]: 'x' }],
+  });
+  const ep = jsonEndpoint({ url: SITE + '/api/inventory?from=15301&page=2&start=4800', method: 'POST', status: 200, contentType: 'application/json', body, postData: JSON.stringify({ filters: { [VIN2]: true }, zip: '15301' }) });
+  const text = JSON.stringify(ep);
+  for (const value of [VIN, VIN2, '25,995', '24,995', '12345', '4500', '15301', '31207']) assert.ok(!text.includes(value), `no ${value} in the summary`);
+  assert.deepEqual(ep.paging, { page: 2, start: 4800 }, 'a five-digit number is not a page');
+  assert.ok(ep.topKeys.includes('photosByVin'));
+  assert.ok(ep.records.keys.some((k) => k.startsWith('notes_<VIN>')));
+  assert.ok(ep.requestKeys.keys.includes('filters.<VIN>: boolean'));
+  assert.ok(ep.records.priceLabels.some((p) => p.label === 'Was <$> now'));
+  assert.deepEqual(Object.keys(ep.records.conditions), ['Used - stock <n> at <n> Main …'], 'numbers out, and cut short');
+  assert.equal(scrub('VehicleInternetPrice'), 'VehicleInternetPrice', 'an ordinary name is kept');
+  assert.equal(scrub('x'.repeat(60)).length, 40);
 });
 
 test('botSigns: a 403, 429 or 503 or a challenge page is a refusal; a CDN header on an ordinary page is only noted', () => {
@@ -241,6 +332,33 @@ test('lotSyncReading counts what the scan stored and summarises the service with
   assert.equal(lotSyncReading({}).carCount, 0);
 });
 
+test("capInventoryLimits lowers the inventory-data reader's limits in the survey's copy, never raises them, and fails loudly if they are renamed", () => {
+  const src = read('../extension/adapters/inventoryJson.js');
+  const out = capInventoryLimits(src, { listPages: 5, carPages: 10 });
+  assert.match(out, /export const MAX_INVENTORY_PAGES = 5;/);
+  assert.match(out, /export const MAX_CONFIRM_PAGES = 10;/);
+  assert.equal(out.length, src.length - 1, 'nothing else changed (30 -> 5 is one digit shorter, 12 -> 10 the same length)');
+  const high = capInventoryLimits(src, { listPages: 50, carPages: 50 });
+  assert.match(high, /export const MAX_INVENTORY_PAGES = 30;/, 'a cap above the shipped limit leaves it');
+  assert.match(high, /export const MAX_CONFIRM_PAGES = 12;/);
+  assert.throws(() => capInventoryLimits('export const MAX_CONFIRM_PAGES = 1;', { listPages: 1, carPages: 1 }), /inventoryJson\.js has no .*MAX_INVENTORY_PAGES/);
+  const survey = read('../scripts/survey.mjs');
+  assert.match(survey, /capInventoryLimits\(readFileSync\(inventoryPath/, "the survey's copy of the extension is capped");
+});
+
+test("verdictFor: a DealerOn or Dealer.com list cut short by the survey's own list-page cap is a note, a list that stopped sooner is a gap", () => {
+  const base = { list: { server: { carLinks: 0 }, rendered: { carLinks: 12 } }, limits: { scan: { listPages: 5, sitemaps: 2, carPages: 10 } } };
+  const ok = { attempted: true, ok: true, adapter: 'dealerOn', adapterName: 'DealerOn', carCount: 60, withPrice: 60, withMileage: 60, withPhotos: 60, requests: 5, warnings: ['The website returned 60 of 124 cars.'] };
+  const capped = verdictFor({ ...base, lotSync: ok });
+  assert.equal(capped.verdict, 'reads it');
+  assert.match(capped.notes.join(), /survey's own cap of 5 list pages/);
+  const stopped = verdictFor({ ...base, lotSync: { ...ok, carCount: 24, withPrice: 24, withMileage: 24, withPhotos: 24, requests: 2, warnings: ['The website returned 24 of 124 cars.'] } });
+  assert.equal(stopped.verdict, 'partly', 'two list pages of five: the reader stopped, not the cap');
+  assert.match(stopped.gaps.join(), /24 of 124/);
+  const standard = verdictFor({ ...base, list: { server: { carLinks: 12 }, rendered: { carLinks: 12 } }, carPagesSummary: { read: 2, withVehicleJsonLd: 2, withVehicleMicrodata: 0 }, lotSync: { ...ok, adapter: 'schemaOrg' } });
+  assert.equal(standard.verdict, 'partly', "the standard-data reader's list is not capped this way");
+});
+
 test('verdictFor: reads it, partly, doesn\'t read it, and not surveyed, each with its reason', () => {
   const base = { list: { server: { carLinks: 2 }, rendered: { carLinks: 2 } }, carPagesSummary: { read: 2, withVehicleJsonLd: 2, withVehicleMicrodata: 0 } };
   const ok = { attempted: true, ok: true, adapter: 'schemaOrg', adapterName: 'Standard vehicle data (schema.org)', carCount: 10, withPrice: 10, withMileage: 10, withPhotos: 9, warnings: [] };
@@ -277,7 +395,7 @@ test('the reports: the per-site report.md carries the platform evidence, the gap
     list: { finalUrl: LIST, title: 'Used', platform: fingerprint({ url: LIST, html: '' }), server: pageAnatomy(DEALERCOM_LIKE, LIST, 200), rendered: pageAnatomy(DEALERON_LIKE, LIST, 200), pagination: { shapes: ['?pt='] } },
     carPages: [{ url: SITE + '/v/1', status: 200, jsonLd: jsonLdSummary(CAR_PAGE), microdata: {}, serverVins: 1, photoHosts: { 'photos.example-cdn.test': 1 } }],
     carPagesSummary: { read: 1, withVehicleJsonLd: 1, withVehicleMicrodata: 0 },
-    jsonEndpoints: [{ method: 'GET', pattern: SITE + '/api/inventory?page=…', status: 200, topKeys: ['vehicles'], vinCount: 2, page: 'list page' }],
+    jsonEndpoints: [{ method: 'GET', pattern: SITE + '/api/inventory?page=…', status: 200, topKeys: ['vehicles'], vinCount: 2, page: 'list page', paging: { page: 1 }, records: { listPath: 'vehicles', count: 2, total: null, keys: ['vin: string', 'price: number'], priceLabels: [{ key: 'price', label: 'price', kind: 'plain', final: false, cars: 2 }, { key: 'packages.Tech Package', label: 'Tech Package', kind: 'other', final: false, aside: true, cars: 1 }], ownLabels: [{ key: 'PriceLabel', label: 'Market Value', notThePrice: true, cars: 2 }], conditions: { '(none)': 2 }, conditionFields: { inventoryType: { used: 1 }, type: { Loaner: 1 } }, filled: { price: 2, mileage: 0 } } }],
     excerpt: { from: SITE + '/v/1', text: jsonLdExcerpt(CAR_PAGE) },
     requests: { survey: 4, robots: 1, list: 1, listServerHtml: 1, carPages: 1, browserTotal: 9, blockedMedia: 3, lotSyncScan: 5 },
     bot: { signs: [] },
@@ -289,6 +407,13 @@ test('the reports: the per-site report.md carries the platform evidence, the gap
   assert.match(md, /\*\*unknown\*\* \(no known marker matched; not guessed\)/);
   assert.match(md, /car links only after scripts run: yes/);
   assert.match(md, /`https:\/\/www\.sample-motors\.test\/api\/inventory\?page=…`/);
+  assert.match(md, /paging in the address: `page=1`/);
+  assert.match(md, /car records at `vehicles`: 2 on this answer, total said nowhere/);
+  assert.match(md, /filled by the reader \(of 2\): price 2, mileage 0/);
+  assert.match(md, /"Tech Package" \(`packages\.Tech Package`, other, outside the record's price fields: never the price, 1 cars\)/, 'a figure from a package is marked as never the price');
+  assert.match(md, /condition fields: `inventoryType` used 1; `type` Loaner 1/);
+  assert.match(md, /first record's fields: `vin: string`, `price: number`/);
+  assert.match(md, /the records' own label for their price: "Market Value" \(`PriceLabel`, not the selling price: the reader takes no price, 2 cars\)/);
   assert.match(md, /```json\n[\s\S]*vehicleIdentificationNumber/);
   assert.match(md, /\*\*Verdict: partly\.\*\*/);
   assert.match(md, /cap: at most 8 pages per site/);
@@ -313,4 +438,27 @@ test('the survey script: its npm command, an ignored output folder, the how-to, 
   assert.match(src, /isFacebook\(hostOf\(req\.url\(\)\)\)[\s\S]{0,120}route\.abort/, 'any request to Facebook is blocked');
   assert.ok(DEFAULTS.pauseMs >= 2000, 'at least 2 seconds between the survey\'s own requests');
   assert.equal((src.match(/if \(bot\.refused\) stop\(/g) || []).length, 3, 'a refusal on the list, its server HTML or a car page stops the site');
+});
+
+// SYNTHETIC: a Dealer.com-shaped record whose final price is not a plain
+// amount. The survey marks that price as one the reader can't read (the
+// reader then takes no price), and never copies what it says.
+test('jsonEndpoint marks a final price the reader can\'t read as an amount, without its words', () => {
+  const body = { inventory: [{ vin: VIN, year: 2019, make: 'Honda', model: 'Civic', odometer: 31207, inventoryType: 'used', link: '/used/Honda/2019-Honda-Civic-0123456789abcdef0123456789abcdef.htm', address: { accountName: 'Sample Motors' }, pricing: { dprice: [{ typeClass: 'retailPrice', label: 'Price', value: '$18,995' }, { typeClass: 'finalPrice', label: 'Sample Motors Price', value: 'Call for Price', isFinalPrice: true }] } }] };
+  const rs = jsonEndpoint({ url: SITE + '/apis/widget/INVENTORY_LISTING:inventory-data-bus1/getInventory?start=0', status: 200, contentType: 'application/json', body: JSON.stringify(body) }).records;
+  assert.deepEqual(rs.priceLabels.find((p) => p.label === 'Sample Motors Price'), { key: 'dprice.finalPrice', label: 'Sample Motors Price', kind: 'selling', final: true, unreadable: true, cars: 1 });
+  assert.equal(rs.filled.price, 0, 'the reader takes no price, never the $18,995 beside it');
+  assert.ok(!JSON.stringify(rs).includes('Call for Price'), 'what the price says is not copied');
+});
+
+// SYNTHETIC: a Dealer.com-shaped record with a package priced beside the
+// car. The reader never takes a figure from outside the record's price
+// fields and lists (inventoryJson.js labeledPrices marks it aside), and the
+// survey says so beside its label, so the report never reads as if a
+// package's figure were a selling price.
+test('jsonEndpoint marks a figure from outside the record\'s price fields, such as a package, as never the price', () => {
+  const body = { inventory: [{ vin: VIN, year: 2019, make: 'Honda', model: 'Civic', odometer: 31207, inventoryType: 'used', link: '/used/Honda/2019-Honda-Civic-0123456789abcdef0123456789abcdef.htm', address: { accountName: 'Sample Motors' }, pricing: { dprice: [{ typeClass: 'retailPrice', label: 'Price', value: '$18,995' }] }, packages: [{ name: 'Dealer Protection Package', price: 1295 }] }] };
+  const rs = jsonEndpoint({ url: SITE + '/apis/widget/INVENTORY_LISTING:inventory-data-bus1/getInventory?start=0', status: 200, contentType: 'application/json', body: JSON.stringify(body) }).records;
+  assert.deepEqual(rs.priceLabels.find((p) => p.label === 'Dealer Protection Package'), { key: 'packages.Dealer Protection Package', label: 'Dealer Protection Package', kind: 'selling', final: false, aside: true, cars: 1 });
+  assert.equal(rs.filled.price, 1, 'the car keeps its own price');
 });

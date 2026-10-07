@@ -13,7 +13,7 @@ import { DECISION } from './classify.js';
 import { basisPrice } from './rescan.js';
 import { sortOrder, sortEntries, filterText, isNew, newDaysOf, dateLine } from './readyList.js';
 import { originsFor } from './rescanSchedule.js';
-import { patternCovers } from './photoHosts.js';
+import { patternCovers, hostList } from './photoHosts.js';
 
 const has = (obj, key) => Boolean(obj) && typeof obj === 'object' && Object.prototype.hasOwnProperty.call(obj, key);
 
@@ -99,6 +99,16 @@ export function defaultOrigin(sites, lastOrigin = null) {
 export function siteReadOrigins(origin, info) {
   if (!origin || !info || !info.service) return [];
   return originsFor({ origin, adapter: info.adapter || null }, info.service);
+}
+
+/**
+ * What the side panel says before Chrome's prompt for reading the website:
+ * every host it is about to ask for (`patterns`, the ones not granted yet),
+ * as Chrome's prompt will list them. A Dealer Inspire website's inventory
+ * service is one of them, so the sentence names it too.
+ */
+export function siteAskText(patterns) {
+  return `Chrome will ask to let Lot Current read ${hostList(patterns) || 'the website'} from the side panel (the same permission automatic rescans use).`;
 }
 
 /**

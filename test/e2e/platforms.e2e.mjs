@@ -10,6 +10,10 @@
 //   other posted car's price drop.
 //   Dealer.com: the same scan paging by "start" -> the sold car's page
 //   answers 410 and goes on To do.
+// Throughout, nothing but the test's one Publish click touches the mock
+// form's action controls, and no listing is marked sold, deleted or updated
+// (the mock form's /actions and /listing-actions logs stay empty, as in the
+// other flows).
 //
 // The real facebook.com is never automated, and no real dealer website is
 // read. Run: node test/e2e/platforms.e2e.mjs (npm run test:e2e runs every flow)
@@ -21,14 +25,15 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { startMockPlatformSite, PLATFORM_LOT, DEALER_NAMES } from './mock-platform-sites.mjs';
-import { startMockMarketplace } from './mock-marketplace.mjs';
+import { startMockMarketplace, INITIAL_LISTINGS } from './mock-marketplace.mjs';
+import { blockFacebook } from './noFacebook.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const shots = join(root, 'test/e2e/screenshots');
 mkdirSync(shots, { recursive: true });
 
 // Test copy of the extension: it may script the local mock servers and nothing else.
-const extDir = mkdtempSync(join(tmpdir(), 'lot-sync-ext-'));
+const extDir = mkdtempSync(join(tmpdir(), 'lot-current-ext-'));
 cpSync(join(root, 'extension'), extDir, { recursive: true });
 const manifest = JSON.parse(readFileSync(join(extDir, 'manifest.json'), 'utf8'));
 manifest.host_permissions = ['http://127.0.0.1/*'];
@@ -41,13 +46,14 @@ const market = await startMockMarketplace();
 const originOf = (kind) => `http://127.0.0.1:${sites[kind].address().port}`;
 const LIST = { dealerOn: '/searchused.aspx', dealerCom: '/used-inventory/index.htm' };
 const marketOrigin = `http://127.0.0.1:${market.address().port}`;
-const profileDir = mkdtempSync(join(tmpdir(), 'lot-sync-profile-platforms-'));
+const profileDir = mkdtempSync(join(tmpdir(), 'lot-current-profile-platforms-'));
 const context = await chromium.launchPersistentContext(profileDir, {
   channel: process.env.LOTSYNC_E2E_CHANNEL || 'chromium',
   headless: true,
   args: [`--disable-extensions-except=${extDir}`, `--load-extension=${extDir}`],
   viewport: { width: 760, height: 900 },
 });
+const facebook = await blockFacebook(context); // the real facebook.com is never loaded (./noFacebook.mjs)
 
 const [sold, dropped, ...rest] = PLATFORM_LOT;
 const lowMiles = PLATFORM_LOT[PLATFORM_LOT.length - 1];
@@ -62,7 +68,16 @@ const watch = (p) => {
 };
 const control = async (kind, path) => (await fetch(originOf(kind) + path)).text();
 const requests = async (kind) => JSON.parse(await control(kind, '/requests'));
-const publishCount = async () => (await fetch(`${marketOrigin}/publish-count`)).text();
+// How many times Publish was clicked; and first, that nothing ever touched the
+// mock form's decoy action controls or submitted it (see mock-marketplace.mjs).
+const publishCount = async () => {
+  assert.deepEqual(await (await fetch(`${marketOrigin}/actions`)).json(), [], 'nothing may touch an action control but the person');
+  // nor did anything mark a listing sold, delete one or save an edit: Facebook lands on a listing page after Publish,
+  // and the day-2 rescan puts a sold car and a price drop on To do, which only the person acts on
+  assert.deepEqual(await (await fetch(`${marketOrigin}/listing-actions`)).json(), [], 'nothing may mark sold, delete or update a listing but the person');
+  assert.deepEqual(await (await fetch(`${marketOrigin}/listing-state`)).json(), INITIAL_LISTINGS, 'every listing is as it was');
+  return (await fetch(`${marketOrigin}/publish-count`)).text();
+};
 
 try {
   const ext = await context.newPage();
@@ -81,6 +96,7 @@ try {
       dealer: { name, city: 'Springfield', state: 'OH', zip: '43215' },
       priceNote: 'Price includes the $490 doc fee; tax and tags extra.',
       dailyCap: 10,
+      rulesReadAt: new Date().toISOString(), // set-up's posting rules, ticked (the side panel asks first otherwise: test/e2e/panel.e2e.mjs)
       rewrite: { enabled: false, endpoint: '', key: '' },
     });
     await chrome.storage.local.set({
@@ -174,6 +190,7 @@ try {
       await panel.waitForSelector('#detected', { timeout: 15000 });
       await panel.click('#confirmPosted');
       await panel.waitForSelector('#done');
+      assert.equal(await publishCount(), '1', "the person's click, and nothing on the listing page Facebook lands on");
       await panel.close();
       panelRef = null;
       popup = await openPopup();
@@ -181,9 +198,11 @@ try {
     // the second car was listed by hand
     await tab(popup, 'ready').click();
     await popup.click(`button[data-action="post"][data-vin="${dropped.vin}"]`);
+    await popup.click(`button[data-action="markBefore"][data-vin="${dropped.vin}"]`); // listed before today
     await popup.waitForSelector(`button[data-action="unpost"][data-vin="${dropped.vin}"]`);
     if (kind === 'dealerCom') {
       await popup.click(`button[data-action="post"][data-vin="${sold.vin}"]`);
+      await popup.click(`button[data-action="markBefore"][data-vin="${sold.vin}"]`);
       await popup.waitForSelector(`button[data-action="unpost"][data-vin="${sold.vin}"]`);
     }
 
@@ -198,6 +217,7 @@ try {
     assert.deepEqual(diff.takeDown.map((t) => [t.vin, t.why]), [[sold.vin, 'gone']]);
     assert.deepEqual(diff.priceUpdates.map((p) => [p.vin, p.from, p.to]), [[dropped.vin, dropped.base + dropped.fee, dropped.base - 1000 + dropped.fee]]);
     assert.deepEqual(vinsOf(diff.needsALook), []);
+    assert.equal(await publishCount(), '1', 'the rescan puts the sold car and the price drop on To do and touches no listing');
     await popup.close();
     popup = await openPopup();
     assert.match(await popup.textContent('.panel'), /Take down\s*1[\s\S]*Gone from the website/);
@@ -209,6 +229,7 @@ try {
   assert.equal(await publishCount(), '1', "only the person's one click");
   assert.equal(rest.length > 0, true);
   assert.deepEqual(errors, [], 'no console errors');
+  facebook.assertNone();
   console.log('DealerOn and Dealer.com E2E passed. Screenshots in test/e2e/screenshots/');
 } catch (e) {
   for (const [name, p] of [['Panel', panelRef], ['Popup', popupRef]]) {

@@ -2,9 +2,10 @@
 
 A template to fill in during Milestone 6. `PLAN.md` says the next dealer-website platform is picked from demand among Dealer.com, DealerOn, Dealer eProcess and DealerFire, and that the milestone is only done when **the next platform is chosen with a written reason and a named first dealer**. This file is where that gets written.
 
-Today Lot Current has two adapters:
+Today Lot Current has four adapters:
 
 - **Dealer Inspire** websites that use the Cars Commerce inventory search (`extension/adapters/dealerInspire.js`, detected by `window.SEARCH_SERVICE` on the page, service host `websites-search.api.carscommerce.inc`). Verified on the pilot dealer's live site.
+- **DealerOn** and **Dealer.com** (`extension/adapters/dealerOn.js` and `dealerCom.js`, on the shared `inventoryJson.js`): read the inventory list the website's own used-inventory page loads. Written from public sources and a page-text survey of local dealer websites, tested only on synthetic sites; **no real DealerOn or Dealer.com website has been read yet** (below, both stay "to be verified on a real site" until one has).
 - **Standard vehicle data** (`extension/adapters/schemaOrg.js`): any website that publishes schema.org vehicle markup (JSON-LD or microdata) on its inventory pages, read from the list page, its `rel=next` pages and each car's own page. It was written from the public schema.org definitions and Google's vehicle listing documentation and tested only on synthetic pages. **It is not verified on any real website, and no platform below is claimed to work with it** until a real site on that platform has been scanned. Its limits are listed in `extension/adapters/README.md`: a list drawn by scripts shows few links to a plain read, and a website that turns away reads without cookies can be scanned from the tab but fails the background rescan.
 
 So the first question for each candidate is whether its websites already publish usable standard vehicle data. If they do, the platform may need no adapter of its own, only a verified scan and a line in `extension/adapters/README.md`. If they don't, or the markup is too thin (no VIN, no price the page shows, no car pages the list links to), the platform gets its own adapter. Each new platform is one file under `extension/adapters/` behind the same interface: `probeInPage()` and `searchInPage(service, request)` in the tab, then `detect(probe)`, `scan(search, options)`, `normalize(record)`, `getDetails(search, vin, options)`, `makeDirectSearch(service)`, plus `origins(service)` and `photoOrigins(records)` for the permissions. It goes before `schemaOrg` in `ADAPTERS`, so its own probe wins on its sites.
@@ -19,28 +20,31 @@ Only what the repository already says is written here. Everything else is marked
 
 ### Dealer.com
 
+- **Reader**: built (`extension/adapters/dealerCom.js`), not yet run on a real site; one survey run (`npm run survey`) confirms or corrects each line below (`extension/adapters/README.md` lists what it must confirm).
 - **Detection**: to be verified on a real site.
-- **Inventory**: `extension/adapters/README.md` says inventory comes from its own JSON endpoints behind the search results page, and each page embeds a vehicle data object. It needs a probe for the page's inventory API and a normaliser for its record shape. Which endpoint, what the record looks like, and whether it can be called from the dealer's own tab without a permission: to be verified on a real site.
+- **Inventory**: the reader (written from Dealer.com's public Web Integration API documentation and the 2026-10-01 page-text survey; `extension/adapters/README.md`) reads the inventory list the used-inventory page itself requests from a `getInventory` or `ws-inv-data` address on the website's own origin, and needs no permission beyond the website itself. The survey saw list pages drawn by scripts and sold car pages answering 410 (seven pages). Whether that request is one the reader can repeat (it may be a POST), its paging and count fields, and the record's field names for condition, certified, stock, mileage, photos and prices: to be verified on a real site.
 - **Pre-owned signal (inventory type, URL word, title word)**: to be verified on a real site.
 - **Description and features**: to be verified on a real site.
 - **Photo host**: to be verified on a real site.
 - **Address data (for the Location field)**: to be verified on a real site.
-- **Known dealers on it**: none named yet. `HANDOFF.md` records a Dealer.com adapter as an idea the owner has not asked for, "needs a real site to verify".
+- **Known dealers on it**: none named yet. The reader exists because the owner asked for Lot Current to read any dealer website, whatever its platform (`HANDOFF.md`, 15.9); it has not read a live site.
 
 ### DealerOn
 
+- **Reader**: built (`extension/adapters/dealerOn.js`), not yet run on a real site; one survey run (`npm run survey`) confirms or corrects each line below (`extension/adapters/README.md` lists what it must confirm).
 - **Detection**: to be verified on a real site.
-- **Inventory**: `extension/adapters/README.md` says the listings are server-rendered with a search API used by the search results page's filters, and that VIN, price and status are present in the page's data layer. The API's shape and whether the data layer alone is enough for a scan: to be verified on a real site.
+- **Inventory**: the reader (written from a public write-up of DealerOn's Cosmos list data and the 2026-10-01 page-text survey; `extension/adapters/README.md`) reads the list data the used-inventory page itself requests from `/api/vhcliaa/vehicle-pages/cosmos/srp/vehicles/` on the website's own origin (`DisplayCards[].VehicleCard`, with the VIN, year, car-page address, internet price and mileage). The survey saw list pages drawn by scripts, car pages with the VIN in their address and photos under `/inventoryphotos/`, one sold car's page answering 404 (a single page, still to confirm: a car the reader can't call gone stays "missing but not confirmed gone", never taken down), and a robots.txt asking for 10 seconds between automated reads. Between the car pages it reads to check whether a car sold, the reader keeps the `Crawl-delay` the website's own robots.txt asks for, and DealerOn's 10 seconds only when robots.txt can't be read. The paging parameter and count field, and the record's field names for condition, certified, stock and prices: to be verified on a real site.
 - **Pre-owned signal**: to be verified on a real site.
 - **Description and features**: to be verified on a real site.
-- **Photo host**: to be verified on a real site.
+- **Photo host**: the `/inventoryphotos/` addresses at full size and the server they come from: to be verified on a real site.
 - **Address data**: to be verified on a real site.
-- **Known dealers on it**: none named yet.
+- **Known dealers on it**: none named yet. The reader exists for the same reason as Dealer.com's; it has not read a live site.
 
 ### Dealer eProcess
 
+- **Reader**: none yet.
 - **Detection**: to be verified on a real site.
-- **Inventory**: `extension/adapters/README.md` says inventory JSON sits behind the search results page with a different pricing block, and that the Carfax link is a separate feed. The pricing block matters: Lot Current's price basis (the main price, or the lower second price when the website shows one) has to map onto it honestly, and the Carfax flag is a supporting sign in the pre-owned check. Both: to be verified on a real site.
+- **Inventory**: `extension/adapters/README.md` lists it, unchecked, as believed to load inventory JSON behind the search results page with a pricing block of its own, and a Carfax link from a separate feed. The pricing block matters: Lot Current's price basis (the main price, or the lower second price when the website shows one) has to map onto it honestly, and the Carfax flag is a supporting sign in the pre-owned check. Both: to be verified on a real site.
 - **Pre-owned signal**: to be verified on a real site.
 - **Description and features**: to be verified on a real site.
 - **Photo host**: to be verified on a real site.
@@ -49,8 +53,9 @@ Only what the repository already says is written here. Everything else is marked
 
 ### DealerFire
 
+- **Reader**: none yet.
 - **Detection**: to be verified on a real site.
-- **Inventory**: `extension/adapters/README.md` says the platform is WordPress-based with an inventory plugin, and records are in page HTML and a JSON feed. Whether the feed is complete enough for the scan (VIN, price, status, photos) or the HTML has to be read: to be verified on a real site.
+- **Inventory**: `extension/adapters/README.md` lists it, unchecked, as believed to be WordPress-based with an inventory plugin, its records in the page HTML and a JSON feed. Whether the feed is complete enough for the scan (VIN, price, status, photos) or the HTML has to be read: to be verified on a real site.
 - **Pre-owned signal**: to be verified on a real site.
 - **Description and features**: to be verified on a real site.
 - **Photo host**: to be verified on a real site.
@@ -88,13 +93,13 @@ Fill in one row per candidate. Use the words in each column, not numbers, so nob
 | Description and features location (known / unknown) | | | | |
 | Estimated work (small / medium / large, and why) | | | | |
 
-## Verification steps for the chosen platform, before the adapter is written
+## Verification steps for the chosen platform, before its reader is written or relied on
 
 1. Open the first dealer's used inventory page and click **Scan website** with the owner present. If the standard vehicle data adapter reads it, write down what it found against the website (cars, prices, the pre-owned decisions), the site and the date. That is the verification, and the platform may need no adapter of its own. Either way, record what the page exposes: any global inventory object, the network calls the search results page makes when a filter changes, the structured data on the page and on a car's page.
 2. Save one real record per edge case into `test/fixtures/` under a name for that platform, with the dealer's agreement: a used car, a certified car, a new car, a demo or loaner if the site has one, a car with no price, a car with no photos, a car at another store if the site is a group site.
 3. Write down the three pre-owned signs (or the equivalents) and where each comes from.
 4. Write down the photo host or hosts and the address source.
-5. Only then write `extension/adapters/<platform>.js` and its tests on those fixtures, and run the popup's scan on the real site with the owner present.
+5. For a platform with no reader yet (Dealer eProcess, DealerFire), only then write `extension/adapters/<platform>.js` and its tests on those fixtures. For DealerOn or Dealer.com, check the reader already there against those fixtures and fix what differs inside `extension/adapters/` and its test fixtures (`extension/adapters/README.md` lists what one survey run must confirm). Either way, run the popup's scan on the real site with the owner present.
 
 ## Required output
 

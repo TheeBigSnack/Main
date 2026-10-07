@@ -5,13 +5,15 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import {
-  keyMode, webhookUrlFor, wantedObjects, runSetup, secretsCommands, priceMismatch, portalMismatch, webhookMismatch,
+  keyMode, webhookUrlFor, wantedObjects, runSetup, secretsCommands, webhookSecretLines, priceMismatch, portalMismatch, webhookMismatch,
   LOOKUP_KEYS, FOUNDING_COUPON_ID, TAG,
 } from '../scripts/stripe-setup-lib.mjs';
 import { parseArgs } from '../scripts/stripe-setup.mjs';
-import { HANDLED_EVENTS } from '../supabase/functions/_shared/billing.mjs';
+import { HANDLED_EVENTS, PRICE_TAG } from '../supabase/functions/_shared/billing.mjs';
 
 const pricing = JSON.parse(readFileSync(new URL('../marketing/pricing.json', import.meta.url), 'utf8'));
 const KEY = 'sk_test_abc123';
@@ -124,7 +126,27 @@ test('stripe setup: key modes, webhook addresses and options', () => {
   assert.equal(webhookUrlFor(HOOK), HOOK);
   for (const bad of ['', 'http://x.supabase.co/functions/v1/billing/webhook', 'https://x.supabase.co/functions/v1/billing', 'https://u:p@x.co/billing/webhook', 'https://x.co/billing/webhook?a=1', 'ABC']) assert.equal(webhookUrlFor(bad), null, bad);
   assert.deepEqual(parseArgs(['--webhook-urlX', 'y'])['unknown'], ['--webhook-urlX', 'y']);
-  assert.deepEqual(parseArgs(['--apply', '--webhook-url', REF, '--site-url=https://a.example', '--nope']), { apply: true, live: false, reprice: false, webhookUrl: REF, siteUrl: 'https://a.example', productName: 'Lot Current', unknown: ['--nope'] });
+  assert.deepEqual(parseArgs(['--apply', '--webhook-url', REF, '--site-url=https://a.example', '--nope']), { apply: true, live: false, reprice: false, webhookUrl: REF, siteUrl: 'https://a.example', productName: 'Lot Current', unknown: ['--nope'], missing: [] });
+});
+
+// A --site-url with nothing after it once counted as no flag at all: the run
+// went on and only noted "no --site-url given".
+test('stripe setup: a flag given with no value is refused before anything is read', () => {
+  for (const argv of [['--site-url'], ['--site-url='], ['--site-url=  '], ['--site-url', '--apply']]) {
+    assert.deepEqual(parseArgs(argv).missing, ['--site-url'], JSON.stringify(argv));
+  }
+  assert.equal(parseArgs(['--site-url', '--apply']).apply, true, 'the next flag is not taken as the value');
+  assert.deepEqual(parseArgs(['--webhook-url', '--product-name=']).missing, ['--webhook-url', '--product-name']);
+  assert.equal(parseArgs(['--product-name=']).productName, 'Lot Current');
+  assert.deepEqual(parseArgs(['--site-url', 'https://a.example', '--product-name', 'Lot Current Test']).missing, []);
+  // the command itself stops with exit 2 and names the flag; no key is set, so nothing could reach Stripe
+  const env = { ...process.env };
+  delete env.STRIPE_SECRET_KEY;
+  delete env.NODE_TEST_CONTEXT;
+  const r = spawnSync(process.execPath, [fileURLToPath(new URL('../scripts/stripe-setup.mjs', import.meta.url)), '--apply', '--site-url'], { encoding: 'utf8', env });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /^--site-url needs a value, so nothing was read or changed/);
+  assert.equal(r.stdout, '');
 });
 
 test('stripe setup: the wanted objects carry the numbers in marketing/pricing.json and the events the webhook handles', () => {
@@ -149,9 +171,57 @@ test('stripe setup: a live key is refused without --live, and a missing key is a
   const none = await runSetup({ key: '', pricing, fetchImpl: s.fetchImpl });
   assert.equal(none.ok, false);
   assert.equal(s.calls.length, 0);
-  const allowed = await runSetup({ key: 'sk_live_abc', live: true, pricing, fetchImpl: s.fetchImpl });
+  const allowed = await runSetup({ key: 'sk_live_abc', live: true, pricing: { ...pricing, hypothesis: false, confirmedOn: '2026-12-01' }, fetchImpl: s.fetchImpl, now: Date.parse('2026-12-01T09:00:00Z') });
   assert.equal(allowed.mode, 'live');
   assert.ok(s.calls.length > 0);
+});
+
+// Live prices charge real money; marketing/pricing.json calls itself a guess
+// until a dealer has agreed to a price in writing (docs/launch-checklist.md,
+// "Pricing confirmed"), and the website says prices are confirmed with the
+// dealer before any paid subscription starts.
+test('stripe setup: live mode is refused while pricing.json is still a hypothesis, before anything is read; test mode is not', async () => {
+  // (the committed file is refused the same way while it says "hypothesis": true; test/marketing.test.js holds
+  // when it may say false)
+  // and while it says "hypothesis": false without the date of the dealer's written agreement, or with a date that is not one
+  // or a date after today (the agreement has not happened yet); the refusal names what is missing
+  const { confirmedOn: _date, ...numbers } = pricing;
+  const now = Date.parse('2026-10-05T12:00:00Z');
+  const flag = /^it still says "hypothesis": true/;
+  const noDate = /^it says "hypothesis": false but has no "confirmedOn" date/;
+  const notADate = /^its "confirmedOn" \(.*\) is not a real date written YYYY-MM-DD/;
+  const later = /^its "confirmedOn" \(2026-10-06\) is after today \(2026-10-05\)/;
+  const guesses = [[{ ...numbers, hypothesis: true }, flag], [{ ...numbers, hypothesis: undefined }, flag], [{ ...numbers, hypothesis: 'false' }, flag], [{ ...numbers, hypothesis: true, confirmedOn: '2026-10-01' }, flag],
+    [{ ...numbers, hypothesis: false }, noDate], [{ ...numbers, hypothesis: false, confirmedOn: '' }, noDate], [{ ...numbers, hypothesis: false, confirmedOn: 'soon' }, notADate],
+    [{ ...numbers, hypothesis: false, confirmedOn: '2026-02-30' }, notADate], [{ ...numbers, hypothesis: false, confirmedOn: 20261001 }, notADate], [{ ...numbers, hypothesis: false, confirmedOn: '2026-10-06' }, later]];
+  if (pricing.hypothesis !== false) guesses.unshift([pricing, flag]);
+  for (const [guess, why] of guesses) {
+    const s = fakeStripe();
+    const r = await runSetup({ key: 'sk_live_abc', live: true, apply: true, pricing: guess, fetchImpl: s.fetchImpl, webhookUrl: REF, now });
+    assert.equal(r.ok, false, JSON.stringify([guess.hypothesis, guess.confirmedOn]));
+    assert.equal(s.calls.length, 0, 'nothing read or created in live mode');
+    assert.deepEqual(r.secrets, {});
+    const refused = r.lines.find((l) => l.check === 'marketing/pricing.json');
+    assert.ok(refused && !refused.ok && !refused.note, 'a failure, not a note');
+    assert.match(refused.detail, why, JSON.stringify([guess.hypothesis, guess.confirmedOn]));
+    assert.match(refused.detail, /nothing was read or changed in live mode[\s\S]*docs\/launch-checklist\.md, "Pricing confirmed"/);
+  }
+  // a dealer's agreement dated today or before: live mode goes ahead
+  for (const day of ['2026-10-05', '2026-09-30']) {
+    const s = fakeStripe();
+    const r = await runSetup({ key: 'sk_live_abc', live: true, pricing: { ...numbers, hypothesis: false, confirmedOn: day }, fetchImpl: s.fetchImpl, now });
+    assert.equal(r.lines.find((l) => l.check === 'marketing/pricing.json'), undefined, day);
+    assert.ok(s.calls.length > 0, day);
+  }
+  const s = fakeStripe();
+  const test = await runSetup({ key: KEY, apply: true, pricing, fetchImpl: s.fetchImpl, webhookUrl: REF });
+  assert.equal(test.ok, true, 'test mode moves no money and runs on the hypothesis');
+  // the live switch names the gate before its first step
+  const doc = readFileSync(new URL('../docs/stripe-setup.md', import.meta.url), 'utf8');
+  const live = doc.slice(doc.indexOf('## Later: switching to live mode'), doc.indexOf('## What never happens'));
+  assert.ok(live.indexOf('"Pricing confirmed"') > 0 && live.indexOf('"Pricing confirmed"') < live.indexOf('1. Activate the Stripe account'), 'named before step 1');
+  assert.doesNotMatch(doc, /a hypothesis until a dealer pays/, 'one rule for when the flag flips: the written agreement');
+  assert.match(readFileSync(new URL('../docs/launch-checklist.md', import.meta.url), 'utf8'), /\*\*Pricing confirmed\.\*\*[^\n]*npm run stripe-setup` refuses live mode until then/);
 });
 
 test('stripe setup: a read on an empty account writes nothing and fails each missing object, naming --apply', async () => {
@@ -188,8 +258,14 @@ test('stripe setup: --apply creates everything once, prints the ids and the sign
   const cmds = secretsCommands(first);
   assert.deepEqual(cmds, [
     `supabase secrets set STRIPE_PRICE_ROOFTOP=${s.db.prices[0].id} STRIPE_PRICE_SEAT=${s.db.prices[1].id} STRIPE_PORTAL_CONFIGURATION=${s.db.portals[0].id}`,
-    'supabase secrets set STRIPE_WEBHOOK_SECRET=whsec_madeup',
   ]);
+  // the signing secret is printed on its own for the Dashboard, never as a command a shell's history would keep
+  assert.equal(cmds.join(' ').includes('whsec_'), false, 'no command carries the webhook secret');
+  const hook = webhookSecretLines(first);
+  assert.equal(hook[0], 'STRIPE_WEBHOOK_SECRET: whsec_madeup');
+  assert.match(hook.join(' '), /Supabase Dashboard \(Edge Functions, Secrets\)/);
+  assert.doesNotMatch(hook.join(' '), /supabase secrets set STRIPE_WEBHOOK_SECRET=/);
+  assert.deepEqual(webhookSecretLines({ webhookSecret: '' }), []);
   assert.equal(cmds.join(' ').includes(KEY), false, 'the secret key is never echoed');
   for (const c of s.calls) {
     assert.equal(c.url.includes(KEY), false, 'the key is never in an address');
@@ -205,7 +281,7 @@ test('stripe setup: --apply creates everything once, prints the ids and the sign
   assert.deepEqual(second.secrets, first.secrets);
   const read = await run(s);
   assert.equal(read.ok, true);
-  assert.ok(read.lines.every((l) => l.ok));
+  assert.deepEqual(read.lines.filter((l) => !l.ok).map((l) => l.check), ['failed payments'], 'everything is ok but the one setting only the Dashboard has');
 });
 
 test('stripe setup: a price that differs from pricing.json fails and is left alone; --apply --reprice moves the lookup key to a new price', async () => {
@@ -224,6 +300,9 @@ test('stripe setup: a price that differs from pricing.json fails and is left alo
   assert.equal(old.lookup_key, null);
   assert.equal(re.secrets.STRIPE_PRICE_ROOFTOP, s.db.prices[2].id);
   assert.ok(s.calls.some((c) => c.path === '/v1/prices' && c.form.transfer_lookup_key === 'true'));
+  // the billing webhook tells seats from the rooftop by this tag, so a subscription still on the old price keeps its seats
+  assert.equal(TAG, PRICE_TAG);
+  assert.deepEqual(s.db.prices.map((p) => [p.id === old.id, p.metadata[PRICE_TAG]]), [[true, 'rooftop'], [false, 'seat'], [false, 'rooftop']], 'the old price keeps its tag, the new one has the same');
 });
 
 test('stripe setup: a portal or webhook changed in the Dashboard is reported on a read and set back by --apply', async () => {
@@ -251,6 +330,23 @@ test('stripe setup: no webhook address and no site address are notes, not failur
   const bad = await run(s, { webhookUrl: 'https://example.com/hook' });
   assert.equal(line(bad, 'webhook').ok, false);
   assert.equal(line(bad, 'webhook').note, undefined);
+});
+
+test('stripe setup: a --site-url that is not an https origin fails before anything is read or changed', async () => {
+  for (const siteUrl of ['lotcurrent.example', 'https://lotcurrent.example/legal/', 'http://lotcurrent.example', 'https://lotcurrent.example?x=1']) {
+    const s = fakeStripe();
+    const r = await run(s, { apply: true, siteUrl });
+    assert.equal(r.ok, false, siteUrl);
+    const l = line(r, 'billing portal: legal links');
+    assert.equal(l.ok, false, siteUrl);
+    assert.equal(l.note, undefined, `${siteUrl} is a failure, not a note`);
+    assert.match(l.detail, /not an https origin/);
+    assert.doesNotMatch(r.lines.map((x) => x.detail).join('\n'), /no --site-url given/);
+    assert.equal(s.calls.length, 0, `${siteUrl}: no Stripe call`);
+  }
+  for (const siteUrl of ['https://lotcurrent.example', 'https://lotcurrent.example/', ' https://lotcurrent.example ']) {
+    assert.equal(wantedObjects(pricing, { siteUrl }).portal.business_profile.terms_of_service_url, 'https://lotcurrent.example/legal/terms/');
+  }
 });
 
 test('stripe setup: a rejected key or an unreachable Stripe ends in one FAIL line, never a crash', async () => {
@@ -295,4 +391,83 @@ test('stripe setup: a new --site-url is applied to the portal and the next read 
   assert.equal((await run(s, { apply: true, siteUrl: 'https://lotcurrent.example' })).ok, true);
   assert.equal(s.db.portals[0].business_profile.terms_of_service_url, 'https://lotcurrent.example/legal/terms/');
   assert.equal((await run(s, { siteUrl: 'https://lotcurrent.example' })).ok, true);
+});
+
+// A secret written into a command stays in the shell's history file: Windows
+// PowerShell 5.1's PSReadLine keeps every line in ConsoleHost_history.txt,
+// bash and zsh keep theirs. The guides set the Stripe key at a prompt and put
+// the secrets in the Supabase Dashboard, and the setup prints the webhook
+// secret on its own rather than inside a command.
+test('stripe setup: no guide has the owner type a secret key or signing secret into a command', () => {
+  const read = (rel) => readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8');
+  const typed = /(STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|ANTHROPIC_API_KEY)\s*=\s*['"]?(?:sk_|rk_|whsec_|sk-ant-)/;
+  for (const f of ['docs/stripe-setup.md', 'docs/production-setup.md', 'supabase/README.md', 'scripts/stripe-setup.mjs', 'scripts/stripe-setup-lib.mjs', 'README.md', 'backend/README.md']) {
+    for (const l of read(f).split('\n')) assert.doesNotMatch(l, typed, `${f}: ${l.trim().slice(0, 100)}`);
+  }
+  const doc = read('docs/stripe-setup.md');
+  assert.ok(doc.includes("$env:STRIPE_SECRET_KEY = Read-Host 'Stripe secret key'"), 'PowerShell reads the key at a prompt');
+  assert.match(doc, /PowerShell does show the key on screen as you paste it, so do this where nobody can see your screen/, 'Read-Host keeps the key out of history, not off the screen');
+  assert.ok(doc.includes('read -rs STRIPE_SECRET_KEY && export STRIPE_SECRET_KEY'), 'macOS and Linux read it at a prompt');
+  assert.match(doc, /ConsoleHost_history\.txt/, 'the guide names the file a typed key would stay in');
+  const live = doc.slice(doc.indexOf('## Later: switching to live mode'));
+  assert.match(live, /live secret key \(`sk_live_`\) set at the prompt as in step 3/);
+});
+
+// docs/stripe-setup.md runs test mode on the production project, so the
+// rows the test-mode webhook writes stay in public.subscriptions; the live
+// switch resets them. The statement in the doc must clear every column the
+// webhook copies from Stripe (all of them but the dealership, the free pilot's
+// end, which stays, and updated_at). The columns are read from every
+// migration: 0004's create table plus each `add column` of every later
+// `alter table public.subscriptions` statement, one or several, on one line
+// or over several, so a column a later migration adds that way is caught
+// here. The doc must not claim test mode leaves no trace.
+test('stripe setup doc: the live switch resets every Stripe column test mode wrote, keeps the free pilots, and the intro does not say nothing leaks', () => {
+  const doc = readFileSync(new URL('../docs/stripe-setup.md', import.meta.url), 'utf8');
+  const live = doc.slice(doc.indexOf('## Later: switching to live mode'));
+  const sql = /```sql\n([^]*?)```/.exec(live)?.[1] || '';
+  assert.match(sql, /update public\.subscriptions/, 'the live switch has the reset statement');
+  // the columns as every migration leaves them: 0004's table and what later files add
+  const dir = new URL('../supabase/migrations/', import.meta.url);
+  const migrations = readdirSync(dir).filter((f) => /^\d{4}_.+\.sql$/.test(f)).sort().map((f) => readFileSync(new URL(f, dir), 'utf8')).join('\n');
+  const table = /create table public\.subscriptions \(([^]*?)\n\);/.exec(migrations)[1];
+  const columns = [...table.matchAll(/^\s+([a-z_]+) /gm)].map((m) => m[1]);
+  for (const [statement] of migrations.replace(/--.*$/gm, '').matchAll(/\balter table (?:if exists )?(?:only )?public\.subscriptions\b[^;]*;/gi)) {
+    for (const m of statement.matchAll(/\badd column (?:if not exists )?([a-z_]+)/gi)) columns.push(m[1]);
+  }
+  assert.ok(columns.includes('stripe_customer_id') && columns.includes('cancel_at'), columns.join(','));
+  const sets = [...sql.matchAll(/^\s+(?:set\s+)?([a-z_]+) = /gm)].map((m) => m[1]);
+  assert.ok(sets.length >= 5, sets.join(','));
+  for (const c of sets) assert.ok(columns.includes(c), `the reset sets ${c}, which no migration creates: the statement would fail`);
+  for (const c of columns.filter((c) => !['dealership_id', 'pilot_ends_at', 'updated_at'].includes(c))) assert.match(sql, new RegExp(`\\b${c} = `), `the reset sets ${c}`);
+  assert.match(sql, /status = case when pilot_ends_at is not null then 'pilot' end/, 'a free pilot stays a pilot');
+  assert.doesNotMatch(sql, /pilot_ends_at = /, 'the free pilots keep their end dates');
+  assert.ok(live.indexOf('```sql') > live.indexOf('the new webhook secret and the live key'), 'after the live key and webhook secret, so no test event lands after it');
+  // The reset sets columns later migrations add (cancel_at, 0009_cancel_at.sql):
+  // on a project that has not applied them the statement fails, so the live
+  // switch applies the migrations itself before it (the Supabase workflow's
+  // database step, as every production change), rather than relying on step 5
+  // having been run since the column was added.
+  const push = live.search(/the Supabase workflow's \*\*plan\*\* and, if it lists a migration, \*\*database\*\*/);
+  assert.ok(push >= 0 && push < live.indexOf('```sql'), 'the live switch applies the migrations (the workflow\'s database step) before the reset');
+  assert.doesNotMatch(doc, /nothing made here leaks into live mode/);
+  assert.match(doc.slice(0, doc.indexOf('## What you need first')), /stay there until the live switch resets them/);
+});
+
+test('stripe setup: every run that reaches Stripe notes the failed-payment setting it cannot set, and the docs give the step', async () => {
+  const s = fakeStripe();
+  for (const r of [await run(s), await run(s, { apply: true })]) {
+    const l = line(r, 'failed payments');
+    assert.ok(l, 'a failed payments line');
+    assert.equal(l.note, true, 'a note: it never fails the run');
+    assert.match(l.detail, /"If all retries for a payment fail" to "Cancel the subscription"/);
+    assert.match(l.detail, /docs\/stripe-setup\.md step 3/);
+  }
+  const doc = readFileSync(new URL('../docs/stripe-setup.md', import.meta.url), 'utf8');
+  const step3 = doc.slice(doc.indexOf('## 3. '), doc.indexOf('## 4. '));
+  assert.match(step3, /set \*\*If all retries for a payment fail\*\* to \*\*Cancel the subscription\*\*/);
+  assert.match(doc.slice(doc.indexOf('## Later: switching to live mode')), /\*\*If all retries for a payment fail\*\* is \*\*Cancel the subscription\*\*/, 'checked again in live mode');
+  const readme = readFileSync(new URL('../supabase/README.md', import.meta.url), 'utf8');
+  assert.doesNotMatch(readme, /Stripe is still collecting/, 'an unpaid subscription is no longer retried');
+  assert.match(readme, /`past_due` and `unpaid` are left out: the subscription is still open/);
 });
