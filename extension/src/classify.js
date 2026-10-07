@@ -16,7 +16,10 @@
 //   to "needs a look".
 //   Mileage is never used to call a car used: the test site has "New" units
 //   with 3,000-29,000 miles (demos/loaners that aren't flagged as such).
-//   When the signs disagree, or look off, the car goes to "needs a look".
+//   When the signs disagree, or look off, the car goes to "needs a look". So
+//   does a car whose two condition fields (the inventory type and the second
+//   one, readableType) disagree, one calling it new and the other pre-owned,
+//   whatever its title says, unless every sign calls it new.
 //   A website that marks a car damaged or refurbished (in its own words or
 //   with schema.org's DamagedCondition and RefurbishedCondition) sends it to
 //   "needs a look" too: a person checks what that means before it is posted.
@@ -176,6 +179,17 @@ export function checkPreOwned(v) {
   if (isNew.length && !preOwned.length) {
     if (v.carfaxUrl) notes.push('Has a Carfax report even though the website calls it new. If it is really used, fix its type in the inventory system.');
     return { verdict: 'new', reason: "New vehicle. Marketplace doesn't allow dealers to list new cars.", checks, notes };
+  }
+
+  // The record's two condition fields disagree: one calls the car new, the
+  // other pre-owned ("Used" and "New"). The second field is otherwise only
+  // the title's fallback; here it counts whatever the title and the address
+  // say, so the car waits on a person, never Ready, and both words are named.
+  // A car every sign calls new is skipped as new above, as before.
+  const typeSays = readCondition(v.inventoryType);
+  const secondSays = readCondition(v.readableType);
+  if ((typeSays === 'new' && secondSays === 'pre-owned') || (typeSays === 'pre-owned' && secondSays === 'new')) {
+    return { verdict: 'review', reason: `The website disagrees with itself: it lists the car as "${v.inventoryType}" and as "${v.readableType}". Check its condition before posting.`, checks, notes };
   }
 
   // Damaged or refurbished never goes straight to Ready, whatever the other

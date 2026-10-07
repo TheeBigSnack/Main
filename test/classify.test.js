@@ -178,6 +178,44 @@ test('a demo or loaner the second condition field calls pre-owned gets a look wh
   assert.deepEqual(assessVehicle({ ...used, isDemo: true }, {}).notes, []);
 });
 
+// The record's two condition fields (inventoryType and readableType) that
+// disagree, one calling the car new and the other pre-owned, send it to Needs
+// a look naming both words, whatever the title and the address say, unless
+// every sign calls it new, when it is skipped as new as before (the
+// DealerOn and Dealer.com readers keep "used" and "New" from two fields this
+// way; a Dealer Inspire record carries type and readable_type). Before, the
+// second field was read only when the title had no condition word, so a
+// record with "Used" in one field and "New" in the other could be Ready.
+test('two condition fields that disagree on new and pre-owned send the car to Needs a look, naming both words', () => {
+  const vin = '1C4RJFBG0RC000002';
+  const used = {
+    vin, year: 2021, make: 'Jeep', model: 'Grand Cherokee', trim: 'Limited', inventoryType: 'Used', readableType: 'New', isDemo: false, isLoaner: false,
+    siteTitle: 'Used 2021 Jeep Grand Cherokee Limited', url: `https://www.example-dealer.test/used/2021-jeep-grand-cherokee-limited-${vin.toLowerCase()}/`, urlConditionWord: 'used',
+    carfaxUrl: 'https://www.carfax.com/x', mileage: 31200, price: 30000, photoCount: 10, availability: 'In-Stock',
+  };
+  const cases = [
+    [used, 'Used', 'New'],
+    [{ ...used, inventoryType: 'Certified Used' }, 'Certified Used', 'New'],
+    [{ ...used, siteTitle: '2021 Jeep Grand Cherokee Limited' }, 'Used', 'New'],
+    [{ ...used, inventoryType: 'New', readableType: 'Pre-Owned' }, 'New', 'Pre-Owned'],
+    [{ ...used, inventoryType: 'New', readableType: 'Pre-Owned', siteTitle: '2021 Jeep Grand Cherokee Limited', urlConditionWord: 'new' }, 'New', 'Pre-Owned'],
+  ];
+  for (const [v, first, second] of cases) {
+    const a = assessVehicle(v, {});
+    assert.equal(a.decision, DECISION.REVIEW, `${first} / ${second}: ${a.reason}`);
+    assert.equal(a.reason, `The website disagrees with itself: it lists the car as "${first}" and as "${second}". Check its condition before posting.`);
+  }
+  // a car every sign (type, title, address) calls new is still skipped as new
+  assert.equal(assessVehicle({ ...used, inventoryType: 'New', readableType: 'Pre-Owned', siteTitle: 'New 2021 Jeep Grand Cherokee Limited', urlConditionWord: 'new' }, {}).decision, DECISION.SKIP);
+  // fields that agree, or a second field that says neither, change nothing
+  assert.equal(assessVehicle({ ...used, readableType: 'Pre-Owned' }, {}).decision, DECISION.READY);
+  assert.equal(assessVehicle({ ...used, readableType: null }, {}).decision, DECISION.READY);
+  assert.equal(assessVehicle({ ...used, inventoryType: 'New', readableType: 'New', siteTitle: 'New 2021 Jeep Grand Cherokee Limited', urlConditionWord: 'new' }, {}).decision, DECISION.SKIP);
+  // a demo or loaner is decided by the loaner rule first, as before
+  assert.equal(assessVehicle({ ...used, isLoaner: true }, {}).decision, DECISION.REVIEW);
+  assert.match(assessVehicle({ ...used, isLoaner: true }, {}).reason, /^Listed as pre-owned but also flagged as a loaner\./);
+});
+
 test('a demo or loaner named after the model year is never Ready: in the title, the trim or the page address', () => {
   const vin = '1C4RJFBG0RC000001';
   const used = {

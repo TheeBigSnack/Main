@@ -532,10 +532,10 @@ const DEMO_LETTERS = /demo/i;
 const LOANER_LETTERS = /loaner|courtesy/i;
 const lettersOf = (text) => String(text).replace(/[^a-z]/gi, '');
 
-// A condition word the gate can read, from a condition field; a field that
-// says nothing about new or used ("Car", "SUV") is not a condition.
-function conditionOf(card) {
-  const raw = textOf(pick(card, N.condition));
+// A condition word the gate can read, from one condition field's text; a
+// field that says nothing about new or used ("Car", "SUV") is not a
+// condition ('').
+function conditionText(raw) {
   if (/^\s*u\s*$/i.test(raw)) return 'Used'; // a one-letter code, as some list data sends it
   if (/^\s*n\s*$/i.test(raw)) return 'New';
   const words = conditionWords(raw);
@@ -543,12 +543,26 @@ function conditionOf(card) {
   return DEMO_LETTERS.test(lettersOf(raw)) || LOANER_LETTERS.test(lettersOf(raw)) ? raw : '';
 }
 
+// The first condition field present, as a condition word.
+const conditionOf = (card) => conditionText(textOf(pick(card, N.condition)));
+
+// What a condition word says, in the pre-owned gate's order (classify.js
+// readCondition): 'demo' for a demo or loaner word, then 'pre-owned', then
+// 'new', else ''. So "Used - Like New" is used, not new.
+function conditionSays(words) {
+  const text = String(words || '');
+  if (/\b(?:demo(?:nstrator)?|loaner|courtesy)\b/i.test(text) || DEMO_LETTERS.test(lettersOf(text)) || LOANER_LETTERS.test(lettersOf(text))) return 'demo';
+  if (/\b(?:used|pre-?\s?owned|certified|cpo)\b/i.test(text)) return 'pre-owned';
+  if (/\bnew\b/i.test(text)) return 'new';
+  return '';
+}
+
 /**
  * Every condition field the record carries, top level and attribute lists,
  * in the order of N.condition's names: { key, text }. conditionOf reads the
- * first; the demo, loaner and certified words are read in all of them, since
- * a record can say "used" in one ("inventoryType") and "Loaner" in another
- * ("type", "stockType").
+ * first; the demo, loaner, certified, new and used words are read in all of
+ * them, since a record can say "used" in one ("inventoryType") and "Loaner"
+ * or "New" in another ("type", "stockType", "newUsed").
  * @param {object} card
  * @returns {{ key: string, text: string }[]}
  */
@@ -675,9 +689,22 @@ export function normalizeInventoryRecord(card, { origin, page = null } = {}) {
   const fields = [condition, ...conditionFields(card).map((f) => f.text)];
   const demoWord = fields.some((t) => DEMO_LETTERS.test(lettersOf(t)));
   const loanerWord = fields.some((t) => LOANER_LETTERS.test(lettersOf(t)));
-  const inventoryType = certified && !/\bnew\b/i.test(condition) && !demoWord && !loanerWord ? 'Certified Used' : condition || null;
+  // A "new" word counts in any condition field too (rule 3), and so does a
+  // used one beside it: the first of each, as a condition word. A new word
+  // anywhere stops the certified rename; when the first field present says
+  // nothing, a new word from another field is the inventory type.
+  const said = fields.map(conditionText).filter(Boolean);
+  const newWord = said.find((w) => conditionSays(w) === 'new') || '';
+  const usedWord = said.find((w) => conditionSays(w) === 'pre-owned') || '';
+  const inventoryType = (certified && !newWord && !demoWord && !loanerWord ? 'Certified Used' : condition || newWord) || null;
   const marked = certified || fields.some((t) => /\b(?:certified|cpo)\b/i.test(conditionWords(t)));
-  const readableType = marked && (demoWord || loanerWord) ? 'Certified' : null;
+  // A record whose fields disagree, used in one and new in another, keeps
+  // the word that disagrees with its inventory type as its second condition
+  // field, so the gate sends the car to Needs a look naming both words
+  // (classify.js checkPreOwned) instead of letting it reach Ready.
+  const typeSays = conditionSays(inventoryType);
+  const disagrees = newWord && usedWord ? (typeSays === 'new' ? usedWord : typeSays === 'pre-owned' ? newWord : '') : '';
+  const readableType = marked && (demoWord || loanerWord) ? 'Certified' : disagrees || null;
   const title = textOf(pick(card, N.title));
   const location = textOf(pick(card, N.location, { nested: true })) || null;
   const own = ownPriceLabel(card);

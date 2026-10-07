@@ -1279,3 +1279,54 @@ test('R-8: a footnote or trademark mark after a price\'s label changes nothing: 
   const named = normalizeInventoryRecord({ ...record, pricing: { ...record.pricing, dprice } }, { origin: DEALERCOM_ORIGIN });
   assert.deepEqual([named.price, named.priceLabel, named.priceBeforeFees], [car.base + car.fee, 'Sample Price*', car.base], 'Dealer.com: "Sample Price*" not marked final is still the dealer\'s own price');
 });
+
+// Rule 3, second repair cycle: a "new" word in any condition field. Before,
+// only the first condition field present was read for it, so a record that
+// said "used" there and "New" in another field (newUsed, type, VehicleType)
+// was Ready, and with the certified flag it was even renamed Certified Used.
+// Every condition field now counts: when one says used and another new, the
+// two are kept as the record's two condition fields (inventoryType and
+// readableType), the gate sends the car to Needs a look naming both words,
+// and the certified rename never happens.
+test('Rule 3: a "new" word in any condition field counts on DealerOn and Dealer.com: fields that disagree send the car to Needs a look naming both words, never Certified Used', () => {
+  const [c] = platformCars(1, { from: 730 });
+  const com = (patch, certified = false) => normalizeInventoryRecord({ ...dealerComRecord({ ...c, certified }), ...patch }, { origin: DEALERCOM_ORIGIN });
+  const on = (patch, certified = false) => normalizeInventoryRecord({ ...dealerOnCard({ ...c, certified }).VehicleCard, ...patch }, { origin: DEALERON_ORIGIN });
+  const cases = {
+    // the reviewer's three records
+    'Dealer.com, inventoryType used with newUsed New': [com({ newUsed: 'New' }), 'used', 'New'],
+    'Dealer.com, certified, inventoryType used with type New': [com({ type: 'New' }, true), 'used', 'New'],
+    'DealerOn, VehicleCondition Used with VehicleType New': [on({ VehicleType: 'New' }), 'Used', 'New'],
+    // the same in other shapes
+    'DealerOn, certified, VehicleCondition Certified Pre-Owned with VehicleType New': [on({ VehicleType: 'New' }, true), 'Certified Pre-Owned', 'New'],
+    'Dealer.com, inventoryType used with a one-letter stockType N': [com({ stockType: 'N' }), 'used', 'New'],
+    'Dealer.com, inventoryType used with NEW_VEHICLE in its attributes': [com({ attributes: [{ name: 'newUsed', value: 'NEW_VEHICLE' }] }), 'used', 'NEW VEHICLE'],
+    'Dealer.com, certified, inventoryType new with type Used': [com({ inventoryType: 'new', type: 'Used' }, true), 'new', 'Used'],
+  };
+  for (const [what, [v, first, second]] of Object.entries(cases)) {
+    assert.doesNotMatch(String(v.inventoryType), /certified used/i, `${what}: never renamed Certified Used`);
+    assert.deepEqual([v.inventoryType, v.readableType], [first, second], `${what}: both words kept`);
+    const verdict = checkPreOwned(v);
+    assert.equal(verdict.verdict, 'review', `${what}: ${verdict.reason}`);
+    assert.equal(verdict.reason, `The website disagrees with itself: it lists the car as "${first}" and as "${second}". Check its condition before posting.`, what);
+    assert.equal(assessVehicle(v, withDefaults({})).decision, DECISION.REVIEW, `${what}: Needs a look, never Ready`);
+  }
+  // fields that agree change nothing: used and used is Ready, a certified one is Certified Used, new and new is skipped
+  const used = com({ newUsed: 'Used', type: 'SUV' }, true);
+  assert.deepEqual([used.inventoryType, used.readableType], ['Certified Used', null]);
+  assert.equal(assessVehicle(used, withDefaults({})).decision, DECISION.READY);
+  const fresh = com({ inventoryType: 'new', newUsed: 'New', link: `/new/${c.make}/${c.year}-${c.make}-${c.model}.htm` });
+  assert.equal(assessVehicle(fresh, withDefaults({})).decision, DECISION.SKIP);
+  // a used field that says "Like New" is used, not new
+  const likeNew = com({ condition: 'Used - Like New' });
+  assert.deepEqual([likeNew.inventoryType, likeNew.readableType], ['used', null]);
+  assert.equal(assessVehicle(likeNew, withDefaults({})).decision, DECISION.READY);
+  // when the first condition field present says nothing of the kind, a new word in another is the inventory type
+  const silent = on({ VehicleCondition: 'Vehicle', VehicleType: 'New' }, true);
+  assert.equal(silent.inventoryType, 'New');
+  assert.equal(assessVehicle(silent, withDefaults({})).decision, DECISION.REVIEW, 'its title and address say used: Needs a look');
+  // a loaner the website also calls new somewhere is still decided by the loaner rule, never Ready
+  const loaner = com({ type: 'Loaner', newUsed: 'New' }, true);
+  assert.notEqual(assessVehicle(loaner, withDefaults({})).decision, DECISION.READY);
+  assert.doesNotMatch(String(loaner.inventoryType), /certified used/i);
+});

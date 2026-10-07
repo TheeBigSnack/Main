@@ -18,7 +18,7 @@ export const VEHICLE_FIELDS = Object.freeze([
   // --- the pre-owned gate (classify.js checkPreOwned): three signs are compared; two that say pre-owned, or one backed by a Carfax link, pass, and none may say new ---
   'inventoryType', // "Used" / "Certified Used" / "New" (the schema.org reader adds "Damaged" / "Refurbished", which the gate sends to Needs a look): sign 1; the rescan flags a retype
   'siteTitle', // the website's own title for the car ("Pre-Owned 2019 ..."): sign 3 (titleConditionWords); branded-title words (listingData.js)
-  'readableType', // "Pre-Owned" / "Certified Pre-Owned" / "New": backs up sign 3 when the title has no condition word; for a demo or loaner, a pre-owned one also counts when the title has words of its own (Needs a look, not skipped)
+  'readableType', // "Pre-Owned" / "Certified Pre-Owned" / "New": backs up sign 3 when the title has no condition word; for a demo or loaner, a pre-owned one also counts when the title has words of its own (Needs a look, not skipped); one that disagrees with inventoryType (new against pre-owned) sends the car to Needs a look whatever the title says
   'url', // the car's page on the website: the popup, the panel and upkeep link to it; the rescan keeps it
   'urlConditionWord', // the condition word in that address ("used", "certified used", "new"): sign 2
   'isDemo', // true blocks posting (classify.js)
