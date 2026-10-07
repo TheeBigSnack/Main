@@ -2712,7 +2712,7 @@ test('a role with a number keeps the form shut, and the status line names the ro
 });
 
 test('the checks line says which problems stop the form and which only warn', () => {
-  const checksHtml = new Function('esc', 'ruleProblems', 'noteFor', `${fnText('checksHtml')}\nreturn checksHtml;`)((s) => String(s), template.ruleProblems, () => '');
+  const checksHtml = new Function('esc', 'ruleProblems', 'noteFor', `${constText('settingsFix')}\n${fnText('checksHtml')}\nreturn checksHtml;`)((s) => String(s), template.ruleProblems, () => '');
   const stop = { code: 'unknown-number', text: '"12000" isn\'t in the website\'s data for this car' };
   const warn = { code: 'too-short', text: '50 words; needs at least 60' };
   const both = checksHtml({ ok: false, problems: [stop, warn], words: 50 });
@@ -2728,6 +2728,22 @@ test('the checks line says which problems stop the form and which only warn', ()
   assert.doesNotMatch(passed, /claim matches the website/);
   assert.match(passed, /no banned phrases or flagged claims/);
   assert.match(passed, /read it through before you publish/);
+});
+
+// The review's checks line is what the person sees while a number in
+// Settings keeps the form shut (Open the Marketplace form and Check fields
+// are off then, so the status line's reason rarely shows): it says the fix is
+// in Settings when that is the only fix there is.
+test('the checks line says the fix is in Settings when only a number in Settings stops the form', () => {
+  const checksHtml = new Function('esc', 'ruleProblems', 'noteFor', `${constText('settingsFix')}\n${fnText('checksHtml')}\nreturn checksHtml;`)((s) => String(s), template.ruleProblems, () => '');
+  const salesperson = { name: 'Sam', title: '2nd shift sales' };
+  const c = { vehicle: CAR, dealer: SETTINGS.dealer, salesperson, price: 20986 };
+  const text = template.buildTemplateDescription({ ...c, priceNote: '' });
+  assert.match(checksHtml(template.runGuardrails(text, c)), /^<div class="checks bad" id="checks">Fix before the form can be filled:<ul><li>Your role "2nd shift sales" has a number in it[^<]+<\/li><\/ul><p>After you save Settings, the template writes the description again; if you edited it, click Reset to template\.<\/p><\/div>$/);
+  // a stop of the description's own beside it: no such line, the description needs fixing too
+  const mixed = checksHtml(template.runGuardrails(text.replace('34,567 miles', '12,000 miles'), c));
+  assert.match(mixed, /Fix before the form can be filled:<ul><li>Your role "2nd shift sales"/);
+  assert.doesNotMatch(mixed, /After you save Settings/);
 });
 
 test('Open the Marketplace form, Fill it in now and Fill again all refuse a description with a claim the website does not make', async () => {

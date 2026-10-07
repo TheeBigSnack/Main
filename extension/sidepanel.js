@@ -1529,14 +1529,17 @@ async function downloadPhotos() {
 // ---------- rendering ----------
 
 // The problems that keep the form from being filled (fillBlocker), then the
-// ones that only warn (length and tone).
+// ones that only warn (length and tone). When only numbers in Settings stop
+// it, the line says the fix is there (settingsFix): Open the Marketplace form
+// and Check fields are off meanwhile, so the status line's reason rarely shows.
 function checksHtml(g) {
   if (!g) return '';
   if (g.ok) return `<div class="checks ok" id="checks">All checks passed: ${g.words} words; every number the checks found is in the website's data, price and mileage included; no banned phrases or flagged claims; dealership and your role named${noteFor() ? '; price note included' : ''}. The checks look for set words and numbers, so read it through before you publish.</div>`;
   const stops = ruleProblems(g);
   const warns = g.problems.filter((p) => !stops.includes(p));
   const list = (ps) => `<ul>${ps.map((p) => `<li>${esc(p.text)}</li>`).join('')}</ul>`;
-  return `<div class="checks ${stops.length ? 'bad' : 'warn'}" id="checks">${stops.length ? `Fix before the form can be filled:${list(stops)}` : ''}${warns.length ? `Worth fixing (the form can still be filled):${list(warns)}` : ''}</div>`;
+  const fix = settingsFix(stops);
+  return `<div class="checks ${stops.length ? 'bad' : 'warn'}" id="checks">${stops.length ? `Fix before the form can be filled:${list(stops)}${fix ? `<p>${esc(fix)}</p>` : ''}` : ''}${warns.length ? `Worth fixing (the form can still be filled):${list(warns)}` : ''}</div>`;
 }
 
 function sourcePill() {
