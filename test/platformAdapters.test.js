@@ -1332,3 +1332,80 @@ test('Rule 3: a "new" word in any condition field counts on DealerOn and Dealer.
   assert.notEqual(assessVehicle(loaner, withDefaults({})).decision, DECISION.READY);
   assert.doesNotMatch(String(loaner.inventoryType), /certified used/i);
 });
+
+// Rule 4, repair cycle 2 round 2: the website's own price written in a way
+// the reader can't read as an amount ("$40,590*", "Call for Price", "$24,499
+// + tax", nothing at all). Before, the reader kept an entry only when its
+// value was a plain amount, so the price the platform marks final (Dealer.com's
+// isFinalPrice entry or finalPrice field), or DealerOn's internet price under
+// the dealer's own label, vanished without a word, and the car was Ready at
+// the plain, base or starting price beside it: a figure the website does not
+// show as its price. Now such a car has no price, and Not ready quotes what
+// the list says for a person to check.
+test('Rule 4: a final or selling price the reader can\'t read as an amount leaves the car with no price, quoted; never the plain, base or starting price beside it', () => {
+  const P = (dprice) => choosePrices(labeledPrices({ pricing: { dprice } }), { dealer: 'Sample Chevrolet' });
+  const reads = (text, label = null) => `the list's final price${label ? `, "${label}",` : ''} reads "${text}", which Lot Current does not read as an amount`;
+  const none = (priceLabel) => ({ price: null, priceLabel, priceBeforeFees: null });
+  // the reviewer's entries: the final one is not a plain amount
+  for (const text of ['$24,499*', 'Call for Price', '$24,499 + tax']) {
+    assert.deepEqual(P([{ label: 'Price', value: '$24,000' }, { label: 'Doc Fee', value: '$499' }, { label: 'Sample Price', value: text, isFinalPrice: true }]), none(reads(text, 'Sample Price')), `final "${text}" beside a plain price`);
+    assert.deepEqual(P([{ typeClass: 'retailPrice', label: 'Retail Price', value: '$24,000' }, { label: 'Sample Price', value: text, isFinal: true }]), none(reads(text, 'Sample Price')), `final "${text}" beside a base price`);
+    assert.deepEqual(P([{ label: 'Price', value: '$24,000' }, { value: text, isFinalPrice: true }]), none(reads(text)), `final "${text}" with no label`);
+  }
+  assert.deepEqual(P([{ label: 'Price', value: '$24,000' }, { label: 'Sample Price', value: '', isFinalPrice: true }]), none('the list\'s final price, "Sample Price", has no amount'), 'a final entry with no amount');
+  assert.deepEqual(P([{ label: 'Price', value: '$24,000' }, { label: 'Sample Price', isFinalPrice: true }]), none('the list\'s final price, "Sample Price", has no amount'));
+  // a final entry with no label whose amount reads is the website's price, as any final one
+  assert.deepEqual(P([{ label: 'Price', value: '$24,000' }, { value: '$24,499', isFinalPrice: true }]), { price: 24499, priceLabel: 'Price', priceBeforeFees: 24000 });
+  // what is not the price's amount never blocks it: a payment, a note, a flag about a price, a sale event
+  assert.deepEqual(P([{ label: 'Price', value: '$24,000' }, { label: 'Payment', value: 'From $399/mo', isFinalPrice: false }, { label: 'Price Note', value: 'Plus tax', isFinalPrice: 'false' }, { label: 'Sale Event', value: 'See dealer' }]), { price: 24000, priceLabel: 'Price', priceBeforeFees: null });
+  assert.deepEqual(choosePrices(labeledPrices({ price: 24000, showInternetPrice: 'yes', isSalePrice: false, hasFinalPrice: 'true', callForPrice: 'Y' })), { price: 24000, priceLabel: 'price', priceBeforeFees: null });
+  // a final price that reads stands even when another final mark can't be read
+  assert.deepEqual(P([{ label: 'Price', value: '$24,000' }, { label: 'Sample Price', value: '$24,499', isFinalPrice: true }, { label: 'Sample Price', value: '$24,499*', isFinalPrice: true }]), { price: 24499, priceLabel: 'Sample Price', priceBeforeFees: 24000 });
+
+  // through the whole Dealer.com record, with its documented top-level fields
+  const [c] = platformCars(1, { from: 740 });
+  const car = { ...c, certified: false };
+  const { pricing, ...bare } = dealerComRecord(car);
+  assert.ok(pricing);
+  for (const text of ['$40,590*', 'Call for Price']) {
+    const v = normalizeInventoryRecord({ ...bare, finalPrice: text, startingPrice: '$40,100' }, { origin: DEALERCOM_ORIGIN });
+    assert.deepEqual([v.price, v.priceLabel, v.priceBeforeFees], [null, reads(text), null], `Dealer.com finalPrice "${text}"`);
+    const a = assessVehicle(v, withDefaults({}));
+    assert.equal(a.decision, DECISION.NOT_READY, `Dealer.com finalPrice "${text}": Not ready, never Ready at the starting price`);
+    assert.deepEqual(a.blockers.map((b) => b.text), [`No price on the website (${reads(text)})`]);
+  }
+  const empty = normalizeInventoryRecord({ ...bare, finalPrice: null, startingPrice: '$40,100' }, { origin: DEALERCOM_ORIGIN });
+  assert.deepEqual([empty.price, empty.priceLabel], [null, 'the list\'s final price has no amount'], 'a final price field with nothing in it');
+  const fine = normalizeInventoryRecord({ ...bare, finalPrice: '$40,590', startingPrice: '$40,100' }, { origin: DEALERCOM_ORIGIN });
+  assert.deepEqual([fine.price, fine.priceLabel, fine.priceBeforeFees], [40590, 'final Price', 40100], 'a final price that reads is the price, as before');
+  const record = dealerComRecord(car);
+  const dprice = record.pricing.dprice.map((e) => (e.isFinalPrice ? { ...e, value: '$40,590*' } : e));
+  const starred = normalizeInventoryRecord({ ...record, pricing: { ...record.pricing, dprice } }, { origin: DEALERCOM_ORIGIN });
+  assert.deepEqual([starred.price, starred.priceLabel, starred.priceBeforeFees], [null, reads('$40,590*', 'Sample Price'), null], 'Dealer.com: the isFinalPrice entry "$40,590*"');
+  assert.equal(assessVehicle(starred, withDefaults({})).decision, DECISION.NOT_READY);
+
+  // DealerOn: its own label says the price is the dealer's, and the internet price can't be read
+  const card = dealerOnCard(car).VehicleCard;
+  const on = (patch) => normalizeInventoryRecord({ ...card, ...patch }, { origin: DEALERON_ORIGIN });
+  for (const text of ['Call for price', '$40,590*']) {
+    const v = on({ VehicleInternetPrice: text });
+    const why = `the list's "Internet Price" reads "${text}", which Lot Current does not read as an amount`;
+    assert.deepEqual([v.price, v.priceLabel, v.priceBeforeFees], [null, why, null], `DealerOn internet price "${text}"`);
+    assert.equal(assessVehicle(v, withDefaults({})).decision, DECISION.NOT_READY);
+    const unlabelled = on({ VehicleInternetPrice: text, VehiclePriceLabel: undefined });
+    assert.deepEqual([unlabelled.price, unlabelled.priceLabel], [null, why], `DealerOn internet price "${text}" with no label of its own`);
+  }
+  for (const patch of [{ VehicleInternetPrice: '' }, { VehicleInternetPrice: null }, { VehicleInternetPrice: undefined }]) {
+    const v = on(patch);
+    assert.deepEqual([v.price, v.priceLabel, v.priceBeforeFees], [null, 'the list labels its price "Sample Motors Price" but gives no amount Lot Current can read for it', null], `DealerOn internet price ${JSON.stringify(patch.VehicleInternetPrice)}`);
+    assert.equal(assessVehicle(v, withDefaults({})).decision, DECISION.NOT_READY);
+  }
+  // nothing says the website's price is another: the only price, a retail one, is still the price
+  const retailOnly = on({ VehicleInternetPrice: undefined, VehiclePriceLabel: undefined });
+  assert.deepEqual([retailOnly.price, retailOnly.priceLabel], [car.base, 'Retail Price']);
+  const retailLabel = on({ VehicleInternetPrice: undefined, VehiclePriceLabel: 'Retail Price' });
+  assert.equal(retailLabel.price, car.base, 'a record that labels its price "Retail Price" is priced at it');
+  // the usual card is unchanged: the dealer's price, the retail price below it
+  const usual = on({});
+  assert.deepEqual([usual.price, usual.priceBeforeFees], [car.base + car.fee, car.base]);
+});

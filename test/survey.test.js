@@ -438,3 +438,14 @@ test('the survey script: its npm command, an ignored output folder, the how-to, 
   assert.ok(DEFAULTS.pauseMs >= 2000, 'at least 2 seconds between the survey\'s own requests');
   assert.equal((src.match(/if \(bot\.refused\) stop\(/g) || []).length, 3, 'a refusal on the list, its server HTML or a car page stops the site');
 });
+
+// SYNTHETIC: a Dealer.com-shaped record whose final price is not a plain
+// amount. The survey marks that price as one the reader can't read (the
+// reader then takes no price), and never copies what it says.
+test('jsonEndpoint marks a final price the reader can\'t read as an amount, without its words', () => {
+  const body = { inventory: [{ vin: VIN, year: 2019, make: 'Honda', model: 'Civic', odometer: 31207, inventoryType: 'used', link: '/used/Honda/2019-Honda-Civic-0123456789abcdef0123456789abcdef.htm', address: { accountName: 'Sample Motors' }, pricing: { dprice: [{ typeClass: 'retailPrice', label: 'Price', value: '$18,995' }, { typeClass: 'finalPrice', label: 'Sample Motors Price', value: 'Call for Price', isFinalPrice: true }] } }] };
+  const rs = jsonEndpoint({ url: SITE + '/apis/widget/INVENTORY_LISTING:inventory-data-bus1/getInventory?start=0', status: 200, contentType: 'application/json', body: JSON.stringify(body) }).records;
+  assert.deepEqual(rs.priceLabels.find((p) => p.label === 'Sample Motors Price'), { key: 'dprice.finalPrice', label: 'Sample Motors Price', kind: 'selling', final: true, unreadable: true, cars: 1 });
+  assert.equal(rs.filled.price, 0, 'the reader takes no price, never the $18,995 beside it');
+  assert.ok(!JSON.stringify(rs).includes('Call for Price'), 'what the price says is not copied');
+});

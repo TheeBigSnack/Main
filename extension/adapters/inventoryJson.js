@@ -271,29 +271,59 @@ function amount(value) {
  * guide's value or an offer (VehicleMarketValue, kbbValue: never the price,
  * read so a car with only such a figure has its label quoted). Nested up to
  * four levels; never inside photos or features.
+ *
+ * The website's own price is kept even when its value is not a plain amount
+ * ("$40,590*", "Call for Price", "$24,499 + tax", nothing at all), as an
+ * unreadable entry ({ value: null, text }): the price the platform marks
+ * final (an entry with isFinalPrice or isFinal, a finalPrice field, or what
+ * a finalPrice field holds), and a field or entry whose name says it is the
+ * selling price ("VehicleInternetPrice", "Sale Price") holding text that is
+ * not an amount. choosePrices then gives the car no price and quotes it,
+ * instead of taking the plain, base or starting price beside it.
  * @param {object} record
- * @returns {{ value: number, label: string, key: string, final: boolean }[]}
+ * @returns {{ value: number|null, text?: string, label: string, key: string, final: boolean }[]}
  */
 export function labeledPrices(record) {
   const out = [];
-  const visit = (x, key, depth) => {
+  // an amount that can't be read: kept when it is the final price, or when
+  // it holds some text and its name says it is the selling price ("Internet
+  // Price", "Sale Price"; never a "Sale Event" or a payment)
+  const unreadable = (entry, raw) => {
+    const text = typeof raw === 'string' || typeof raw === 'number';
+    if (entry.final || (text && entry.text && /price/i.test(entry.label) && priceKind(entry) === 'selling')) out.push(entry);
+  };
+  // a field that says something about a price ("isFinalPrice", "showInternetPrice"), not one
+  const FLAG = /^(?:is|has|show|hide|display|use|enable|allow|include)[a-z]/;
+  const visit = (x, key, depth, markedFinal = false) => {
     if (depth > 4 || !x || typeof x !== 'object') return;
     if (Array.isArray(x)) {
-      for (const el of x) visit(el, key, depth + 1);
+      for (const el of x) visit(el, key, depth + 1, markedFinal);
       return;
     }
     const label = textOf(x.label ?? x.title ?? x.displayName ?? '');
     const kind = textOf(x.typeClass ?? x.type ?? x.name ?? '');
-    const value = amount(x.value ?? x.amount ?? x.price ?? x.displayValue);
-    if (value !== null && (label || kind)) {
-      out.push({ value, label: label || spaced(kind), key: `${key}.${kind}`, final: truthy(x.isFinalPrice) || truthy(x.isFinal) });
+    const raw = x.value ?? x.amount ?? x.price ?? x.displayValue;
+    const value = amount(raw);
+    const final = markedFinal || truthy(x.isFinalPrice) || truthy(x.isFinal);
+    const name = label || spaced(kind) || (markedFinal ? spaced(key).replace(/^Vehicle\s+/i, '') : '');
+    if (value !== null && (name || final)) {
+      out.push({ value, label: name, key: `${key}.${kind}`, final });
       return;
+    }
+    if (depth > 0 && (final || name)) {
+      const before = out.length;
+      unreadable({ value: null, text: textOf(raw).slice(0, 60), label: name, key: `${key}.${kind}`, final }, raw);
+      if (out.length > before || final) return;
     }
     for (const [k, v] of Object.entries(x)) {
       if (/image|photo|picture|feature|option|media|attribute/i.test(k)) continue;
-      const n = /price/i.test(k) || GUIDE_LABEL.test(labelWords(spaced(k))) ? amount(v) : null;
-      if (n !== null) out.push({ value: n, label: spaced(k).replace(/^Vehicle\s+/i, ''), key: k, final: keyName(k) === 'finalprice' });
-      else if (v && typeof v === 'object') visit(v, k, depth + 1);
+      const named = /price/i.test(k) || GUIDE_LABEL.test(labelWords(spaced(k)));
+      const n = named ? amount(v) : null;
+      const label = spaced(k).replace(/^Vehicle\s+/i, '');
+      const isFinal = keyName(k) === 'finalprice';
+      if (n !== null) out.push({ value: n, label, key: k, final: isFinal });
+      else if (v && typeof v === 'object') visit(v, k, depth + 1, isFinal);
+      else if (named && /price$/.test(keyName(k)) && !FLAG.test(keyName(k)) && v !== undefined && typeof v !== 'boolean') unreadable({ value: null, text: textOf(v).slice(0, 60), label, key: k, final: isFinal }, v);
     }
   };
   visit(record, '', 0);
@@ -360,6 +390,15 @@ function quoteLabels(labels) {
   return `the list labels its ${quoted.length > 1 ? 'prices' : 'price'} ${list}, which Lot Current does not read as the selling price`;
 }
 
+// The website's own price that is not a plain amount, quoted for a person
+// to check: "the list's final price reads "$40,590*", which Lot Current does
+// not read as an amount", or "the list's final price has no amount".
+function unreadablePrice(e) {
+  const label = String(e.label || '').slice(0, 60);
+  const what = e.final ? `the list's final price${label && !/^final price$/i.test(label) ? `, "${label}",` : ''}` : `the list's "${label || 'Price'}"`;
+  return e.text ? `${what} reads "${e.text}", which Lot Current does not read as an amount` : `${what} has no amount`;
+}
+
 // The labels of a guide's or an offer's figures, quoted: some websites
 // label their own selling price that way ("Market Price"), and the price is
 // still not taken. A payment or an incentive is not such a label.
@@ -417,25 +456,50 @@ export const labelIsNotThePrice = (label) => NOT_THE_PRICE.test(labelWords(label
  * price unknown no other figure on the record is taken instead. The same
  * holds for the entry the platform marks final when its label is set aside
  * the same way ("Special Offer", "Market Value", "MSRP"): no price, the
- * label quoted, never the plain or base price beside it.
- * @param {{ value: number, label: string, key: string, final: boolean }[]} entries
+ * label quoted, never the plain or base price beside it. And for the
+ * website's own price when it is not a plain amount ("$40,590*", "Call for
+ * Price", "$24,499 + tax", nothing at all; labeledPrices keeps it): the
+ * final price when none that reads stands beside it, or a selling price
+ * ("Internet Price") when no final price reads gives no price, and what the
+ * list says is quoted (`the list's final price reads "$40,590*", which Lot
+ * Current does not read as an amount`). A record whose own label says its
+ * price is the dealer's or a selling one ("Sample Motors Price") with only a
+ * base amount that reads gets no price either: the retail or starting price
+ * is not the one it labels.
+ * @param {{ value: number|null, text?: string, label: string, key: string, final: boolean }[]} entries
  * @param {{ dealer?: string, label?: string|null }} [context]
  */
 export function choosePrices(entries, { dealer = '', label = null } = {}) {
   if (label && labelIsNotThePrice(label) && !isDealerPrice(label, dealer)) return NO_PRICE(quoteLabels([label]));
-  const kinds = (entries || []).map((e) => ({ ...e, kind: priceKind(e, dealer) }));
+  const all = (entries || []).map((e) => ({ ...e, kind: priceKind(e, dealer) }));
   // The entry the platform marks as the website's price (Dealer.com's
   // isFinalPrice) set aside as not the price: an offer ("Special Offer"), a
   // guide's value ("Market Value"), an MSRP. The website's price is that
   // figure, so, as for a record's own label above, no plain or base price is
   // taken in its place: no price, and the label is quoted.
-  const setAside = kinds.filter((e) => e.final && e.kind === 'other');
+  const setAside = all.filter((e) => e.final && e.kind === 'other');
   if (setAside.length) return NO_PRICE(quoteLabels(setAside.map(setAsideWords)));
+  const kinds = all.filter((e) => e.value !== null && e.value !== undefined);
+  // The website's own price written in a way that is not a plain amount
+  // ("$40,590*", "Call for Price", nothing at all; labeledPrices keeps it):
+  // the final price, or a selling price when no final price reads. The
+  // website's price is that figure, so no plain, base or starting price is
+  // taken in its place: no price, and what the list says is quoted. A final
+  // price that reads still stands beside another final mark that doesn't.
+  const finalReads = kinds.some((e) => e.final && e.kind === 'selling');
+  const unread = finalReads ? [] : all.filter((e) => (e.value === null || e.value === undefined) && (e.final || e.kind === 'selling'));
+  if (unread.length) return NO_PRICE(unreadablePrice(unread.find((e) => e.final) || unread[0]));
   const of = (kind) => kinds.filter((e) => e.kind === kind);
   const selling = of('selling');
   const plain = of('plain');
   const base = of('base');
   const named = of('named');
+  // The record's own label says its price is the dealer's or a selling one
+  // ("Sample Motors Price", "Internet Price"), and only a base amount reads
+  // (DealerOn's internet price empty or missing beside its retail price): the
+  // price it labels is not the retail or starting one, so that is not taken.
+  const ownKind = label ? priceKind({ label, key: '', final: false }, dealer) : null;
+  const ownIsSelling = ownKind === 'selling' || ownKind === 'named';
   const differ = (list) => new Set(list.map((e) => e.value)).size > 1;
   const TWO = 'Two prices on the website';
   let main = null;
@@ -450,6 +514,7 @@ export function choosePrices(entries, { dealer = '', label = null } = {}) {
     if (differ(plain)) return NO_PRICE(TWO);
     main = plain[0];
   } else if (base.length) {
+    if (ownIsSelling) return NO_PRICE(`the list labels its price "${String(label).slice(0, 60)}" but gives no amount Lot Current can read for it`);
     if (differ(base)) return NO_PRICE(TWO);
     main = base[0];
   }
