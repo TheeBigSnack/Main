@@ -163,7 +163,7 @@ test('set-up warns under the role, the name and the dealership name while they h
   assert.equal(liveRegion(html, 'wizNameSay'), '');
   wiz.step = 'address';
   html = wizardHtml();
-  assert.match(inputWith(html, 'id="wizDealer"'), /aria-describedby="wizDealerWarn"/);
+  assert.match(inputWith(html, 'id="wizDealer"'), /aria-describedby="wizDealerWarn wizYouWarn"/);
   assert.equal(region(html, 'wizDealerWarn'), DEALER_WARNING);
   assert.equal(liveRegion(html, 'wizDealerSay'), 'The dealership\'s name reads as a price or a mileage, which keeps the Marketplace form shut for nearly every car: every price and mileage in a description must match the listing. Write the number as a word.');
 
@@ -406,6 +406,56 @@ test('no warning about the role or the name when the dealership\'s name, city or
   globalThis.document = { getElementById: (id) => { if (!elements.has(id)) elements.set(id, countingElement(id)); return elements.get(id); } };
   handleWizardInput({ id: 'wizTitle', value: '2nd shift sales' });
   assert.equal(text(elements.get('wizTitleWarn')), '');
+  wiz.active = false;
+});
+
+// Set-up's You step comes before the address step, so it reads the
+// dealership as set-up held it then. A dealership name, city or ZIP typed on
+// the address step that no longer holds the number in the role or the name
+// brings that warning up there, under the fields that changed it; a warning
+// the You step already gave is not said again.
+test('set-up\'s address step warns about the role or the name once the dealership typed there no longer holds its number', () => {
+  wiz.active = true;
+  wiz.step = 'you';
+  wiz.settings = withDefaults({ salesperson: { name: 'Sam 2', title: '2nd shift sales' }, dealer: { name: '2nd Chance Auto', city: 'Springfield', state: 'OH', zip: '43215' } });
+  assert.equal(region(wizardHtml(), 'wizTitleWarn'), '', 'the You step: the dealership name holds the number');
+  assert.equal(region(wizardHtml(), 'wizNameWarn'), '');
+  wiz.step = 'address';
+  const html = wizardHtml();
+  assert.equal(region(html, 'wizYouWarn'), '', 'the dealership as set-up holds it still holds the number');
+  assert.equal(liveRegion(html, 'wizYouSay'), '');
+  assert.match(inputWith(html, 'id="wizDealer"'), /aria-describedby="wizDealerWarn wizYouWarn"/);
+  assert.match(inputWith(html, 'id="wizCity"'), /aria-describedby="wizYouWarn"/);
+  assert.match(inputWith(html, 'id="wizZip"'), /aria-describedby="wizYouWarn"/);
+
+  // the step's boxes as the browser holds them, and the regions the step drew
+  const boxes = { wizDealer: { value: '2nd Chance Auto' }, wizCity: { value: 'Springfield' }, wizZip: { value: '43215' } };
+  const elements = new Map();
+  globalThis.document = { getElementById: (id) => boxes[id] || (elements.has(id) ? elements.get(id) : elements.set(id, countingElement(id)).get(id)) };
+  const type = (id, value) => { boxes[id].value = value; handleWizardInput({ id, value }); };
+  const said = () => text(document.getElementById('wizYouWarn'));
+  const ROLE = 'The dealership\'s name, city and ZIP typed here no longer have the number in your role. ' + settingNumberWarning('role', '2nd shift sales') + ' Your role is on the You step.';
+  const NAME = 'The dealership\'s name, city and ZIP typed here no longer have the number in your name. ' + settingNumberWarning('name', 'Sam 2') + ' Your name is on the You step.';
+  for (const value of prefixes('Chance Auto')) type('wizDealer', value);
+  assert.equal(said(), `${ROLE}${NAME}`);
+  assert.equal(document.getElementById('wizYouSay').writes, 1, 'spoken once, when the warning comes');
+  assert.equal(text(document.getElementById('wizYouSay')), `${ROLE} ${NAME}`);
+  type('wizDealer', '2nd Chance Auto');
+  assert.equal(said(), '', 'the number is back');
+  assert.equal(text(document.getElementById('wizYouSay')), '');
+  // the ZIP is one of the facts too: one that holds the number ends the warning
+  type('wizDealer', 'Chance Auto');
+  type('wizZip', '2');
+  assert.equal(said(), '', 'a ZIP is a fact too');
+  type('wizZip', '43215');
+  assert.equal(said(), `${ROLE}${NAME}`);
+
+  // a role the You step already warned about is not warned about again
+  wiz.settings = withDefaults({ salesperson: { name: 'Sam', title: '2nd shift sales' }, dealer: { name: 'Example Motors', city: 'Springfield', state: 'OH', zip: '43215' } });
+  assert.equal(region(wizardHtml(), 'wizYouWarn'), '');
+  boxes.wizDealer.value = 'Example Motors';
+  type('wizDealer', 'Example Auto');
+  assert.equal(said(), '');
   wiz.active = false;
 });
 

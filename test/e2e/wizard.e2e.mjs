@@ -142,6 +142,13 @@ try {
   assert.match(await panel.textContent('#wizAddressHint'), /^Read from the website \(structured data\)\. Marketplace asks/, 'the step says where the address came from');
   assert.equal(await panel.inputValue('#wizState'), 'PA');
   assert.equal(await panel.inputValue('#wizZip'), '15370', "from the website's structured data");
+  // a dealership typed here that no longer has the number in the role or the name brings that warning up here; this role and name have none
+  assert.equal(await panel.getAttribute('#wizZip', 'aria-describedby'), 'wizYouWarn');
+  assert.equal(await panel.getAttribute('#wizDealer', 'aria-describedby'), 'wizDealerWarn wizYouWarn');
+  assert.equal(await panel.getAttribute('#wizYouSay', 'aria-live'), 'polite');
+  await panel.locator('#wizZip').pressSequentially('0');
+  await panel.fill('#wizZip', '15370');
+  assert.equal((await panel.textContent('#wizYouWarn')).trim(), '', 'no number in the role or the name: nothing to say');
   await panel.click('#wizNext'); // -> price
   await panel.waitForSelector('#wizPriceNote');
   assert.match(await panel.textContent('h3'), /^The price to post$/);
