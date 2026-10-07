@@ -81,8 +81,10 @@ const OLD_NAME_ONE = new RegExp(`${LOT}${SEP}${SYNC}`);
 // mail link's subject), so "lot+sync" and "x &=lot+sync" in code are left
 // alone, but so is a form body with no ? or & in front ("q=Lot+Sync"), and
 // the rare code shaped like a pair ("a?b=lot+sync") is read as one. An
-// escaped plus ("%2B") stays a plus. A run of escapes that is not UTF-8 is
-// read as Latin-1, as JavaScript's escape() writes it ("Lot%A0Sync").
+// escaped plus ("%2B") stays a plus. A run of escapes is read as UTF-8 where
+// it is and byte by byte as Latin-1 where it is not, as JavaScript's escape()
+// writes it ("Lot%A0Sync"), so a stray byte does not hide the escapes around
+// it; escape()'s "%u200B" form is read too.
 // Inline tags that can sit inside a name ("Lot<wbr>Sync",
 // "Lot <strong>Sync</strong>", an SVG "<tspan>") are removed when tags is
 // true. A tag is removed with its attributes, so the scan reads every line
@@ -96,8 +98,18 @@ const NAMED = {
   ndash: '\u2013', mdash: '\u2014', minus: '\u2212', period: '.', lowbar: '_', UnderBar: '_', amp: '&', AMP: '&',
 };
 const char = (n) => (n === 10 || n === 13 ? ' ' : n >= 0 && n <= 0x10ffff ? String.fromCodePoint(n) : '');
-const latin1 = (run) => run.replace(/%([0-9a-f]{2})/gi, (_, h) => char(parseInt(h, 16)));
-const urlRun = (run) => { try { return decodeURIComponent(run).replace(/[\r\n]/g, ' '); } catch { return latin1(run); } };
+// One run of %XX escapes: from each byte, the UTF-8 sequence its first byte
+// announces if the bytes make one, else that one byte as Latin-1.
+function urlRun(run) {
+  const bytes = run.match(/%[0-9a-f]{2}/gi);
+  let out = '';
+  for (let i = 0; i < bytes.length;) {
+    const b = parseInt(bytes[i].slice(1), 16);
+    const n = b >= 0xf0 ? 4 : b >= 0xe0 ? 3 : b >= 0xc0 ? 2 : 1;
+    try { out += decodeURIComponent(bytes.slice(i, i + n).join('')); i += n; } catch { out += char(b); i += 1; }
+  }
+  return out.replace(/[\r\n]/g, ' ');
+}
 function decode(line, { tags = true } = {}) {
   return (tags ? line.replace(INLINE_TAG, '') : line)
     .replace(/&#x([0-9a-f]{1,6});?/gi, (_, h) => char(parseInt(h, 16)))
@@ -105,6 +117,7 @@ function decode(line, { tags = true } = {}) {
     .replace(/&([A-Za-z]+);/g, (m, name) => NAMED[name] ?? m)
     .replace(/\\u\{([0-9a-f]{1,6})\}|\\u([0-9a-f]{4})|\\x([0-9a-f]{2})/gi, (_, a, b, c) => char(parseInt(a || b || c, 16)))
     .replace(/[?&][\w.~-]+=[^\s"'<>&#]*/g, (pair) => pair.replace(/\+/g, ' '))
+    .replace(/%u([0-9a-f]{4})/gi, (_, h) => char(parseInt(h, 16)))
     .replace(/(?:%[0-9a-f]{2})+/gi, urlRun);
 }
 
@@ -461,6 +474,9 @@ test('the scan catches the old name in every spelling, in any file that is not e
     '<a href="/s/Lot%A0Sync">search</a>',
     // and "&AMP;", HTML's capitalised "&amp;", in front of a query pair
     '<a href="/s?a=1&AMP;subject=Lot+Sync">Email us</a>',
+    // escape()'s %u form, and a run that mixes a UTF-8 sequence with a stray Latin-1 byte
+    'https://www.example.com/Lot%u200BSync',
+    'https://www.example.com/Lot%E2%80%8B%A0Sync',
   ];
   for (const text of spellings) {
     for (const path of ['docs/help.md', 'extension/popup.js', 'site/index.html', 'marketing/sales-sheet.md']) {
