@@ -53,12 +53,15 @@ const SEP = '[\\t\\v\\f\\r \\u00a0\\u00ad\\u1680\\u2000-\\u200d\\u2010-\\u2015\\
 // A line break, optionally followed by the comment or quote marker that
 // starts a wrapped comment or quote line (// # * -- > ; <!--).
 const WRAP = `(?:\\n${SEP}(?:(?://|/?\\*|#|--|>|;|<!--)${SEP})?)?`;
-// "lot" where a word starts: not straight after a letter or digit ("pilot
-// sync", "ballotSync" and "slotsync" are other words), except a capital L
-// after a small letter or digit, which starts the next word of a camelCase
-// name ("initLotSync"). The case is spelled out in the classes, so the
+// "lot" where a word starts: not straight after a letter ("pilot sync",
+// "ballotSync" and "slotsync" are other words; after a digit it starts one,
+// as in "2026lotsync.csv"), except a capital L after a small letter, which
+// starts the next word of a camelCase name ("initLotSync"), and "Lot" after a
+// capital, the next word after an acronym ("UILotSync"). In all capitals no
+// word start shows ("PILOTSYNC" is the pilot's sync), so an L inside a run of
+// capitals starts no word. The case is spelled out in the classes, so the
 // expressions carry no i flag, which would make that capital L match any l.
-const LOT = '(?:(?<![A-Za-z0-9])[Ll][Oo][Tt]|(?<=[a-z0-9])L[Oo][Tt])';
+const LOT = '(?:(?<![A-Za-z])[Ll][Oo][Tt]|(?<=[a-z])L[Oo][Tt]|(?<=[A-Z])Lot)';
 const SYNC = '[Ss][Yy][Nn][Cc]';
 const OLD_NAME = new RegExp(`${LOT}${SEP}${WRAP}${SYNC}`, 'g');
 const OLD_NAME_ONE = new RegExp(`${LOT}${SEP}${SYNC}`);
@@ -419,6 +422,10 @@ test('the scan catches the old name in every spelling, in any file that is not e
     'see (LotSync) and x.lotsync',
     'MY_LOTSYNC_KEY',
     'lOt SyNc',
+    // glued to what comes before: the next word after a capitalised acronym, or after a digit
+    'the UILotSync panel',
+    'Download 2026lotsync.csv',
+    'v2lot-sync',
     // the spellings a careless edit is most likely to bring back
     'Lot-Sync',
     'lot_sync',
