@@ -13,9 +13,9 @@
 import assert from 'node:assert/strict';
 import { runGuardrails as jsGuardrails } from '../../extension/src/rewriteTemplate.js';
 import { buildRewritePrompt as jsPrompt } from '../../backend/rewritePrompt.js';
-import { runGuardrails as tsGuardrails, BANNED_PHRASES, BANNED_UNLESS, PRICE_NOTE_UNLESS, WORD_LIMITS, CLAIM_KINDS, spelledQuantities as tsSpelled, ownAbbreviations as tsOwn, numbersAsWords as tsWords } from '../functions/_shared/guardrails.ts';
+import { runGuardrails as tsGuardrails, BANNED_PHRASES, BANNED_UNLESS, PRICE_NOTE_UNLESS, WORD_LIMITS, CLAIM_KINDS, spelledQuantities as tsSpelled, ownAbbreviations as tsOwn, numbersAsWords as tsWords, nameWithoutNumber as tsNameWithout } from '../functions/_shared/guardrails.ts';
 import { buildRewritePrompt as tsPrompt, SYSTEM_PROMPT } from '../functions/_shared/rewritePrompt.ts';
-import { BANNED_PHRASES as JS_BANNED, BANNED_UNLESS as JS_UNLESS, PRICE_NOTE_UNLESS as JS_NOTE_UNLESS, WORD_LIMITS as JS_LIMITS, CLAIM_KINDS as JS_CLAIMS, spelledQuantities as jsSpelled, ownAbbreviations as jsOwn, numbersAsWords as jsWords } from '../../extension/src/rewriteTemplate.js';
+import { BANNED_PHRASES as JS_BANNED, BANNED_UNLESS as JS_UNLESS, PRICE_NOTE_UNLESS as JS_NOTE_UNLESS, WORD_LIMITS as JS_LIMITS, CLAIM_KINDS as JS_CLAIMS, spelledQuantities as jsSpelled, ownAbbreviations as jsOwn, numbersAsWords as jsWords, nameWithoutNumber as jsNameWithout } from '../../extension/src/rewriteTemplate.js';
 import { SYSTEM_PROMPT as JS_SYSTEM } from '../../backend/rewritePrompt.js';
 
 const vehicle = {
@@ -119,6 +119,9 @@ const texts = [
   sixty('2019 Ram 1500 Big Horn with 41,230 miles.').replace('I am Alex, sales consultant', 'I am J2 Smith, 1 owner car specialist') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn with 41,230 miles.').replace('sales consultant', 'Sales Associate 2') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn with 41,230 miles.').replace('sales consultant', '#1 salesman') + '\nVIN TESTVIN0000000001.',
+  // a name whose number belongs to the words around it: no example, since the name without it would be garbled
+  sixty('2019 Ram 1500 Big Horn with 41,230 miles.').replace('I am Alex,', 'I am Alex (Store 2),') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn with 41,230 miles.').replace('I am Alex,', 'I am Alex 2nd shift,') + '\nVIN TESTVIN0000000001.',
   // a role that is only a number: set aside only where it is said once, and never inside a longer number
   sixty('2019 Ram 1500 Big Horn with 41,230 miles. Seats 2 rows.').replace('sales consultant', '2') + '\nVIN TESTVIN0000000001.',
   sixty('2019 Ram 1500 Big Horn with 2,000 miles.').replace('sales consultant', '2') + '\nVIN TESTVIN0000000001.',
@@ -158,6 +161,8 @@ const contexts = [
   { vehicle, dealer, salesperson: { name: 'J2 Smith', title: '1 owner car specialist' }, priceNote: '', price: 28995 },
   { vehicle, dealer, salesperson: { name: 'Alex', title: 'Sales Associate 2' }, priceNote: '', price: 28995 },
   { vehicle, dealer, salesperson: { name: 'Alex', title: '#1 salesman' }, priceNote: '', price: 28995 },
+  { vehicle, dealer, salesperson: { name: 'Alex (Store 2)', title: 'sales consultant' }, priceNote: '', price: 28995 },
+  { vehicle, dealer, salesperson: { name: 'Alex 2nd shift', title: 'sales consultant' }, priceNote: '', price: 28995 },
   {},
 ];
 
@@ -178,6 +183,7 @@ assert.deepEqual(JSON.parse(JSON.stringify(PRICE_NOTE_UNLESS)), JSON.parse(JSON.
 assert.deepEqual(CLAIM_KINDS.map((k) => [k.what, String(k.re), Boolean(k.part), String(k.hedge), String(k.sourceRe)]), JS_CLAIMS.map((k) => [k.what, String(k.re), Boolean(k.part), String(k.hedge), String(k.sourceRe)]));
 assert.deepEqual([...settingsNamed].sort(), ["Your dealership's name", 'Your name', 'Your role']);
 for (const value of ['2nd shift sales', 'sales, 2nd shift', 'Team 3 Sales', '8 Mile Auto', '12th Street Motors', 'sales, 24/7', 'Route19', 'sales consultant', '', '0th', '21st', '#1 salesman', 'Sales 2.0', '0% APR specialist', '$0 down specialist', 'Sales Associate 2', 'Internet Sales (Store 2)', 'Sales 2nd shift', 'Shift 2.', '(2nd shift)', '“3rd” shift']) assert.equal(tsWords(value), jsWords(value), value);
+for (const value of ['Sam 2', 'Sam2', 'J2 Smith', 'Sam 2nd', 'Sam (2)', 'Sam [2]', 'Sam "2"', 'Sam (2) Smith', 'Mary-Kate 2', "Sam O'Brien 2", 'Sam (Store 2)', 'Sam (2nd shift)', 'Sam 2nd shift', 'Sam, 2nd shift', 'Sam 2 Smith', 'Sam-2', 'Sam #2', 'Sam 24/7', 'Sam 2.0', 'Sam, 2', 'Sam (Jr 2', 'Sam 2-3', '2nd shift Sam', '22', '', 'Sam']) assert.equal(tsNameWithout(value), jsNameWithout(value), value);
 for (const text of texts) assert.deepEqual(tsSpelled(text), jsSpelled(text));
 for (const ctx of contexts) assert.deepEqual([...tsOwn(ctx.vehicle)], [...jsOwn(ctx.vehicle)]);
 assert.deepEqual({ ...WORD_LIMITS }, { ...JS_LIMITS });

@@ -295,7 +295,8 @@ test('typing a role in Settings: the warning under it follows every key, and the
 // none ("#one salesman", "Sales two.zero" are no help), a number word takes a
 // capital where the words around it have one, and an example that would fail
 // a check of its own ("One owner car specialist" says one owner) is not
-// offered. A name loses only its digits, never a whole word.
+// offered. A name loses only its number, and only where the rest of the
+// name stays as typed.
 test('numbers as words: a number with a sign, a decimal point or another number at it gets no word', () => {
   for (const value of ['#1 salesman', 'Sales 2.0', '0% APR specialist', '$0 down specialist', 'Team 2-3', 'shift 3:30']) {
     assert.equal(numbersAsWords(value), '', value);
@@ -329,6 +330,32 @@ test('an example that would fail a check of its own is not offered, and a name l
     const example = /for example "([^"]+)"/.exec(settingNumberWarning(setting, value))[1];
     const c = ctxFor({ salesperson: setting === 'role' ? { name: 'Sam', title: example } : { name: example, title: 'sales consultant' } });
     assert.deepEqual(checked(c).g.problems, [], example);
+  }
+});
+
+// A name's example goes into the sign-off of every listing once the
+// salesperson copies it, so it is offered only where taking the number out
+// leaves the rest of the name as typed: digits inside a word, beside a letter
+// ("Sam2", "J2 Smith"), a number that is a word of its own at the end of the
+// name ("Sam 2", "Sam 2nd"), or one in brackets or quotes of its own ("Sam
+// (2)"). Anywhere else the number may belong to the words around it ("Sam
+// 2nd shift", "Sam (Store 2)"), and the name without it would be garbled
+// ("Sam shift", "Sam (Store"): the warning and the reason say only to leave
+// the number out.
+test('a name\'s example is offered only where taking the number out leaves the rest of the name as typed', () => {
+  for (const [value, example] of [['Sam 2', 'Sam'], ['Sam2', 'Sam'], ['J2 Smith', 'J Smith'], ['Sam 2nd', 'Sam'], ['Sam (2)', 'Sam'], ['Sam [2]', 'Sam'], ['Sam "2"', 'Sam'], ['Sam (2) Smith', 'Sam Smith'], ['Mary-Kate 2', 'Mary-Kate'], ["Sam O'Brien 2", "Sam O'Brien"]]) {
+    const warning = settingNumberWarning('name', value);
+    assert.ok(warning.endsWith(`Leave it out, for example "${example}".`), `${value}: ${warning}`);
+    const c = ctxFor({ salesperson: { name: example, title: 'sales consultant' } });
+    assert.deepEqual(checked(c).g.problems, [], `the example for ${value} passes the checks`);
+  }
+  for (const value of ['Sam (Store 2)', 'Sam (2nd shift)', 'Sam 2nd shift', 'Sam, 2nd shift', 'Sam 2 Smith', 'Sam-2', 'Sam #2', 'Sam 24/7', 'Sam 2.0', 'Sam, 2', 'Sam (Jr 2', 'Sam 2-3', '2nd shift Sam']) {
+    const warning = settingNumberWarning('name', value);
+    assert.ok(warning.endsWith('Leave it out.'), `${value}: ${warning}`);
+    const g = checked(ctxFor({ salesperson: { name: value, title: 'sales consultant' } })).g;
+    const reason = g.problems.find((p) => p.code === 'setting-number');
+    assert.ok(reason, `${value}: the reason names the name`);
+    assert.equal(reason.text, `Your name "${value}" has a number in it, and every number in a description must match the website's data for the car; change it in Settings (Your name): leave the number out`, value);
   }
 });
 

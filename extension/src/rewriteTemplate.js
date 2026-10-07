@@ -1039,13 +1039,40 @@ export function numbersAsWords(value) {
   });
   return /\d/.test(out) ? '' : out;
 }
-// The value without its digits, and an ordinal ending after them, and without
-// what is left with no letter ("Sam 2" and "Sam2" are "Sam", "J2 Smith" is
-// "J Smith", "Sam (2)" is "Sam").
-const withoutDigits = (value) => oneLine(oneLine(value).replace(/\d+(?:(?:st|nd|rd|th)(?!\p{L}))?/giu, '')).split(' ').filter((w) => /\p{L}/u.test(w)).join(' ');
+// The name without its number, offered only where taking the number out
+// leaves the rest of the name as typed (it goes into the sign-off of every
+// listing once copied): digits inside a word, after a letter ("Sam2" is
+// "Sam", "J2 Smith" is "J Smith"), a number that is a word of its own at the
+// end of the name ("Sam 2", "Sam 2nd"), or one in brackets or quotes of its
+// own anywhere ("Sam (2)", "Sam (2) Smith"). '' for any other number: one
+// among the name's words may belong to them ("Sam 2nd shift" is not "Sam
+// shift", "Sam (Store 2)" is not "Sam (Store"), and one with another sign at
+// it ("Sam-2", "Sam #2", "24/7", "2.0", "Sam, 2") leaves the sign behind.
+// '' too for what has no letter, or brackets or quotes left unpaired.
+const NTH = '\\d+(?:st|nd|rd|th)?';
+const BARE_NUMBER = new RegExp(`^${NTH}$`, 'i');
+const OWN_BRACKETS = new RegExp(`^(?:\\(${NTH}\\)|\\[${NTH}\\]|\\{${NTH}\\}|"${NTH}"|'${NTH}'|\u2018${NTH}\u2019|\u201c${NTH}\u201d)$`, 'i');
+const AFTER_A_LETTER = /(?<=\p{L})\d+(?:(?:st|nd|rd|th)(?!\p{L}))?/giu;
+const timesIn = (text, c) => text.split(c).length - 1;
+const paired = (text) => [['(', ')'], ['[', ']'], ['{', '}'], ['\u201c', '\u201d']].every(([a, b]) => timesIn(text, a) === timesIn(text, b)) && timesIn(text, '"') % 2 === 0;
+export function nameWithoutNumber(value) {
+  const words = oneLine(value).split(' ');
+  const kept = [];
+  for (const [i, word] of words.entries()) {
+    if (!/\d/.test(word)) kept.push(word);
+    else if (OWN_BRACKETS.test(word) || (BARE_NUMBER.test(word) && i === words.length - 1)) continue;
+    else {
+      const left = word.replace(AFTER_A_LETTER, '');
+      if (/\d/.test(left)) return '';
+      kept.push(left);
+    }
+  }
+  const out = kept.join(' ');
+  return /\p{L}/u.test(out) && paired(out) && /[\p{L}.)\]}"'\u2019\u201d]$/u.test(out) ? out : '';
+}
 const SETTING_WORDS = Object.freeze({
   role: Object.freeze({ your: 'Your role', field: 'Your role', example: numbersAsWords, otherwise: 'write the number as a word or leave it out' }),
-  name: Object.freeze({ your: 'Your name', field: 'Your name', example: withoutDigits, otherwise: 'leave the number out' }),
+  name: Object.freeze({ your: 'Your name', field: 'Your name', example: nameWithoutNumber, otherwise: 'leave the number out' }),
   dealer: Object.freeze({ your: "Your dealership's name", field: 'Dealership name', example: numbersAsWords, otherwise: 'write the number as a word' }),
 });
 // The way to write the value that the reason and the warning offer ('' for

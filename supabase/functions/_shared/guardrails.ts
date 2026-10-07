@@ -812,13 +812,37 @@ export function numbersAsWords(value: unknown): string {
   });
   return /\d/.test(out) ? '' : out;
 }
-// The value without its digits (and an ordinal ending after them), and
-// without what is left with no letter ("J2 Smith" is "J Smith").
-const withoutDigits = (value: unknown): string => oneLine(oneLine(value).replace(/\d+(?:(?:st|nd|rd|th)(?!\p{L}))?/giu, '')).split(' ').filter((w) => /\p{L}/u.test(w)).join(' ');
+// The name without its number, only where taking the number out leaves the
+// rest of the name as typed: digits after a letter in a word ("J2 Smith" is
+// "J Smith"), a number that is a word of its own at the end ("Sam 2"), or
+// one in brackets or quotes of its own ("Sam (2)"); '' for any other number
+// ("Sam 2nd shift", "Sam (Store 2)", "Sam-2"), for what has no letter, and
+// for brackets or quotes left unpaired.
+const NTH = '\\d+(?:st|nd|rd|th)?';
+const BARE_NUMBER = new RegExp(`^${NTH}$`, 'i');
+const OWN_BRACKETS = new RegExp(`^(?:\\(${NTH}\\)|\\[${NTH}\\]|\\{${NTH}\\}|"${NTH}"|'${NTH}'|\u2018${NTH}\u2019|\u201c${NTH}\u201d)$`, 'i');
+const AFTER_A_LETTER = /(?<=\p{L})\d+(?:(?:st|nd|rd|th)(?!\p{L}))?/giu;
+const timesIn = (text: string, c: string): number => text.split(c).length - 1;
+const paired = (text: string): boolean => [['(', ')'], ['[', ']'], ['{', '}'], ['\u201c', '\u201d']].every(([a, b]) => timesIn(text, a) === timesIn(text, b)) && timesIn(text, '"') % 2 === 0;
+export function nameWithoutNumber(value: unknown): string {
+  const words = oneLine(value).split(' ');
+  const kept: string[] = [];
+  for (const [i, word] of words.entries()) {
+    if (!/\d/.test(word)) kept.push(word);
+    else if (OWN_BRACKETS.test(word) || (BARE_NUMBER.test(word) && i === words.length - 1)) continue;
+    else {
+      const left = word.replace(AFTER_A_LETTER, '');
+      if (/\d/.test(left)) return '';
+      kept.push(left);
+    }
+  }
+  const out = kept.join(' ');
+  return /\p{L}/u.test(out) && paired(out) && /[\p{L}.)\]}"'\u2019\u201d]$/u.test(out) ? out : '';
+}
 type Setting = 'role' | 'name' | 'dealer';
 const SETTING_WORDS: Readonly<Record<Setting, Readonly<{ your: string; field: string; example: (value: unknown) => string; otherwise: string }>>> = Object.freeze({
   role: Object.freeze({ your: 'Your role', field: 'Your role', example: numbersAsWords, otherwise: 'write the number as a word or leave it out' }),
-  name: Object.freeze({ your: 'Your name', field: 'Your name', example: withoutDigits, otherwise: 'leave the number out' }),
+  name: Object.freeze({ your: 'Your name', field: 'Your name', example: nameWithoutNumber, otherwise: 'leave the number out' }),
   dealer: Object.freeze({ your: "Your dealership's name", field: 'Dealership name', example: numbersAsWords, otherwise: 'write the number as a word' }),
 });
 // The example is offered only when the sign-off written with it gives the
