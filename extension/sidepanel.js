@@ -259,6 +259,9 @@ async function notSavedHere(other, saved) {
   state.notSaved = report;
   setStatus('');
   render();
+  // the keyboard was in the box this view replaced: it goes to the kept text (or Back)
+  const landing = $(report.kept.length ? 'kept-' + report.kept[0].key : 'back');
+  if (landing) landing.focus();
 }
 
 // A website's saved post is written together with that website as the one

@@ -320,6 +320,7 @@ try {
   assert.match(await panel.textContent('#notSaved'), /'s Marketplace form is open from the side panel in another Chrome window, and the post changed there after this side panel showed it, so what was done here was not saved\. Finish the post there; opening the side panel in that window brings it back\./);
   assert.equal(await panel.getAttribute('#notSaved', 'role'), 'alert');
   assert.equal(await panel.inputValue('#kept-description'), typed, 'the text typed here is kept on screen');
+  assert.equal(await panel.evaluate(() => document.activeElement && document.activeElement.id), 'kept-description', 'the keyboard lands on the kept text, where the typing box was');
   assert.equal(await panel.getAttribute('#kept-description', 'readonly'), '', 'read-only');
   assert.equal(await panel.getAttribute('button[aria-label="Copy the description"]', 'data-copy'), typed, 'Copy copies it');
   assert.match(await panel.textContent('#notSavedKept'), /What you typed here is below, kept on this screen only/);
