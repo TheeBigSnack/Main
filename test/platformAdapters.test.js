@@ -1624,3 +1624,48 @@ test('R-8: a footnote of several numbers or a letter, in a superscript tag or in
   const own = normalizeInventoryRecord({ ...dealerOnCard(car).VehicleCard, VehiclePriceLabel: 'Sample Motors Price<sup>1,2</sup>' }, { origin: DEALERON_ORIGIN });
   assert.deepEqual([own.price, own.priceBeforeFees], [car.base + car.fee, car.base]);
 });
+
+// Rule 3, repair cycle 3 (the lead's direction): a "new" word in another
+// condition field counted only when the whole field matched a list of the
+// ways a new condition is written ("New In Stock", "New - In Transit"). The
+// same meaning with another separator or status ("New (In Stock)",
+// "New/In Stock", "NEW!", "New Inbound", "New - Arriving Soon", "In Stock -
+// New") or "New Model" was not read, so a certified record with "used" in
+// its inventory type was renamed Certified Used and reached Ready. Now any
+// new word in any condition field counts, except a grade or a badge that
+// holds the word ("Like New", "New Arrival", "New Tires"), and "Newer" or
+// "News" is not "new".
+test('Rule 3: a new word written any way in another condition field ("New (In Stock)", "In Stock - New", "NEW!") sends the car to Needs a look naming both words, never Certified Used', () => {
+  const [c] = platformCars(1, { from: 800 });
+  const carfaxUrl = `https://www.carfax.com/VehicleHistory/p/Report.cfx?vin=${c.vin}`;
+  const disagree = (first, second) => `The website disagrees with itself: it lists the car as "${first}" and as "${second}". Check its condition before posting.`;
+  for (const T of ['New (In Stock)', 'New/In Stock', 'NEW!', 'New Inbound', 'New - Arriving Soon', 'In Stock - New', 'New Model', 'new', 'Like New / New Vehicle', 'New Arrival - New']) {
+    // the reviewer's certified records: Dealer.com with its /certified/ address, DealerOn with its own condition
+    const com = normalizeInventoryRecord({ ...dealerComRecord({ ...c, certified: true }), stockType: T }, { origin: DEALERCOM_ORIGIN });
+    assert.deepEqual([com.inventoryType, com.readableType], ['used', T], `Dealer.com, certified, stockType "${T}": never renamed Certified Used`);
+    assert.equal(checkPreOwned(com).reason, disagree('used', T), `Dealer.com, certified, stockType "${T}"`);
+    assert.equal(assessVehicle(com, withDefaults({})).decision, DECISION.REVIEW, `Dealer.com, certified, stockType "${T}": Needs a look`);
+    const on = normalizeInventoryRecord({ ...dealerOnCard({ ...c, certified: true }).VehicleCard, VehicleType: T }, { origin: DEALERON_ORIGIN });
+    assert.deepEqual([on.inventoryType, on.readableType], ['Certified Pre-Owned', T], `DealerOn, certified, VehicleType "${T}"`);
+    assert.equal(assessVehicle(on, withDefaults({})).decision, DECISION.REVIEW, `DealerOn, certified, VehicleType "${T}": Needs a look`);
+    // without the certified flag: an address with no condition word and a Carfax report
+    const plain = normalizeInventoryRecord({ ...dealerComRecord({ ...c, certified: false }), stockType: T, link: `/vehicle/${c.vin}.htm`, carfaxUrl }, { origin: DEALERCOM_ORIGIN });
+    assert.deepEqual([plain.inventoryType, plain.readableType], ['used', T], `Dealer.com, not certified, stockType "${T}"`);
+    assert.equal(assessVehicle(plain, withDefaults({})).decision, DECISION.REVIEW, `Dealer.com, not certified, stockType "${T}": Needs a look, never Ready`);
+    const onPlain = normalizeInventoryRecord({ ...dealerOnCard({ ...c, certified: false }).VehicleCard, VehicleType: T }, { origin: DEALERON_ORIGIN });
+    assert.deepEqual([onPlain.inventoryType, onPlain.readableType], ['Used', T], `DealerOn, not certified, VehicleType "${T}"`);
+    assert.equal(assessVehicle(onPlain, withDefaults({})).decision, DECISION.REVIEW, `DealerOn, not certified, VehicleType "${T}": Needs a look`);
+  }
+  // the first field present says nothing about the condition: the new word is the inventory type, never Certified Used
+  const vague = normalizeInventoryRecord({ ...dealerComRecord({ ...c, certified: true }), inventoryType: 'Vehicle', type: 'New Model' }, { origin: DEALERCOM_ORIGIN });
+  assert.equal(vague.inventoryType, 'New Model', 'a certified record whose only new word is "New Model" in another field');
+  assert.notEqual(assessVehicle(vague, withDefaults({})).decision, DECISION.READY);
+  const vagueNew = normalizeInventoryRecord({ ...dealerComRecord({ ...c, certified: true }), inventoryType: 'Vehicle', type: 'New Model', link: `/vehicle/${c.vin}.htm`, carfaxUrl }, { origin: DEALERCOM_ORIGIN });
+  assert.equal(assessVehicle(vagueNew, withDefaults({})).decision, DECISION.SKIP, 'nothing else calls it pre-owned: skipped as new');
+  // "Newer" and "News" are not "new", and a grade or a badge alone is still no new sign
+  for (const word of ['Newer', 'In the News', 'Like New', 'New Arrival', 'New Arrivals', 'Brand New Tires', 'New Tyres']) {
+    const v = normalizeInventoryRecord({ ...dealerComRecord({ ...c, certified: false }), stockType: word }, { origin: DEALERCOM_ORIGIN });
+    assert.deepEqual([v.inventoryType, v.readableType], ['used', null], `stockType "${word}"`);
+    assert.equal(assessVehicle(v, withDefaults({})).decision, DECISION.READY, `stockType "${word}": Ready`);
+  }
+});

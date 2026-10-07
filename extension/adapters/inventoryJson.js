@@ -641,18 +641,21 @@ const DEMO_LETTERS = /demo/i;
 const LOANER_LETTERS = /loaner|courtesy/i;
 const lettersOf = (text) => String(text).replace(/[^a-z]/gi, '');
 
-// A new condition as a field writes it: "New", "Brand New", "New Vehicle",
-// "NEW - VEHICLE", with a status or a model year after it ("New In Stock",
-// "New - In Transit", "New 2025", "NEW.") (NEW_CONDITION), or a code run
-// together with no case or underscore to split it by ("NEWVEHICLE",
-// "newcar", "BRANDNEW": NEW_RUN, read as "NEW VEHICLE"). Not a grade or a
-// badge that holds the word ("Like New", "New Arrival", "Brand New Tires").
-// This reading is for the record's other condition fields only: its own
-// condition stops the certified rename whenever it reads as new at all
-// (normalizeInventoryRecord).
+// A grade or a badge that holds the word "new" without calling the car new
+// ("Like New", "Like-New Condition", "New Arrival", "New Arrivals", "Brand
+// New Tires", "New Tyres"). In the record's other condition fields every
+// other "new" word counts, however it is written ("New", "New (In Stock)",
+// "New/In Stock", "NEW!", "New Inbound", "In Stock - New", "New Model"), so
+// a way of writing new nobody listed errs toward Needs a look, never Ready;
+// a field that holds a badge and another new word ("New Arrival - New")
+// still counts. Words such as "Newer" or "News" are not "new". The record's
+// own condition stops the certified rename whenever it reads as new at all,
+// badges too (normalizeInventoryRecord).
+const NEW_BADGE = /\blike[\s-]*new\b|\bnew[\s-]+arrivals?\b|\bnew[\s-]+(?:tires?|tyres?)\b/gi;
+const withoutBadges = (words) => String(words || '').replace(NEW_BADGE, ' ');
+// A new code run together with no case or underscore to split it by
+// ("NEWVEHICLE", "newcar", "BRANDNEW"), read as "NEW VEHICLE".
 const VEHICLE_NOUN = 'vehicles?|cars?|trucks?|suvs?|vans?|units?|inventory|stock|condition';
-const NEW_STATUS = String.raw`in[\s-]*stock|in[\s-]*transit|on[\s-]*order|(?:19|20)\d{2}`;
-const NEW_CONDITION = new RegExp(String.raw`^(?:brand[\s-]*)?new(?:[\s:\-\u2013\u2014]+(?:${VEHICLE_NOUN})){0,2}(?:[\s:,\-\u2013\u2014]+(?:${NEW_STATUS}))?\.?$`, 'i');
 const NEW_RUN = new RegExp(String.raw`^(brand)?(new)(${VEHICLE_NOUN})?$`, 'i');
 
 // A condition word the gate can read, from one condition field's text; a
@@ -667,10 +670,6 @@ function conditionText(raw) {
   if (run) return run.slice(1).filter(Boolean).join(' ');
   return DEMO_LETTERS.test(lettersOf(raw)) || LOANER_LETTERS.test(lettersOf(raw)) ? raw : '';
 }
-
-// Whether a condition word reads as a new condition (NEW_CONDITION), with
-// a schema.org address's words read as words ("NewCondition").
-const isNewCondition = (words) => NEW_CONDITION.test(String(words || '').replace(/^\s*https?:\/\/schema\.org\//i, '').trim());
 
 // The first condition field present, as a condition word.
 const conditionOf = (card) => conditionText(textOf(pick(card, N.condition)));
@@ -822,14 +821,14 @@ export function normalizeInventoryRecord(card, { origin, page = null } = {}) {
   // used one beside it: the first of each, as a condition word. In the
   // record's own condition (the first field present) any new word counts,
   // as the gate reads it ("New In Stock", "New Model", "Like New"): such a
-  // record is never renamed Certified Used. In another field a new word
-  // counts when that field reads as a new condition ("New", "New Vehicle",
-  // "New In Stock", "NEWVEHICLE"), never a grade or a badge ("Like New",
-  // "New Arrival"), and it stops the rename too. When the first field
-  // present says nothing, a new word from another field is the inventory
-  // type.
+  // record is never renamed Certified Used. In another field any new word
+  // counts too, however it is written ("New", "New (In Stock)", "In Stock -
+  // New", "NEW!", "New Model", "NEWVEHICLE"), except a grade or a badge
+  // that holds the word ("Like New", "New Arrival": NEW_BADGE), and it stops
+  // the rename too. When the first field present says nothing, a new word
+  // from another field is the inventory type.
   const said = fields.map(conditionText).filter(Boolean);
-  const newWord = said.find((w) => conditionSays(w) === 'new' && isNewCondition(w)) || '';
+  const newWord = said.find((w) => conditionSays(withoutBadges(w)) === 'new') || '';
   const usedWord = said.find((w) => conditionSays(w) === 'pre-owned') || '';
   const ownSaysNew = conditionSays(condition) === 'new';
   const inventoryType = (certified && !ownSaysNew && !newWord && !demoWord && !loanerWord ? 'Certified Used' : condition || newWord) || null;
