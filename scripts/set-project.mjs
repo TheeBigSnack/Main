@@ -9,11 +9,15 @@
 //
 //   npm run set-project -- https://<ref>.supabase.co sb_publishable_...
 //   npm run set-project -- --check     (exit 1 unless the manager view is ready to deploy)
+//   npm run set-project -- --check --project-ref <ref>   (and both files name that project)
 //
-// --check is what the manager view's deploy workflow runs first: both files
-// filled, the same project and key, a browser-safe key, and the supabase-js
-// address pinned to an exact version (the page runs it with the manager's
-// session, so a new release must not reach it unreviewed).
+// --check is what the manager view's deploy workflow runs first, with the
+// production project's ref from its environment (SUPABASE_PROJECT_REF), so a
+// page set to any other project is refused: both files filled, naming that
+// project, the same project and key, a browser-safe key, and the supabase-js
+// address pinned to an exact version served from the page's own folder (the
+// page runs it with the manager's session, so a new release must not reach it
+// unreviewed, and its Content-Security-Policy allows scripts from 'self' only).
 
 import { readFile, writeFile } from 'node:fs/promises';
 import { pathToFileURL, fileURLToPath } from 'node:url';
@@ -43,12 +47,12 @@ export function keyProblem(key) {
   return '';
 }
 
-// supabase-js from jsDelivr at an exact version (…@2.117.2/+esm), or a copy
-// served next to the page (./vendor/…). A bare major (@2) or a tag is not pinned.
+// supabase-js as the copy served next to the page at an exact version
+// (./vendor/supabase-js-2.117.2.js). A CDN address is refused even when it is
+// pinned: the page's Content-Security-Policy allows scripts from its own
+// origin only, so the page would not load it (manager/config.js says why).
 export function isPinnedClient(address) {
-  const a = String(address || '');
-  if (/^\.\/vendor\/[\w.-]+\.js$/.test(a)) return true;
-  return /^https:\/\/cdn\.jsdelivr\.net\/npm\/@supabase\/supabase-js@\d+\.\d+\.\d+\/\+esm$/.test(a);
+  return /^\.\/vendor\/supabase-js-\d+\.\d+\.\d+\.js$/.test(String(address || ''));
 }
 
 const quote = (v) => `'${String(v).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
@@ -75,25 +79,37 @@ export function applyProject(texts, url, key) {
 }
 
 // What --check reports: an empty list means the manager view may deploy.
-export function readiness({ account = {}, manager = {} } = {}) {
+// projectRef, when given, is the production project's ref: the files must
+// name exactly that project (the shape alone says nothing about which one).
+export function readiness({ account = {}, manager = {}, projectRef } = {}) {
   const problems = [];
   const mUrl = String(manager.supabaseUrl || '').replace(/\/+$/, '');
   const aUrl = String(account.url || '').replace(/\/+$/, '');
   const urlProblem = projectUrlProblem(mUrl);
   if (urlProblem) problems.push(`manager/config.js supabaseUrl: ${urlProblem}`);
+  if (projectRef !== undefined) {
+    const ref = String(projectRef || '').trim();
+    if (!/^[a-z0-9]{20}$/.test(ref)) problems.push(`the production project ref is missing or is not 20 lower-case letters and digits: ${ref || '(empty)'}`);
+    else if (!urlProblem && mUrl !== `https://${ref}.supabase.co`) problems.push(`manager/config.js names ${mUrl}, not the production project https://${ref}.supabase.co: run npm run set-project with the production project and commit`);
+  }
   const kp = keyProblem(manager.supabaseAnonKey);
   if (kp) problems.push(`manager/config.js supabaseAnonKey: ${kp}`);
   if (aUrl !== mUrl || account.anonKey !== manager.supabaseAnonKey) problems.push('extension/src/accountConfig.js and manager/config.js name different projects or keys: run npm run set-project');
-  if (!isPinnedClient(manager.supabaseJs)) problems.push(`manager/config.js supabaseJs is not pinned to an exact version: ${manager.supabaseJs || '(empty)'}`);
+  if (!isPinnedClient(manager.supabaseJs)) problems.push(`manager/config.js supabaseJs is not pinned to an exact version served from manager/vendor/: ${manager.supabaseJs || '(empty)'}`);
   if (manager.functionsUrl) problems.push('manager/config.js functionsUrl is set: the page\'s Content-Security-Policy and this check expect the project\'s own /functions/v1');
   return problems;
 }
 
 async function main(argv) {
   if (argv[0] === '--check') {
+    if (!(argv.length === 1 || (argv.length === 3 && argv[1] === '--project-ref'))) {
+      console.log('usage: npm run set-project -- --check [--project-ref <ref>]');
+      process.exitCode = 2;
+      return;
+    }
     const { ACCOUNT } = await import('../extension/src/accountConfig.js');
     const { CONFIG } = await import('../manager/config.js');
-    const problems = readiness({ account: ACCOUNT, manager: CONFIG });
+    const problems = readiness({ account: ACCOUNT, manager: CONFIG, ...(argv.length === 3 ? { projectRef: argv[2] } : {}) });
     for (const p of problems) console.log(`FAIL  ${p}`);
     console.log(problems.length ? `${problems.length} problem(s): the manager view is not ready to deploy.` : 'The manager view is configured for the production project.');
     process.exitCode = problems.length ? 1 : 0;
@@ -101,7 +117,7 @@ async function main(argv) {
   }
   const [url, key] = argv;
   if (!url || !key || argv.length !== 2) {
-    console.log('usage: npm run set-project -- https://<ref>.supabase.co sb_publishable_...\n       npm run set-project -- --check');
+    console.log('usage: npm run set-project -- https://<ref>.supabase.co sb_publishable_...\n       npm run set-project -- --check [--project-ref <ref>]');
     process.exitCode = 2;
     return;
   }

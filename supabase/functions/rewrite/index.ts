@@ -25,6 +25,16 @@
 // The draft is checked with the same guardrails the extension runs
 // (_shared/guardrails.ts, ported from extension/src/rewriteTemplate.js) and
 // regenerated once with the problems spelled out, then given up on.
+//
+// Time: the extension waits 25 seconds for an answer
+// (extension/src/rewriter.js REWRITE_TIMEOUT_MS) and then shows its
+// template, so nothing done after that reaches anyone and any cost of it is
+// wasted. Each request therefore has one deadline under that, 20 seconds
+// from its arrival (REWRITE_DEADLINE_MS), shared by every Anthropic call it
+// makes: a call still running then is stopped (504), and a retry or a
+// second draft starts only while at least 40% of it is left. A caller that
+// goes away (req.signal) stops the call the same way. A stopped call
+// records no usage.
 
 import { buildRewritePrompt, type RewriteFacts } from '../_shared/rewritePrompt.ts';
 import { runGuardrails, type GuardrailContext, type GuardrailResult } from '../_shared/guardrails.ts';
@@ -41,6 +51,7 @@ const config = {
   apiKey: env('ANTHROPIC_API_KEY'),
   anthropicUrl: 'https://api.anthropic.com/v1/messages',
   timeoutMs: 30_000,
+  deadlineMs: Number(env('REWRITE_DEADLINE_MS')) || 20_000,
   bodyLimit: 64 * 1024,
 };
 
@@ -136,9 +147,29 @@ class UpstreamError extends Error {
   }
 }
 
-// One retry on a network error or a 429/5xx, then a plain message the
-// extension shows (it falls back to the template either way).
-async function callAnthropic(body: Record<string, unknown>): Promise<AnthropicMessage> {
+// The request's time: one signal that stops every call it makes, at the
+// deadline or when the caller goes away, and whether enough of it is left
+// to start another call.
+interface Clock {
+  signal: AbortSignal;
+  roomFor(): boolean;
+}
+const MIN_LEFT = 0.4;
+function clockFor(req: Request): Clock {
+  const started = Date.now();
+  return {
+    signal: AbortSignal.any([req.signal, AbortSignal.timeout(config.deadlineMs)]),
+    roomFor() {
+      return !this.signal.aborted && config.deadlineMs - (Date.now() - started) >= config.deadlineMs * MIN_LEFT;
+    },
+  };
+}
+const OUT_OF_TIME = 'Claude took too long to answer, so it was stopped; the template is used instead';
+
+// One retry on a network error or a 429/5xx while the request has time for
+// it, then a plain message the extension shows (it falls back to the
+// template either way).
+async function callAnthropic(body: Record<string, unknown>, clock: Clock): Promise<AnthropicMessage> {
   for (let attempt = 0; ; attempt += 1) {
     let res: Response;
     try {
@@ -146,13 +177,21 @@ async function callAnthropic(body: Record<string, unknown>): Promise<AnthropicMe
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-api-key': config.apiKey, 'anthropic-version': '2023-06-01' },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(config.timeoutMs),
+        signal: AbortSignal.any([clock.signal, AbortSignal.timeout(config.timeoutMs)]),
       });
     } catch {
-      if (attempt < 1) continue;
+      if (clock.signal.aborted) throw new UpstreamError(504, OUT_OF_TIME);
+      if (attempt < 1 && clock.roomFor()) continue;
       throw new UpstreamError(502, 'could not reach the Anthropic API');
     }
-    if (res.ok) return (await res.json()) as AnthropicMessage;
+    if (res.ok) {
+      try {
+        return (await res.json()) as AnthropicMessage;
+      } catch (e) {
+        if (clock.signal.aborted) throw new UpstreamError(504, OUT_OF_TIME);
+        throw e;
+      }
+    }
     const status = res.status;
     let detail = '';
     try {
@@ -162,9 +201,9 @@ async function callAnthropic(body: Record<string, unknown>): Promise<AnthropicMe
       /* no readable body */
     }
     const retryable = status === 429 || status === 529 || status >= 500;
-    if (retryable && attempt < 1) {
+    if (retryable && attempt < 1 && clock.roomFor()) {
       await new Promise((r) => setTimeout(r, 1000));
-      continue;
+      if (clock.roomFor()) continue;
     }
     if (status === 401 || status === 403) throw new UpstreamError(502, 'the Anthropic API key was rejected');
     if (status === 429 || status === 529) throw new UpstreamError(503, 'the Anthropic API is rate limiting; try again shortly');
@@ -175,6 +214,10 @@ async function callAnthropic(body: Record<string, unknown>): Promise<AnthropicMe
 const textOf = (m: AnthropicMessage): string => (m.content || []).filter((b) => b.type === 'text').map((b) => b.text || '').join('\n').trim();
 
 // ---------- /rewrite ----------
+
+const NO_DEALER_NAME = "the dealership's name is missing: add it in Settings";
+// read as the prompt and the guardrails read it
+const dealerNameOf = (facts: RewriteFacts): string => String((isRecord(facts.dealer) && facts.dealer.name) || '').trim();
 
 // The guardrails want a vehicle-shaped object; the facts are that object minus the VIN.
 function guardrailContext(facts: RewriteFacts): GuardrailContext {
@@ -189,30 +232,32 @@ function guardrailContext(facts: RewriteFacts): GuardrailContext {
       carfaxUrl: facts.carfax ? 'yes' : null,
     },
     dealer: isRecord(facts.dealer) ? facts.dealer : {},
+    salesperson: isRecord(facts.salesperson) ? facts.salesperson : {}, // the role the sign-off must state
     priceNote: typeof facts.priceNote === 'string' ? facts.priceNote : '',
   };
 }
 
+// A draft cut off at max_tokens (600, several times the 120-word limit)
+// always fails the too-long check, so it needs no flag of its own.
 interface Draft {
   text: string;
   refused: boolean;
-  truncated: boolean;
   cost: number;
   model: string;
 }
 
-async function draft(facts: RewriteFacts, fixes: string[], who: Who, service: SupabaseClient): Promise<Draft> {
+async function draft(facts: RewriteFacts, fixes: string[], who: Who, service: SupabaseClient, clock: Clock): Promise<Draft> {
   const { system, user } = buildRewritePrompt(facts, fixes);
   const response = await callAnthropic({
     model: config.model,
     max_tokens: 600,
     system,
     messages: [{ role: 'user', content: user }],
-  });
+  }, clock);
   const model = response.model || config.model;
   const cost = await recordUsage(service, who, 'rewrite', model, response.usage || {});
-  if (response.stop_reason === 'refusal') return { text: '', refused: true, truncated: false, cost, model };
-  return { text: textOf(response), refused: false, truncated: response.stop_reason === 'max_tokens', cost, model };
+  if (response.stop_reason === 'refusal') return { text: '', refused: true, cost, model };
+  return { text: textOf(response), refused: false, cost, model };
 }
 
 interface RewriteAnswer {
@@ -224,16 +269,18 @@ interface RewriteAnswer {
   error: string;
 }
 
-async function rewrite(facts: RewriteFacts, who: Who, service: SupabaseClient): Promise<RewriteAnswer> {
+async function rewrite(facts: RewriteFacts, who: Who, service: SupabaseClient, clock: Clock): Promise<RewriteAnswer> {
   const ctx = guardrailContext(facts);
-  let d = await draft(facts, [], who, service);
+  let d = await draft(facts, [], who, service, clock);
   let g = runGuardrails(d.text, ctx);
   let cost = d.cost;
-  if (!g.ok && !d.refused) {
+  let tries = 1;
+  if (!g.ok && !d.refused && clock.roomFor()) {
     // regenerate once with the problems spelled out, then give up (the extension falls back to its template)
-    d = await draft(facts, g.problems.map((p) => p.text), who, service);
+    d = await draft(facts, g.problems.map((p) => p.text), who, service, clock);
     g = runGuardrails(d.text, ctx);
     cost += d.cost;
+    tries = 2;
   }
   return {
     ok: g.ok,
@@ -241,7 +288,7 @@ async function rewrite(facts: RewriteFacts, who: Who, service: SupabaseClient): 
     model: d.model,
     guardrails: g,
     costUsd: Number(cost.toFixed(5)),
-    error: g.ok ? '' : d.refused ? 'the model declined this request' : 'the draft failed the checks twice',
+    error: g.ok ? '' : d.refused ? 'the model declined this request' : tries === 2 ? 'the draft failed the checks twice' : 'the draft failed the checks, and there was no time for a second one',
   };
 }
 
@@ -256,7 +303,7 @@ type ColorAnswer =
   | { ok: true; exterior: string; interior: string; confidence: string; model: string; costUsd: number }
   | { ok: false; error: string; costUsd: number };
 
-async function guessColors(photos: string[], options: string[], who: Who, service: SupabaseClient): Promise<ColorAnswer> {
+async function guessColors(photos: string[], options: string[], who: Who, service: SupabaseClient, clock: Clock): Promise<ColorAnswer> {
   const content: Array<Record<string, unknown>> = photos.slice(0, COLOR_MAX_PHOTOS).map((url) => ({ type: 'image', source: { type: 'url', url } }));
   content.push({
     type: 'text',
@@ -264,7 +311,7 @@ async function guessColors(photos: string[], options: string[], who: Who, servic
       'If no photo shows the interior, answer "unknown" for interior; if the exterior is not clearly visible, answer "unknown". ' +
       'Reply with JSON only, like {"exterior":"Gray","interior":"Black","confidence":"high"} where confidence is high, medium or low.',
   });
-  const response = await callAnthropic({ model: config.model, max_tokens: 120, messages: [{ role: 'user', content }] });
+  const response = await callAnthropic({ model: config.model, max_tokens: 120, messages: [{ role: 'user', content }] }, clock);
   const model = response.model || config.model;
   const cost = await recordUsage(service, who, 'color', model, response.usage || {});
   if (response.stop_reason === 'refusal') return { ok: false, error: 'the model declined to look at these photos', costUsd: Number(cost.toFixed(5)) };
@@ -284,6 +331,7 @@ async function guessColors(photos: string[], options: string[], who: Who, servic
 // ---------- the handler ----------
 
 Deno.serve(async (req: Request): Promise<Response> => {
+  const clock = clockFor(req);
   if (req.method === 'OPTIONS') return preflight(req);
   const route = routeOf(req);
   const isHealth = req.method === 'GET' && route === 'health';
@@ -353,14 +401,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const photos = Array.isArray(b.photos) ? b.photos.filter((u): u is string => typeof u === 'string' && /^https:\/\//i.test(u)).slice(0, COLOR_MAX_PHOTOS) : [];
       if (!photos.length) return json(req, 400, { ok: false, error: 'photos are missing (1 to 4 https addresses)' });
       const options = Array.isArray(b.options) && b.options.length ? b.options.map(String).slice(0, 40) : DEFAULT_COLORS;
-      const out = await guessColors(photos, options, who, service);
+      const out = await guessColors(photos, options, who, service, clock);
       console.log(`${new Date().toISOString()} color ${photos.length} photo(s) -> ${out.ok ? `${out.exterior || '?'} / ${out.interior || '?'} (${out.confidence})` : out.error} $${out.costUsd} (month $${(spent + out.costUsd).toFixed(2)})`);
       return json(req, 200, out);
     }
     const facts: RewriteFacts = isRecord(body) ? { ...body } : {};
     delete facts.origin; // ours, not a fact about the car
     if (!facts.make || !facts.model) return json(req, 400, { ok: false, error: 'facts are missing (year, make, model, ...)' });
-    const out = await rewrite(facts, who, service);
+    // every description must name the dealership (the guardrails' no-dealer),
+    // so without its name no draft can pass: nothing is asked or paid for
+    if (!dealerNameOf(facts)) return json(req, 400, { ok: false, error: NO_DEALER_NAME });
+    const out = await rewrite(facts, who, service, clock);
     console.log(`${new Date().toISOString()} rewrite ${facts.year} ${facts.make} ${facts.model} -> ${out.ok ? 'ok' : 'failed checks'} $${out.costUsd} (month $${(spent + out.costUsd).toFixed(2)})`);
     return json(req, 200, out);
   } catch (e) {

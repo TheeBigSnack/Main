@@ -18,7 +18,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { startMockSite } from './mock-dealer-site.mjs';
-import { startMockMarketplace } from './mock-marketplace.mjs';
+import { startMockMarketplace, INITIAL_LISTINGS } from './mock-marketplace.mjs';
+import { blockFacebook } from './noFacebook.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const shots = join(root, 'test/e2e/screenshots');
@@ -26,7 +27,7 @@ mkdirSync(shots, { recursive: true });
 
 // Test copy of the extension: it may script the two local mock servers and
 // nothing else (see post.e2e.mjs).
-const extDir = mkdtempSync(join(tmpdir(), 'lot-sync-ext-'));
+const extDir = mkdtempSync(join(tmpdir(), 'lot-current-ext-'));
 cpSync(join(root, 'extension'), extDir, { recursive: true });
 const manifest = JSON.parse(readFileSync(join(extDir, 'manifest.json'), 'utf8'));
 manifest.host_permissions = ['http://127.0.0.1/*'];
@@ -39,13 +40,14 @@ const market = await startMockMarketplace();
 const siteUrl = `http://127.0.0.1:${site.address().port}/used-vehicles/`;
 const origin = new URL(siteUrl).origin;
 const marketOrigin = `http://127.0.0.1:${market.address().port}`;
-const profileDir = mkdtempSync(join(tmpdir(), 'lot-sync-profile-panel-'));
+const profileDir = mkdtempSync(join(tmpdir(), 'lot-current-profile-panel-'));
 const context = await chromium.launchPersistentContext(profileDir, {
   channel: process.env.LOTSYNC_E2E_CHANNEL || 'chromium',
   headless: true,
   args: [`--disable-extensions-except=${extDir}`, `--load-extension=${extDir}`],
   viewport: { width: 520, height: 900 },
 });
+const facebook = await blockFacebook(context); // the real facebook.com is never loaded (./noFacebook.mjs)
 
 const errors = [];
 const watch = (p) => {
@@ -65,16 +67,26 @@ try {
   await ext.close();
   const extUrl = (file) => `chrome-extension://${extensionId}/${file}`;
   const get = async (path) => (await context.request.get(`${path.startsWith('http') ? '' : origin}${path}`)).text();
-  const publishCount = async () => (await context.request.get(`${marketOrigin}/publish-count`)).text();
+  // How many times Publish was clicked; and first, that nothing ever touched the
+  // mock form's decoy action controls or submitted it (see mock-marketplace.mjs).
+  const publishCount = async () => {
+    assert.deepEqual(await (await context.request.get(`${marketOrigin}/actions`)).json(), [], 'nothing may touch an action control but the person');
+    // nor did anything mark a listing sold, delete one or save an edit: Facebook lands on a listing page after Publish
+    assert.deepEqual(await (await context.request.get(`${marketOrigin}/listing-actions`)).json(), [], 'nothing may mark sold, delete or update a listing but the person');
+    assert.deepEqual(await (await context.request.get(`${marketOrigin}/listing-state`)).json(), INITIAL_LISTINGS, 'every listing is as it was');
+    return (await context.request.get(`${marketOrigin}/publish-count`)).text();
+  };
 
-  // Settings and the test hooks straight into storage. Every store is the
-  // salesperson's, so the Ram (Waynesburg) and the Wagoneer (Cranberry) are both ready.
+  // Settings and the test hooks straight into storage. Both stores are the
+  // salesperson's, so the Ram (Waynesburg) and the Wagoneer (Cranberry) are
+  // both ready. Named, not left empty: the website's first scan ticks only
+  // the store named after it when none is chosen (src/scanRunner.js).
   const setup = await context.newPage();
   await setup.goto(extUrl('popup.html'));
   await setup.evaluate(async ({ origin, marketOrigin }) => {
     await chrome.storage.local.set({
       [`settings:${origin}`]: {
-        myStores: [],
+        myStores: ['Ron Lewis Chrysler Dodge Jeep Ram Waynesburg', 'Ron Lewis Chrysler Dodge Jeep Ram Cranberry'],
         basis: 'website',
         salesperson: { name: 'Roger', title: 'sales consultant' },
         dealer: { name: 'Ron Lewis Chrysler Dodge Jeep Ram Waynesburg', city: 'Waynesburg', state: 'PA', zip: '15370' },
@@ -163,9 +175,19 @@ try {
   await panel.waitForFunction(() => !document.getElementById('panelSite'));
 
   // ---- 3. The Ram sold since the scan: Post re-checks it on the website, with no tab, and stops ----
+  // Set-up was never run here, so the posting rules come first: nothing is
+  // read or begun until they are ticked, and the tick goes on with the same car.
   await get('/scenario?name=day2');
   await panel.click(`button[data-post-vin="${RAM}"]`);
+  await panel.waitForSelector('#postingRules');
+  assert.match(await panel.textContent('#postingRules'), /Pre-owned cars only\./);
+  assert.equal(await panel.isDisabled('#rulesContinue'), true, 'nothing goes on before the tick');
+  assert.equal(Number(await get('/direct-count')), directBefore, 'the car is not read before the tick');
+  await panel.check('#rulesRead');
+  assert.equal(await panel.isDisabled('#rulesContinue'), false);
+  await panel.click('#rulesContinue');
   await panel.waitForSelector('#blocked', { timeout: 20000 });
+  assert.ok(await panel.evaluate(async (o) => Boolean((await chrome.storage.local.get(`settings:${o}`))[`settings:${o}`].rulesReadAt), origin), 'the tick is saved for this website');
   assert.match(await panel.textContent('#blocked'), /isn't on the website any more/);
   assert.ok(Number(await get('/direct-count')) > directBefore, 'the car was read from the extension, straight from the inventory service');
   await panel.screenshot({ path: join(shots, 'panel-2-sold.png') });
@@ -173,6 +195,19 @@ try {
   await panel.waitForSelector('#panelReady');
 
   // ---- 4. The Wagoneer's price dropped: posted at the website's price now, not the scan's ----
+  // (first started and stopped at review: Stop this post goes back to the list, nothing opened)
+  // The list's own hint says so: a changed price is posted as the website shows it, not stopped.
+  const listHint = await panel.textContent('#panelListHint');
+  assert.match(listHint, /a price that changed since the last scan is posted as the website shows it now/, 'the list says a new price is posted, not stopped');
+  assert.doesNotMatch(listHint, /changed since the last scan is stopped/, 'the list no longer says every changed car is stopped');
+  await panel.click(`button[data-post-vin="${WAGONEER}"]`);
+  await panel.waitForSelector('#stopPost', { timeout: 20000 });
+  const tabsBeforeStop = context.pages().length;
+  await panel.click('#stopPost');
+  await panel.waitForSelector('#panelReady');
+  assert.match(await panel.textContent('#status'), /Stopped the post of 2022 Jeep Wagoneer Series III\./);
+  assert.equal(await panel.evaluate(async (o) => (await chrome.storage.local.get(`postFlow:${o}`))[`postFlow:${o}`] ?? null, origin), null, 'the stopped post is not saved');
+  assert.equal(context.pages().length, tabsBeforeStop, 'no Facebook tab opened');
   await panel.click(`button[data-post-vin="${WAGONEER}"]`);
   await panel.waitForSelector('#openForm', { timeout: 20000 });
   assert.match(await panel.textContent('#vehicle'), /2022 Jeep Wagoneer Series III/);
@@ -187,10 +222,16 @@ try {
   assert.equal(await fb.inputValue('#price'), '36,883');
   assert.equal(await publishCount(), '0', 'the extension must not publish');
   await fb.click('#publish'); // the salesperson's own click
-  await panel.waitForSelector('#detected', { timeout: 15000 });
+  // The mock lands every Publish on 424242, the Ram's listing, as a
+  // notification clicked on the form would: the single post reads the page
+  // too, and another car's listing is never offered as this car's link.
+  await panel.waitForFunction(() => /couldn't confirm that it shows 2022 Jeep Wagoneer Series III/.test(document.querySelector('#detected')?.textContent || ''), null, { timeout: 20000 });
+  assert.match(await panel.textContent('#detected'), /so its address isn't offered as this car's link/);
+  assert.equal(await panel.inputValue('#listingUrl'), '', "the Ram's listing is not in the Wagoneer's Listing link box");
   await panel.click('#confirmPosted');
   await panel.waitForSelector('#done');
   assert.match(await panel.textContent('#done'), /Recorded: 2022 Jeep Wagoneer Series III at \$36,883/);
+  assert.equal(await panel.$('#done + p a'), null, 'recorded with no listing link');
   assert.equal(await publishCount(), '1');
   await fb.close();
 
@@ -256,13 +297,15 @@ try {
   assert.match(await panel.textContent('#capReached'), /Daily post cap reached \(1 of 1 today\)/, 'a colleague\'s post does not count against this salesperson\'s cap');
   await panel.screenshot({ path: join(shots, 'panel-5-cap.png'), fullPage: true });
 
-  // ---- 9. The pilot numbers: two attempts from the panel, one blocked as gone, one posted ----
+  // ---- 9. The pilot numbers: three attempts from the panel, one blocked as gone, one stopped at review, one posted ----
   const pilot = await panel.evaluate(async (o) => (await chrome.storage.local.get(`pilot:${o}`))[`pilot:${o}`], origin);
   const outcome = (vin) => pilot.posts.filter((p) => p.vin === vin).map((p) => [p.outcome, p.reason || '']);
   assert.deepEqual(outcome(RAM), [['blocked', 'not-on-website']]);
-  assert.deepEqual(outcome(WAGONEER), [['posted', '']]);
+  assert.deepEqual(outcome(WAGONEER), [['abandoned', ''], ['posted', '']]);
 
+  assert.equal(await publishCount(), '1', 'still only the person\'s one click, and no listing marked sold, deleted or edited since');
   assert.deepEqual(errors, [], 'no console errors');
+  facebook.assertNone();
   console.log('Panel E2E passed. Screenshots in test/e2e/screenshots/');
 } finally {
   await context.close();

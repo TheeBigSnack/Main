@@ -24,7 +24,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { startMockStandardSite, STANDARD } from './mock-standard-site.mjs';
-import { startMockMarketplace } from './mock-marketplace.mjs';
+import { startMockMarketplace, INITIAL_LISTINGS } from './mock-marketplace.mjs';
+import { blockFacebook } from './noFacebook.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const shots = join(root, 'test/e2e/screenshots');
@@ -32,7 +33,7 @@ mkdirSync(shots, { recursive: true });
 
 // Test copy of the extension: it may script the two local mock servers and
 // nothing else (the real facebook.com and image host permissions are removed).
-const extDir = mkdtempSync(join(tmpdir(), 'lot-sync-ext-')); // a fresh folder, so flows can run side by side
+const extDir = mkdtempSync(join(tmpdir(), 'lot-current-ext-')); // a fresh folder, so flows can run side by side
 cpSync(join(root, 'extension'), extDir, { recursive: true });
 const manifest = JSON.parse(readFileSync(join(extDir, 'manifest.json'), 'utf8'));
 manifest.host_permissions = ['http://127.0.0.1/*'];
@@ -48,13 +49,14 @@ const origin = `http://127.0.0.1:${site.address().port}`;
 const siteUrl = `${origin}/used-vehicles/`;
 const marketOrigin = `http://127.0.0.1:${market.address().port}`;
 // See popup.e2e.mjs about LOTSYNC_E2E_CHANNEL.
-const profileDir = mkdtempSync(join(tmpdir(), 'lot-sync-profile-standard-'));
+const profileDir = mkdtempSync(join(tmpdir(), 'lot-current-profile-standard-'));
 const context = await chromium.launchPersistentContext(profileDir, {
   channel: process.env.LOTSYNC_E2E_CHANNEL || 'chromium',
   headless: true,
   args: [`--disable-extensions-except=${extDir}`, `--load-extension=${extDir}`],
   viewport: { width: 760, height: 900 },
 });
+const facebook = await blockFacebook(context); // the real facebook.com is never loaded (./noFacebook.mjs)
 
 const V = STANDARD.VINS;
 const DEALER = STANDARD.DEALER.name;
@@ -69,7 +71,15 @@ const watch = (p) => {
 };
 const control = async (path) => (await fetch(origin + path)).text();
 const requests = async () => JSON.parse(await control('/requests'));
-const publishCount = async () => (await fetch(`${marketOrigin}/publish-count`)).text();
+// How many times Publish was clicked; and first, that nothing ever touched the
+// mock form's decoy action controls or submitted it (see mock-marketplace.mjs).
+const publishCount = async () => {
+  assert.deepEqual(await (await fetch(`${marketOrigin}/actions`)).json(), [], 'nothing may touch an action control but the person');
+  // nor did anything mark a listing sold, delete one or save an edit: Facebook lands on a listing page after Publish
+  assert.deepEqual(await (await fetch(`${marketOrigin}/listing-actions`)).json(), [], 'nothing may mark sold, delete or update a listing but the person');
+  assert.deepEqual(await (await fetch(`${marketOrigin}/listing-state`)).json(), INITIAL_LISTINGS, 'every listing is as it was');
+  return (await fetch(`${marketOrigin}/publish-count`)).text();
+};
 
 try {
   const ext = await context.newPage();
@@ -91,6 +101,7 @@ try {
         dealer: { name: DEALER, city: 'Springfield', state: 'OH', zip: '' },
         priceNote: 'Tax, title and registration are extra.',
         dailyCap: 10,
+        rulesReadAt: new Date().toISOString(), // set-up's posting rules, ticked (the side panel asks first otherwise: test/e2e/panel.e2e.mjs)
         rewrite: { enabled: false, endpoint: '', key: '' },
       },
       devOverrides: {
@@ -193,7 +204,7 @@ try {
   assert.match(vehicle, /\$19,995/);
   const draft = await panel.inputValue('#description');
   assert.match(draft, /^2019 Honda Civic EX with 41,230 miles\./);
-  assert.match(draft, /This Civic EX has the 1\.5L Turbo 4-Cylinder, a CVT and a sunroof\./, "the car's own write-up is kept");
+  assert.doesNotMatch(draft, /This Civic EX has the 1\.5L Turbo 4-Cylinder/, "the template never copies the car's own write-up");
   assert.doesNotMatch(draft, /one owner/i, 'no Carfax one-owner flag in standard data, so never said');
   assert.match(draft, /Tax, title and registration are extra\./);
   assert.match(draft, new RegExp(`I'm Alex, sales consultant at ${DEALER}\\.`));
@@ -251,7 +262,20 @@ try {
   popup = await openPopup();
   await tab(popup, 'ready').click();
   await popup.click(`button[data-action="post"][data-vin="${V.accord}"]`);
+  await popup.click(`button[data-action="markBefore"][data-vin="${V.accord}"]`); // listed before today
   await popup.waitForSelector(`button[data-action="unpost"][data-vin="${V.accord}"]`);
+  // a listing made by hand before today is watched, but it is no post of today's
+  assert.match(await popup.textContent('#status'), /^Recorded as listed before today: rescans watch [^,]*Accord[^,]*, and it doesn't count toward today's posts\.$/);
+  const marked = await popup.evaluate(async (vin) => {
+    const all = await chrome.storage.local.get(null);
+    const posted = Object.entries(all).find(([k]) => k.startsWith('posted:'))[1];
+    const log = Object.entries(all).find(([k]) => k.startsWith('postLog:'));
+    return { entry: posted[vin], log: (log ? log[1] : []).filter((e) => e.vin === vin) };
+  }, V.accord);
+  assert.equal(marked.entry.listedBefore, true, 'recorded as listed before today');
+  assert.deepEqual(marked.log, [], 'not on the day\'s post log');
+  await tab(popup, 'mine').click();
+  assert.match(await popup.textContent('.panel'), /Accord[\s\S]*Listed before [A-Z][a-z]{2} \d{1,2}/, 'My listings says it was listed before the day it was marked');
   assert.equal(await tab(popup, 'mine').locator('.count').textContent(), '2');
 
   // ---- 3. Day 2 on a bad server day: the Accord sold, but its old page answers 429 and another car's page 500 ----
@@ -318,6 +342,7 @@ try {
 
   assert.equal(await publishCount(), '1', "still only the person's one click");
   assert.deepEqual(errors, [], 'no console errors');
+  facebook.assertNone();
   console.log('Standard data E2E passed. Screenshots in test/e2e/screenshots/');
 } catch (e) {
   for (const [name, p] of [['Panel', panelRef], ['Popup', popupRef]]) {

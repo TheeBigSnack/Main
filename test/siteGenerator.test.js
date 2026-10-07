@@ -15,17 +15,22 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   PAGES, REDIRECTS, NAV, LEGAL_PAGES, FRAGMENT_PAGES, SITE_NAME, TITLE_SUFFIX, FOOTER_LINE, BRAND_TAGLINE, LINE, THEME_COLOR, NO_SCRIPT_CSP, FORBIDDEN, PILOT,
-  TITLE_MAX, DESCRIPTION_MAX, CONFIG_FILE, PRICING_FILE, STATUS_FILE, USAGE,
+  TITLE_MAX, DESCRIPTION_MAX, CONFIG_FILE, PRICING_FILE, MARKETING_PRICING_FILE, SITE_PRICING_FIELDS, sitePricing, STATUS_FILE, USAGE,
   fullTitle, rootFor, cspFor, render, renderPage, jsonLdFor, socialAlt, faqItems, ancestorsOf, textOf, escapeHtml,
   robotsTxt, sitemapXml, llmsTxt, listedPages, cnameTxt, isPlaceholderHost, validateSite, validatePages, siteUrlReport, templateVars, renderFragmentPage,
   readContext, buildSite, staleFiles, writeSite, assertClean, main,
+  strayFiles, strayAdvice, referencedFiles, OS_FILES, KEPT_FILES, FAVICON_FILES, SOCIAL_INDEX, socialFile,
+  PRICING_FORMAT, pricingText, fillPricing,
 } from '../scripts/site-pages.mjs';
+import { FILES as FAVICONS, SOURCE as FAVICON_SOURCE } from '../scripts/favicons.mjs';
+import { DIR as SOCIAL_DIR, IMAGES_JSON } from '../scripts/social-images.mjs';
 import { SITE } from '../site/config.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const read = (rel) => readFileSync(join(root, rel), 'utf8');
 const pricing = JSON.parse(read(PRICING_FILE));
 const legalDraft = JSON.parse(read(STATUS_FILE)).draft;
+const money = (n) => '$' + Number(n).toLocaleString('en-US');
 
 // A fixture host for the tests only: not one of the reserved placeholder
 // names (which the generator refuses), and never written anywhere but here.
@@ -144,7 +149,7 @@ test('config.js: validateSite accepts the committed config and every honest shap
     [{ siteUrl: 'https://fixture.lotcurrent.com/site' }, /no path/],
     [{ siteUrl: 'http://fixture.lotcurrent.com' }, /https origin/],
     [{ siteUrl: 'fixture.lotcurrent.com' }, /https origin/],
-    [{ siteUrl: 'https://lotsync.example' }, /reserved placeholder host/],
+    [{ siteUrl: 'https://lotcurrent.example' }, /reserved placeholder host/],
     [{ siteUrl: 'https://www.example.com' }, /reserved placeholder host/],
     [{ siteUrl: 'https://site.test' }, /reserved placeholder host/],
     [{ siteUrl: 'https://localhost' }, /reserved placeholder host/],
@@ -152,17 +157,17 @@ test('config.js: validateSite accepts the committed config and every honest shap
     [{ siteUrl: null }, /must be a string/],
     [{ demoEndpoint: 'https://lead.example/functions/v1/lead' }, /reserved placeholder host/],
     [{ demoEndpoint: 'http://abcdefgh.supabase.co/functions/v1/lead' }, /https address/],
-    [{ demoMailto: 'mailto:demo@lotsync.example' }, /reserved placeholder host/],
+    [{ demoMailto: 'mailto:demo@lotcurrent.example' }, /reserved placeholder host/],
     [{ demoMailto: 'demo@fixture.lotcurrent.com' }, /'mailto:<address>'/],
     [{ demoMailto: 'mailto:not an address' }, /'mailto:<address>'/],
     [{ supportEmail: 'mailto:support@fixture.lotcurrent.com' }, /plain address/],
     [{ supportEmail: 'support@example.org' }, /reserved placeholder host/],
     [{ supportEmail: 'support' }, /plain address/],
-    [{ signupUrl: 'https://app.lotsync.example/manager/' }, /reserved placeholder host/],
+    [{ signupUrl: 'https://app.lotcurrent.example/manager/' }, /reserved placeholder host/],
     [{ business: { ...EMPTY_BUSINESS, name: 'Lot Current' } }, /partly filled \(missing streetAddress, addressLocality, addressRegion, postalCode, addressCountry\)/],
     [{ business: { ...BUSINESS, postalCode: '' } }, /partly filled \(missing postalCode\)/],
     [{ business: { ...EMPTY_BUSINESS, telephone: '555' } }, /optional fields but no name or address/],
-    [{ business: { ...BUSINESS, url: 'https://lotsync.example' } }, /business\.url/],
+    [{ business: { ...BUSINESS, url: 'https://lotcurrent.example' } }, /business\.url/],
     [{ business: { ...BUSINESS, url: 'fixture.lotcurrent.com' } }, /business\.url/],
     [{ business: { ...BUSINESS, email: 'x@example.com' } }, /business\.email/],
     [{ business: { ...BUSINESS, openingHours: 'Mo-Fr' } }, /openingHours must be a list/],
@@ -174,7 +179,7 @@ test('config.js: validateSite accepts the committed config and every honest shap
   }
   const { business: _b, ...noBusiness } = base;
   assert.throws(() => validateSite(noBusiness), /business must be an object/);
-  for (const host of ['lotsync.example', 'example', 'a.test', 'x.invalid', 'localhost', 'app.localhost', 'example.com', 'www.example.org', 'sub.example.net', '', 'EXAMPLE.COM', 'a.test.']) assert.equal(isPlaceholderHost(host), true, host);
+  for (const host of ['lotcurrent.example', 'example', 'a.test', 'x.invalid', 'localhost', 'app.localhost', 'example.com', 'www.example.org', 'sub.example.net', '', 'EXAMPLE.COM', 'a.test.']) assert.equal(isPlaceholderHost(host), true, host);
   for (const host of ['fixture.lotcurrent.com', 'example.co', 'test.org', 'notexample.com', 'abcdefgh.supabase.co', 'my-test.io']) assert.equal(isPlaceholderHost(host), false, host);
   // the committed file: a switch is empty until the owner has the real thing,
   // and no invented address is in it, comments included. The only addresses
@@ -212,11 +217,12 @@ test('siteUrl is not set: the site is not ready to publish', async () => {
   assert.equal(siteUrlReport({ siteUrl: FIXTURE_URL }), `siteUrl is ${FIXTURE_URL}: canonical, og:url, og:image, sitemap.xml and CNAME are written`);
 });
 
-test('the committed pages, robots.txt and llms.txt are what the sources make now (npm run site-pages)', async () => {
+test('the committed pages, robots.txt, llms.txt and pricing.json are what the sources make now (npm run site-pages)', async () => {
   const ctx = await readContext(root);
   assert.deepEqual(staleFiles(ctx), [], 'an output differs from its sources: run npm run site-pages and commit');
+  assert.deepEqual(strayFiles(ctx), [], 'a file under site/ is none of the site\'s: the deploy would publish it unchecked');
   const { files, remove } = buildSite(ctx);
-  assert.deepEqual(files.map((f) => f.file), [...FRAGMENT_PAGES.map((p) => p.file), 'site/robots.txt', 'site/llms.txt', ...(SITE.siteUrl ? ['site/sitemap.xml', 'site/CNAME'] : [])]);
+  assert.deepEqual(files.map((f) => f.file), [...FRAGMENT_PAGES.map((p) => p.file), 'site/robots.txt', 'site/llms.txt', PRICING_FILE, ...(SITE.siteUrl ? ['site/sitemap.xml', 'site/CNAME'] : [])]);
   assert.deepEqual(remove, SITE.siteUrl ? [] : ['site/sitemap.xml', 'site/CNAME']);
 });
 
@@ -297,24 +303,28 @@ test('renderPage writes the document in the fixed order, with the absolute tags 
 
 test('JSON-LD: home carries Organization, WebSite and SoftwareApplication (LocalBusiness and an Offer only from config.js and pricing.json), crumb pages a BreadcrumbList, the FAQ a FAQPage', () => {
   const faqBody = render(read(page('faq').source), templateVars(page('faq'), ctxOf()));
-  // the state as committed: no address, no business, prices a hypothesis
-  const home = jsonLdFor(page('home'), ctxOf());
+  // no address, no business, prices a hypothesis (whatever pricing.json says today)
+  const guess = { pricing: { ...pricing, hypothesis: true } };
+  const home = jsonLdFor(page('home'), ctxOf({}, guess));
   assert.equal(home['@context'], 'https://schema.org');
   assert.deepEqual(home['@graph'], [
     { '@type': 'Organization', name: 'Lot Current' },
     { '@type': 'WebSite', name: 'Lot Current' },
     { '@type': 'SoftwareApplication', name: 'Lot Current', applicationCategory: 'BusinessApplication', operatingSystem: 'Chrome', description: page('home').description },
   ]);
-  assert.equal(pricing.hypothesis, true, 'pricing.json is still a hypothesis: no Offer is written');
   // siteUrl set: addresses, the logo, the breadcrumb items
-  const live = jsonLdFor(page('home'), ctxOf({ siteUrl: FIXTURE_URL }))['@graph'];
+  const live = jsonLdFor(page('home'), ctxOf({ siteUrl: FIXTURE_URL }, guess))['@graph'];
   assert.deepEqual(live[0], { '@type': 'Organization', name: 'Lot Current', url: FIXTURE_URL, logo: `${FIXTURE_URL}/apple-touch-icon.png` });
   assert.equal(live[1].url, FIXTURE_URL);
   assert.equal(live[2].url, FIXTURE_URL);
   assert.ok(!('offers' in live[2]));
   // a confirmed price: the Offer from pricing.json, nothing invented
   const paid = jsonLdFor(page('home'), ctxOf({}, { pricing: { ...pricing, hypothesis: false } }))['@graph'][2];
-  assert.deepEqual(paid.offers, { '@type': 'Offer', price: pricing.perRooftopMonthly, priceCurrency: pricing.currency });
+  // per rooftop per month, as the pricing page says, never a bare price that reads as a one-off
+  assert.deepEqual(paid.offers, {
+    '@type': 'Offer', price: pricing.perRooftopMonthly, priceCurrency: pricing.currency,
+    priceSpecification: { '@type': 'UnitPriceSpecification', price: pricing.perRooftopMonthly, priceCurrency: pricing.currency, unitText: 'per rooftop per month', billingDuration: 'P1M' },
+  });
   // the business filled in: LocalBusiness replaces Organization, with only the fields given
   const local = jsonLdFor(page('home'), ctxOf({ business: BUSINESS }))['@graph'][0];
   assert.deepEqual(local, {
@@ -326,7 +336,7 @@ test('JSON-LD: home carries Organization, WebSite and SoftwareApplication (Local
   assert.deepEqual(Object.keys(bare), ['@type', 'name', 'url', 'address'], 'optional fields left out; url falls back to siteUrl');
   assert.equal(bare.url, FIXTURE_URL);
   assert.equal(jsonLdFor(page('home'), ctxOf({ business: { ...BUSINESS, url: 'https://fixture.lotcurrent.com/store' } }))['@graph'][0].url, 'https://fixture.lotcurrent.com/store');
-  for (const node of jsonLdFor(page('home'), ctxOf())['@graph']) {
+  for (const node of jsonLdFor(page('home'), ctxOf({}, guess))['@graph']) {
     for (const key of ['aggregateRating', 'review', 'telephone', 'address', 'offers', 'openingHours', 'url', 'logo', 'email']) assert.ok(!(key in node), `${node['@type']}.${key}: nothing that is not in config.js or pricing.json`);
   }
   // breadcrumbs
@@ -477,7 +487,7 @@ test('what the generator refuses: a second h1, a lost description, an unknown va
   assert.throws(() => renderFragmentPage(p, good + '<p>lorem ipsum</p>', ctx), /contains "lorem"/);
   assert.throws(() => renderFragmentPage(p, good + '<!-- TODO: later -->', ctx), /contains "TODO"/);
   assert.throws(() => renderFragmentPage(p, good + '<input placeholder="x" aria-label="x">', ctx), /contains "placeholder"/);
-  assert.throws(() => renderFragmentPage(p, good + '<p>demo@lotsync.example</p>', ctx), /contains ".example"/);
+  assert.throws(() => renderFragmentPage(p, good + '<p>demo@lotcurrent.example</p>', ctx), /contains ".example"/);
   assert.throws(() => renderFragmentPage(p, good + '<p>yourdomain</p>', ctx), /contains "yourdomain"/);
   assert.throws(() => renderFragmentPage(p, good + '<p>Ron Lewis</p>', ctx), /pilot dealer is a fixture/);
   assert.throws(() => assertClean('x example.com y', 'f'), /f contains "example.com"/);
@@ -489,9 +499,9 @@ test('what the generator refuses: a second h1, a lost description, an unknown va
 });
 
 test('--check exits 1 naming each output that is missing, differs or must not exist, writes nothing, and reports the siteUrl state either way; a run writes and removes', async () => {
-  const tmp = mkdtempSync(join(tmpdir(), 'lotsync-site-'));
+  const tmp = mkdtempSync(join(tmpdir(), 'lotcurrent-site-'));
   try {
-    for (const rel of [CONFIG_FILE, PRICING_FILE, STATUS_FILE]) {
+    for (const rel of [CONFIG_FILE, MARKETING_PRICING_FILE, STATUS_FILE]) {
       mkdirSync(join(tmp, rel, '..'), { recursive: true });
       cpSync(join(root, rel), join(tmp, rel));
     }
@@ -510,15 +520,15 @@ test('--check exits 1 naming each output that is missing, differs or must not ex
     let r = await run(['--check']);
     assert.equal(r.code, 1, 'no pages yet');
     assert.equal(r.log[0], notReady, 'the state is reported before the findings');
-    assert.equal(r.error.length, FRAGMENT_PAGES.length + 2);
+    assert.equal(r.error.length, FRAGMENT_PAGES.length + 3);
     assert.match(r.error[0], /^site\/index\.html is missing: run npm run site-pages$/);
     assert.ok(!existsSync(join(tmp, 'site/index.html')), '--check writes nothing');
     r = await run([]);
     assert.equal(r.code, 0);
-    assert.deepEqual(r.log, [notReady, ...FRAGMENT_PAGES.map((p) => `wrote ${p.file}`), 'wrote site/robots.txt', 'wrote site/llms.txt']);
+    assert.deepEqual(r.log, [notReady, ...FRAGMENT_PAGES.map((p) => `wrote ${p.file}`), 'wrote site/robots.txt', 'wrote site/llms.txt', 'wrote site/pricing.json']);
     r = await run(['--check']);
     assert.deepEqual([r.code, r.error], [0, []]);
-    assert.deepEqual(r.log, [notReady, 'The website pages match site-src/, site/config.js, site/pricing.json and legal/legal-status.json.']);
+    assert.deepEqual(r.log, [notReady, 'The website pages match site-src/, site/config.js, marketing/pricing.json and legal/legal-status.json.']);
     // a hand edit, a missing file, a fragment change
     const faqFile = join(tmp, 'site/faq/index.html');
     const written = readFileSync(faqFile, 'utf8');
@@ -535,6 +545,25 @@ test('--check exits 1 naming each output that is missing, differs or must not ex
     assert.equal((await run([])).code, 0);
     assert.equal((await run(['--check'])).code, 0);
     assert.equal(readFileSync(faqFile, 'utf8'), written, 'the hand edit is gone');
+    // a file no generator writes, nobody keeps and no page shows: the deploy publishes site/ whole, so --check refuses it
+    const stray = 'site/offer/index.html';
+    mkdirSync(join(tmp, 'site/offer'), { recursive: true });
+    writeFileSync(join(tmp, stray), '<!doctype html><title>Offer</title><p>Approved by Meta, an official Facebook partner. Your account is guaranteed safe.</p>');
+    mkdirSync(join(tmp, 'site/screenshots'), { recursive: true });
+    writeFileSync(join(tmp, 'site/screenshots/01-ready-to-post.png'), 'shown on the home page');
+    writeFileSync(join(tmp, 'site/screenshots/failure.png'), 'left by a failed npm run screenshots');
+    writeFileSync(join(tmp, 'site/.DS_Store'), '');
+    r = await run(['--check']);
+    assert.equal(r.code, 1, 'a stray page fails the check');
+    assert.deepEqual(r.error, [strayAdvice(stray), strayAdvice('site/screenshots/failure.png')]);
+    assert.match(r.error[0], /^site\/offer\/index\.html is not part of the site .* the deploy would publish it unchecked: delete it/);
+    r = await run([]);
+    assert.equal(r.code, 1, 'a run writes the pages, names the stray files and fails');
+    assert.deepEqual(r.error, [strayAdvice(stray), strayAdvice('site/screenshots/failure.png')]);
+    assert.ok(existsSync(join(tmp, stray)), 'a run never deletes a file it does not own');
+    rmSync(join(tmp, 'site/offer'), { recursive: true });
+    rmSync(join(tmp, 'site/screenshots/failure.png'));
+    assert.deepEqual([(await run(['--check'])).code, (await run([])).code], [0, 0], 'the screenshot a page shows and the system file are the site\'s');
     // siteUrl set: sitemap.xml and CNAME appear, every page gets its canonical; cleared again: they must go
     writeFileSync(join(tmp, CONFIG_FILE), config.replace("siteUrl: '',", `siteUrl: '${FIXTURE_URL}',`));
     r = await run(['--check']);
@@ -562,12 +591,12 @@ test('--check exits 1 naming each output that is missing, differs or must not ex
     assert.equal((await run(['--check'])).code, 0);
     // a config that cannot be published: refused, nothing written
     const before = readFileSync(faqFile, 'utf8');
-    writeFileSync(join(tmp, CONFIG_FILE), config.replace("siteUrl: '',", "siteUrl: 'https://lotsync.example',"));
+    writeFileSync(join(tmp, CONFIG_FILE), config.replace("siteUrl: '',", "siteUrl: 'https://lotcurrent.example',"));
     r = await run([]);
     assert.equal(r.code, 1);
     assert.match(r.error.join('\n'), /siteUrl is on a reserved placeholder host/);
     assert.equal(readFileSync(faqFile, 'utf8'), before);
-    writeFileSync(join(tmp, CONFIG_FILE), config.replace("demoMailto: '',", "demoMailto: 'mailto:demo@lotsync.example',"));
+    writeFileSync(join(tmp, CONFIG_FILE), config.replace("demoMailto: '',", "demoMailto: 'mailto:demo@lotcurrent.example',"));
     assert.match((await run(['--check'])).error.join('\n'), /demoMailto is on a reserved placeholder host/);
     writeFileSync(join(tmp, CONFIG_FILE), config.replace("name: '',", "name: 'Lot Current',"));
     assert.match((await run(['--check'])).error.join('\n'), /business is partly filled/);
@@ -594,6 +623,163 @@ test('--check exits 1 naming each output that is missing, differs or must not ex
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+// A file a page links to (href), offers at another size (srcset) or a
+// stylesheet draws (url()) is the site's as much as an image a page shows
+// (src): --check counted only src, so each of those failed it as stray.
+test('referencedFiles reads src, href, every srcset candidate and CSS url(), as paths under site/', () => {
+  const page = 'site/faq/index.html';
+  const html = '<link rel="stylesheet" href="../site.css"><a href="/downloads/price-sheet.pdf?v=2#p1">Sheet</a> <img src="/img/lot.png" srcset="/img/lot-1x.png 1x, img/lot-2x.png 2x" alt="The lot">'
+    + '<a href="mailto:hello@example.test">Mail</a> <a href="https://example.test/x.png">There</a> <a href="//cdn.example.test/y.png">CDN</a> <a href="#top">Top</a> <img src="data:image/png;base64,AA" alt="">';
+  assert.deepEqual(referencedFiles(page, html), ['site/site.css', 'site/downloads/price-sheet.pdf', 'site/img/lot.png', 'site/img/lot-1x.png', 'site/faq/img/lot-2x.png']);
+  const css = "body { background: url('/img/bg.png'); } @font-face { src: url(fonts/body.woff2) format('woff2'), url(\"https://fonts.example.test/a.woff2\"); } .x { background: url(data:image/svg+xml;utf8,abc) }";
+  assert.deepEqual(referencedFiles('site/site.css', css), ['site/img/bg.png', 'site/fonts/body.woff2']);
+});
+
+// review: the stray message, --help and docs/website.md still called a stray
+// file one "no page shows", while --check keeps any file a page or the
+// stylesheet points at (referencedFiles above), a plain link included.
+test('the stray message, --help and docs/website.md say a file is the site\'s when a page or stylesheet points at it with src, href, srcset or url()', () => {
+  const doc = read('docs/website.md').split('\n').find((l) => l.startsWith('Two generators write every page'));
+  assert.ok(doc, 'docs/website.md no longer explains the generators');
+  for (const [where, text] of [['strayAdvice', strayAdvice('site/x.png')], ['--help', USAGE.join(' ').replace(/\s+/g, ' ')], ['docs/website.md', doc]]) {
+    assert.doesNotMatch(text, /no page shows/, `${where} says a stray file is one no page shows, while --check counts every reference`);
+    assert.match(text, /no page or stylesheet points at/, `${where} does not say a page or stylesheet pointing at a file keeps it`);
+    for (const ref of ['src', 'href', 'srcset', 'url()']) assert.ok(text.includes(ref), `${where} does not name ${ref} among what --check counts`);
+  }
+});
+
+test('--check takes a file a page links to, a srcset size and a stylesheet image as the site\'s, and leaves out what an operating system writes', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'lotcurrent-site-refs-'));
+  try {
+    for (const rel of [CONFIG_FILE, MARKETING_PRICING_FILE, STATUS_FILE]) {
+      mkdirSync(join(tmp, rel, '..'), { recursive: true });
+      cpSync(join(root, rel), join(tmp, rel));
+    }
+    cpSync(join(root, 'site-src'), join(tmp, 'site-src'), { recursive: true });
+    const faq = read('site-src/pages/faq.html');
+    assert.ok(faq.includes('</h1>'));
+    writeFileSync(join(tmp, 'site-src/pages/faq.html'), faq.replace('</h1>', '</h1>\n        <p><a href="/downloads/price-sheet.pdf">The price sheet</a> <img src="/img/lot.png" srcset="/img/lot.png 1x, img/lot-2x.png 2x" width="10" height="10" alt="The lot"></p>'));
+    writeFileSync(join(tmp, 'site/site.css'), "body { background: url('/img/bg.png'); }\n");
+    const quiet = { log: () => {}, error: () => {} };
+    assert.equal(await main([], quiet, tmp), 0);
+    const files = ['site/downloads/price-sheet.pdf', 'site/img/lot.png', 'site/faq/img/lot-2x.png', 'site/img/bg.png'];
+    const osFiles = ['site/.DS_Store', 'site/._index.html', 'site/img/Thumbs.db', 'site/img/ehthumbs.db', 'site/desktop.ini', 'site/faq/Desktop.ini', 'site/.directory'];
+    for (const f of [...files, ...osFiles]) {
+      mkdirSync(join(tmp, f, '..'), { recursive: true });
+      writeFileSync(join(tmp, f), 'x');
+    }
+    const ctx = await readContext(tmp);
+    assert.deepEqual(strayFiles(ctx), [], 'each is the site\'s, or an operating system\'s file .gitignore keeps out');
+    writeFileSync(join(tmp, 'site/img/unused.png'), 'x');
+    assert.deepEqual(strayFiles(ctx), ['site/img/unused.png'], 'a file nothing points at is still stray');
+    // and the README says a stray file fails --check too, not only a file that differs
+    assert.match(read('README.md'), /^npm run site-pages .*\(--check: exit 1 when a file differs, or a file under site\/ is none of the site's\)$/m);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// OS_FILES leaves files out of the stray check because .gitignore keeps
+// them out of the repository, and so off the deployed site: each name it
+// skips must be one .gitignore ignores.
+test('every operating-system file the stray check skips is one .gitignore keeps out of the repository', () => {
+  const globs = read('.gitignore').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#') && !l.includes('/'))
+    .map((g) => new RegExp(`^${g.replace(/[.+^${}()|\\]/g, '\\$&').replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]')}$`));
+  const names = ['.DS_Store', '._index.html', '._site.css', 'Thumbs.db', 'ehthumbs.db', 'desktop.ini', 'Desktop.ini', '.directory'];
+  for (const name of names) {
+    assert.ok(OS_FILES.test(name), `${name} is skipped`);
+    assert.ok(globs.some((g) => g.test(name)), `${name} is skipped by the stray check, so .gitignore must keep it out`);
+  }
+  for (const name of ['index.html', 'site.css', 'desktop.ini.png', 'Thumbs.db.bak', 'a._b']) assert.ok(!OS_FILES.test(name), `${name} is no operating-system file`);
+});
+
+// review: the numbers a visitor reads without JavaScript were typed into the fragments by hand, so after a change
+// to marketing/pricing.json and a run, --check said "The website pages match ... marketing/pricing.json" while the
+// pages still showed the old price and pilot length (site.js fills them only when it runs and its fetch works).
+test('the generator writes every data-pricing number from marketing/pricing.json: a changed price fails --check, and a run writes the new numbers', async () => {
+  // the fragments type no number of their own
+  for (const p of FRAGMENT_PAGES) {
+    for (const m of read(p.source).matchAll(/data-pricing="([^"]+)">([^<]*)</g)) assert.equal(m[2], '', `${p.source}: data-pricing="${m[1]}" has its own text "${m[2]}"; the generator writes it from the pricing`);
+  }
+  // the committed pages carry the config's numbers in the config's words
+  for (const p of FRAGMENT_PAGES) {
+    for (const m of read(p.file).matchAll(/data-pricing="([^"]+)">([^<]*)</g)) assert.equal(m[2], pricingText(m[1], pricing), `${p.file}: data-pricing="${m[1]}"`);
+  }
+  assert.equal(fillPricing('<p><span data-pricing="perRooftopMonthly">$1</span> and <span class="x" data-pricing="foundingDealerTerm"></span></p>', { perRooftopMonthly: 1499, foundingDealerMonths: 6 }),
+    '<p><span data-pricing="perRooftopMonthly">$1,499</span> and <span class="x" data-pricing="foundingDealerTerm">first 6 months</span></p>');
+  assert.throws(() => fillPricing('<span data-pricing="annualMonthly"></span>', pricing), /data-pricing="annualMonthly" names a number/, 'a key the pricing does not have stops the run');
+  assert.throws(() => fillPricing('<span data-pricing="foundingDealerTerm"></span>', { ...pricing, foundingDealerMonths: undefined }), /foundingDealerMonths/);
+  assert.equal(fillPricing('<p>No numbers here.</p>', undefined), '<p>No numbers here.</p>', 'a page without a span needs no pricing');
+  const tmp = mkdtempSync(join(tmpdir(), 'lotcurrent-site-pricing-'));
+  try {
+    for (const rel of [CONFIG_FILE, MARKETING_PRICING_FILE, STATUS_FILE]) {
+      mkdirSync(join(tmp, rel, '..'), { recursive: true });
+      cpSync(join(root, rel), join(tmp, rel));
+    }
+    cpSync(join(root, 'site-src'), join(tmp, 'site-src'), { recursive: true });
+    let errors = [];
+    const io = { log: () => {}, error: (s) => errors.push(s) };
+    assert.equal(await main([], io, tmp), 0);
+    assert.equal(await main(['--check'], io, tmp), 0);
+    const changed = { ...JSON.parse(read(MARKETING_PRICING_FILE)), perRooftopMonthly: 199, includedSalespeople: 7, pilotDays: 14, foundingDealerMonths: 6 };
+    writeFileSync(join(tmp, MARKETING_PRICING_FILE), JSON.stringify(changed, null, 2) + '\n');
+    errors = [];
+    assert.equal(await main(['--check'], io, tmp), 1, 'a changed price fails --check');
+    for (const file of ['site/index.html', 'site/pricing/index.html', PRICING_FILE]) {
+      assert.ok(errors.includes(`${file} is not what the sources make: run npm run site-pages`), `--check names ${file}: ${errors.join('; ')}`);
+    }
+    assert.equal(await main([], io, tmp), 0);
+    assert.equal(await main(['--check'], io, tmp), 0);
+    const spans = (file) => Object.fromEntries([...readFileSync(join(tmp, file), 'utf8').matchAll(/data-pricing="([^"]+)">([^<]*)</g)].map((m) => [m[1], m[2]]));
+    assert.deepEqual(spans('site/pricing/index.html'), {
+      perRooftopMonthly: '$199', includedSalespeople: 'seven', extraSalespersonMonthly: money(changed.extraSalespersonMonthly), pilotDays: '14',
+      foundingDealerCount: PRICING_FORMAT.foundingDealerCount(changed.foundingDealerCount), foundingDealerMonthly: money(changed.foundingDealerMonthly), foundingDealerTerm: 'first 6 months',
+    });
+    assert.deepEqual(spans('site/index.html'), { perRooftopMonthly: '$199', includedSalespeople: 'seven', extraSalespersonMonthly: money(changed.extraSalespersonMonthly), pilotDays: '14' });
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// site.js writes the numbers again once it has read pricing.json; it must write the words the page already shows.
+test('site.js writes each pricing number in the generator\'s words, so nothing on the page changes when it runs', async () => {
+  const src = read('site/site.js');
+  const configImport = "import { SITE } from './config.js';";
+  assert.ok(src.includes(configImport), 'site.js takes its addresses from config.js');
+  const keys = [...new Set([...Object.keys(PRICING_FORMAT), 'annualMonthsCharged'])];
+  const other = { ...pricing, perRooftopMonthly: 1499, includedSalespeople: 12, extraSalespersonMonthly: 25, pilotDays: 14, foundingDealerCount: 3, foundingDealerMonthly: 1099, foundingDealerMonths: 6, annualMonthsCharged: 10 };
+  let run = 0;
+  for (const numbers of [{ ...pricing, annualMonthsCharged: 10 }, other]) {
+    const els = keys.map((k) => ({ dataset: { pricing: k }, textContent: '' }));
+    const stubs = {
+      document: { documentElement: { dataset: { root: './' } }, querySelectorAll: (sel) => (sel === '[data-pricing]' ? els : []), getElementById: () => null },
+      fetch: async (url) => (url === './pricing.json' ? { ok: true, json: async () => numbers } : { ok: false, status: 404 }),
+    };
+    const saved = Object.fromEntries(Object.keys(stubs).map((k) => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
+    Object.assign(globalThis, stubs);
+    try {
+      run += 1;
+      const code = src.replace(configImport, `const SITE = ${JSON.stringify(base)};`) + `\n// run ${run}\n`;
+      await import('data:text/javascript,' + encodeURIComponent(code));
+      for (let i = 0; i < 5; i += 1) await new Promise((r) => setTimeout(r, 0));
+    } finally {
+      for (const [k, d] of Object.entries(saved)) {
+        if (d) Object.defineProperty(globalThis, k, d);
+        else delete globalThis[k];
+      }
+    }
+    for (const el of els) assert.equal(el.textContent, pricingText(el.dataset.pricing, numbers), `data-pricing="${el.dataset.pricing}" with ${JSON.stringify(numbers[el.dataset.pricing] ?? numbers.foundingDealerMonths)}`);
+  }
+});
+
+test('the files under site/ the map knows besides the pages: the ones kept by hand, and the favicons and share images as their generators name them', () => {
+  assert.deepEqual([...FAVICON_FILES].sort(), FAVICONS.map((f) => f.file).sort(), 'scripts/favicons.mjs writes these');
+  assert.ok(KEPT_FILES.includes(FAVICON_SOURCE), 'the mark the favicons are drawn from');
+  assert.equal(SOCIAL_INDEX, IMAGES_JSON);
+  for (const p of PAGES.filter((x) => x.social)) assert.equal(socialFile(p), `${SOCIAL_DIR}/${p.slug}.png`);
+  for (const f of KEPT_FILES) assert.ok(existsSync(join(root, f)), `${f} exists`);
 });
 
 test('the script imports only node: modules and site/config.js, and reads the inputs it names', () => {

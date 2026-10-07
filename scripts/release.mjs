@@ -11,7 +11,10 @@
 //     files a person edits for a release; everything that ships is committed);
 //   - the new version is not greater than the current one, or the three
 //     version stamps disagree;
-//   - CHANGELOG.md has no "## <new version> (" heading, or it is not the newest;
+//   - CHANGELOG.md has no "## <new version> (" heading, or it is not the newest,
+//     or "## Unreleased" is missing, below it or still holds entries (they
+//     ship in this version: rename "## Unreleased" to the new heading and put
+//     a new, empty "## Unreleased" above it);
 //   - README.md's title does not carry the new major.minor (test/docs.test.js).
 // Then it writes the version into extension/manifest.json, package.json and
 // both places in package-lock.json (a text edit, so formatting and key order
@@ -117,6 +120,33 @@ export function newestChangelogVersion(text) {
   return m ? m[1] : null;
 }
 
+// What stops CHANGELOG.md from describing `version`: no "## <version> (" heading,
+// a newer one above it, or a "## Unreleased" section that is missing, below
+// the new heading or still holds entries (they shipped in this version and
+// belong under its heading). The empty "## Unreleased" stays on top for the
+// next changes; test/brandName.test.js reads it. [] when the log is ready.
+export function changelogProblems(text, version) {
+  const heading = `"## ${version} (<date>, <what it is>)"`;
+  const unreleased = /^## Unreleased[ \t]*$/m.exec(text);
+  if (!changelogHasVersion(text, version)) {
+    return [unreleased
+      ? `CHANGELOG.md has no "## ${version} (" heading. Rename "## Unreleased" to ${heading}, then put a new, empty "## Unreleased" above it.`
+      : `CHANGELOG.md has no "## ${version} (" heading. Write ${heading} at the top, above ${newestChangelogVersion(text) || 'the others'}, with an empty "## Unreleased" above it.`];
+  }
+  const problems = [];
+  if (newestChangelogVersion(text) !== version) problems.push(`CHANGELOG.md's newest heading is ${newestChangelogVersion(text)}; put the ${version} entry at the top, under "## Unreleased".`);
+  if (!unreleased) {
+    problems.push(`CHANGELOG.md has no "## Unreleased" heading; put an empty one above "## ${version} (" for the changes after this release (test/brandName.test.js reads it).`);
+    return problems;
+  }
+  const versionAt = new RegExp(`^## ${escapeRe(version)} \\(`, 'm').exec(text).index;
+  const next = text.indexOf('\n## ', unreleased.index + 1);
+  const pending = text.slice(unreleased.index + unreleased[0].length, next < 0 ? undefined : next).trim();
+  if (pending) problems.push(`CHANGELOG.md's "## Unreleased" still holds entries, which ship in ${version}: move them under "## ${version} (" (or rename "## Unreleased" to ${heading}) and leave an empty "## Unreleased" on top.`);
+  else if (versionAt < unreleased.index) problems.push(`CHANGELOG.md's "## Unreleased" sits below "## ${version} (": move the empty "## Unreleased" to the top.`);
+  return problems;
+}
+
 // test/docs.test.js wants the README to open with the shipped major.minor.
 export function readmeTitle(version) {
   const v = parseVersion(version);
@@ -144,6 +174,17 @@ export function submitSteps(listing) {
 // The same name scripts/pack.mjs writes.
 export const zipPath = (version) => `dist/lot-current-extension-${version}.zip`;
 
+// The account project a build talks to: the url in extension/src/accountConfig.js,
+// or '' while that config is empty.
+export function accountUrlIn(text) {
+  const m = /^\s*url: '([^']*)',/m.exec(String(text || ''));
+  return m ? m[1] : '';
+}
+
+// What a build that names an account project must wait for, in one place so
+// docs/release.md can quote it.
+export const ACCOUNT_GATE = 'docs/production-setup.md steps 3 to 5 done and npm run check-deploy showing no FAIL';
+
 // Lines whose text differs between two versions of a file (the edit keeps the line count).
 export function changedLines(before, after) {
   const a = before.split('\n');
@@ -152,13 +193,19 @@ export function changedLines(before, after) {
 }
 
 // What a person does after the script: printed, never run.
-export function nextSteps({ version, listing }) {
+export function nextSteps({ version, listing, accountUrl = '' }) {
   const zip = zipPath(version);
   const boxes = submitSteps(listing || '');
   const lines = [
     `Lot Current ${version} is packed: ${zip}`,
     'Nothing was committed, tagged, pushed or uploaded. Next, by hand (docs/release.md):',
     '',
+    // a build that names the account project offers sign-in, which works only once that project is set up
+    ...(accountUrl ? [
+      `This build names the account project ${accountUrl} (extension/src/accountConfig.js), so the wizard and Settings offer sign-in.`,
+      `Hand it to no tester and upload it nowhere before ${ACCOUNT_GATE}: until then that sign-in cannot work.`,
+      '',
+    ] : []),
     '1. The end-to-end flows and the sandbox drive, with Playwright\'s Chromium (README, "For development"):',
     '     npm run test:e2e',
     '     npm run test:demo',
@@ -208,6 +255,15 @@ function listingText(io) {
   }
 }
 
+// Likewise the account config, read only to say what the build talks to.
+function accountUrlOf(io) {
+  try {
+    return accountUrlIn(io.read('extension/src/accountConfig.js'));
+  } catch {
+    return '';
+  }
+}
+
 // The whole release. io: { read(rel), write(rel, text), exists(rel), run(cmd) -> { code, stdout }, log(s), error(s) }.
 // Returns the exit code.
 export function release(argv, io) {
@@ -242,8 +298,7 @@ export function release(argv, io) {
     if (dirty.length) problems.push(`uncommitted changes outside ${RELEASE_NOTES.join(' and ')}: ${dirty.slice(0, 10).join(', ')}${dirty.length > 10 ? ` and ${dirty.length - 10} more` : ''}. Commit or put them aside first, so the zip is what the tag holds.`);
   }
   const changelog = io.read('CHANGELOG.md');
-  if (!changelogHasVersion(changelog, version)) problems.push(`CHANGELOG.md has no "## ${version} (" heading. Write the entry first, above ${newestChangelogVersion(changelog) || 'the others'}: "## ${version} (<date>, <what it is>)".`);
-  else if (newestChangelogVersion(changelog) !== version) problems.push(`CHANGELOG.md's newest heading is ${newestChangelogVersion(changelog)}; put the ${version} entry at the top.`);
+  problems.push(...changelogProblems(changelog, version));
   const readme = io.read('README.md');
   if (!readmeTitleFits(readme, version)) problems.push(`README.md does not open with "${readmeTitle(version)}" (test/docs.test.js checks it); change its title first.`);
   if (problems.length) {
@@ -265,7 +320,7 @@ export function release(argv, io) {
       for (const d of changedLines(texts[f], next[f])) io.log(`  ${f}:${d.line}  ${d.from}  ->  ${d.to}`);
     }
     io.log(`Then it would run ${COMMANDS.test.join(' ')} and ${COMMANDS.pack.join(' ')}, and print:\n`);
-    io.log(nextSteps({ version, listing: listingText(io) }).join('\n'));
+    io.log(nextSteps({ version, listing: listingText(io), accountUrl: accountUrlOf(io) }).join('\n'));
     return 0;
   }
 
@@ -280,7 +335,7 @@ export function release(argv, io) {
   if (io.run(COMMANDS.pack).code !== 0) return restore('npm run pack failed');
   if (!io.exists(zipPath(version))) return restore(`npm run pack did not write ${zipPath(version)}`);
   io.log('');
-  io.log(nextSteps({ version, listing: listingText(io) }).join('\n'));
+  io.log(nextSteps({ version, listing: listingText(io), accountUrl: accountUrlOf(io) }).join('\n'));
   return 0;
 }
 

@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { startMockSite } from './mock-dealer-site.mjs';
+import { blockFacebook } from './noFacebook.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const shots = join(root, 'test/e2e/screenshots');
@@ -18,7 +19,7 @@ mkdirSync(shots, { recursive: true });
 
 // Test copy of the extension that may script the local mock site without a
 // click on the toolbar icon (the real one relies on that click via activeTab).
-const extDir = mkdtempSync(join(tmpdir(), 'lot-sync-ext-')); // a fresh folder, so flows can run side by side
+const extDir = mkdtempSync(join(tmpdir(), 'lot-current-ext-')); // a fresh folder, so flows can run side by side
 cpSync(join(root, 'extension'), extDir, { recursive: true });
 const manifest = JSON.parse(readFileSync(join(extDir, 'manifest.json'), 'utf8'));
 manifest.host_permissions = ['http://127.0.0.1/*'];
@@ -32,13 +33,14 @@ const siteUrl = `http://127.0.0.1:${server.address().port}/used-vehicles/`;
 // unpacked extensions. LOTSYNC_E2E_CHANNEL can point at another Chromium
 // build, but note that branded Google Chrome and Edge 137+ ignore
 // --load-extension, so they can't run this test.
-const profileDir = mkdtempSync(join(tmpdir(), 'lot-sync-profile-popup-'));
+const profileDir = mkdtempSync(join(tmpdir(), 'lot-current-profile-popup-'));
 const context = await chromium.launchPersistentContext(profileDir, {
   channel: process.env.LOTSYNC_E2E_CHANNEL || 'chromium',
   headless: true,
   args: [`--disable-extensions-except=${extDir}`, `--load-extension=${extDir}`],
   viewport: { width: 760, height: 640 },
 });
+const facebook = await blockFacebook(context); // the real facebook.com is never loaded (./noFacebook.mjs)
 
 const errors = [];
 let popup;
@@ -67,6 +69,8 @@ try {
     }, siteUrl);
     await popup.goto(`chrome-extension://${extensionId}/popup.html`);
     await popup.setViewportSize({ width: 720, height: 590 });
+    // popup.html shows "Scan website", disabled, until the first render has read the saved scan
+    await popup.waitForFunction(() => !document.querySelector('#scan').disabled);
     return popup;
   }
   const tab = (p, name) => p.locator(`.tabs button[data-view="${name}"]`);
@@ -85,9 +89,67 @@ try {
 
   await tab(popup, 'ready').click();
   assert.match(await popup.textContent('.rows'), /2019 Ram 1500 Classic Express/);
+  // Mark posted asks when the listing went up (Cancel records nothing); this one went up today
   await popup.click('button[data-action="post"]');
+  await popup.waitForSelector('.markWhen button[data-action="markBefore"]');
+  assert.match(await popup.textContent('.markWhen'), /Listed on Facebook:\s*Today\s*Before today\s*Cancel/);
+  await popup.click('button[data-action="markCancel"]');
+  await popup.waitForSelector('button[data-action="post"]');
+  assert.equal(await popup.$('button[data-action="unpost"]'), null, 'Cancel records nothing');
+  await popup.click('button[data-action="post"]');
+  await popup.click('button[data-action="markToday"]');
   await popup.waitForSelector('button[data-action="unpost"]');
+  const marked = await popup.evaluate(async () => {
+    const all = await chrome.storage.local.get(null);
+    const posted = Object.entries(all).find(([k]) => k.startsWith('posted:'))[1];
+    const log = Object.entries(all).find(([k]) => k.startsWith('postLog:'));
+    return { entry: Object.values(posted)[0], log: log ? log[1] : [] };
+  });
+  assert.equal(marked.entry.listedBefore, undefined, 'a post of today');
+  assert.equal(marked.log.length, 1, 'on the day\'s post log');
   await popup.screenshot({ path: join(shots, '2-ready-marked-posted.png') });
+
+  // ---- The price setting changes while the Ram is posted ----
+  // A listing posted before the basis was kept on each entry (as an older
+  // build left it) stays on the basis it was posted at: switching Settings to
+  // the lower second price is not a website price change, and To do offers no
+  // "price drop" for it; switching back offers no raise either (the posting
+  // rules: a listing's price changes only when the website's does).
+  const postedNow = () => popup.evaluate(async () => { const all = await chrome.storage.local.get(null); return all[Object.keys(all).find((k) => k.startsWith('posted:'))]; });
+  await popup.evaluate(async () => {
+    const all = await chrome.storage.local.get(null);
+    const key = Object.keys(all).find((k) => k.startsWith('posted:'));
+    const posted = all[key];
+    for (const e of Object.values(posted)) delete e.basis;
+    await chrome.storage.local.set({ [key]: posted });
+  });
+  await popup.click('#settingsBtn');
+  await popup.check('input[name="basis"][value="beforeFees"]');
+  await popup.click('#panel button[type="submit"]');
+  await popup.waitForFunction(() => (document.querySelector('#saved')?.textContent || '').length > 0);
+  assert.match(await popup.textContent('#saved'), /Your listings keep the price they were posted at; the new price setting is for new posts\./);
+  // it was marked after the last scan, which shows the website as it was before (src/rescan.js scanCar):
+  // the switch leaves it for the next scan to read
+  assert.deepEqual(Object.values(await postedNow()).map((e) => [e.price, e.basis]), [[27163, undefined]], 'not stamped off a scan taken before it was posted');
+  const scanned = () => popup.waitForFunction(() => document.querySelector('#settingsBtn').getAttribute('aria-pressed') === 'false' && document.querySelector('#panel .meta') && !document.querySelector('#scan').disabled);
+  await popup.click('#scan');
+  await scanned(); // the view turns to To do only once the scan is saved
+  assert.deepEqual(Object.values(await postedNow()).map((e) => [e.price, e.basis]), [[27163, 'website']], 'the scan reads the basis it was posted at');
+  assert.match(await popup.textContent('#panel .meta'), /6 used cars/);
+  assert.doesNotMatch(await popup.textContent('#panel'), /Update price/, 'a changed setting is not a website price change');
+  assert.equal(await tab(popup, 'todo').locator('.count').textContent(), '0');
+  await tab(popup, 'mine').click();
+  assert.match(await popup.textContent('.panel'), /Matches the website[\s\S]*posted at the website's main price; your price setting now applies to new posts/);
+  await popup.click('#settingsBtn'); // back to the main price for the rest of the run
+  await popup.check('input[name="basis"][value="website"]');
+  await popup.click('#panel button[type="submit"]');
+  await popup.waitForFunction(() => /^Saved\./.test(document.querySelector('#saved')?.textContent || ''));
+  await popup.click('#scan');
+  await scanned();
+  assert.doesNotMatch(await popup.textContent('#panel'), /Update price/, 'switching back is not a price change either');
+  assert.equal(await tab(popup, 'todo').locator('.count').textContent(), '0', 'back on the main price: still nothing to edit');
+  assert.deepEqual(Object.values(await postedNow()).map((e) => [e.price, e.basis]), [[27163, 'website']], 'the listing never moved');
+  await tab(popup, 'ready').click();
 
   await tab(popup, 'otherStores').click();
   await popup.screenshot({ path: join(shots, '3-other-stores.png') });
@@ -167,6 +229,10 @@ try {
   await popup.waitForFunction(() => document.querySelector('.tabs button[data-view="todo"] .count')?.textContent === '0');
   assert.equal(await tab(popup, 'todo').locator('.count').textContent(), '0');
   assert.equal(await tab(popup, 'mine').locator('.count').textContent(), '0');
+  // the Ram's listing is down, but it was posted today: the daily cap still counts it
+  await tab(popup, 'ready').click();
+  assert.match(await popup.textContent('#pickHint'), /9 more posts allowed today\./);
+  await tab(popup, 'todo').click();
 
   await popup.click('#settingsBtn');
   assert.match(await popup.textContent('.settings'), /usually \$490 higher than/);
@@ -183,6 +249,13 @@ try {
   // other order gives, so a menu that mixed two of them up would show here.
   await dealer.request.get(`http://127.0.0.1:${server.address().port}/scenario?name=day3`);
   popup = await openPopup();
+  // a new day for the cap too: the day's log of posts (the Ram's, from day 1) moves back a day
+  await popup.evaluate(async () => {
+    const all = await chrome.storage.local.get(null);
+    const key = Object.keys(all).find((k) => k.startsWith('postLog:'));
+    const dayBefore = (at) => new Date(Date.parse(at) - 24 * 3600 * 1000).toISOString();
+    await chrome.storage.local.set({ [key]: all[key].map((e) => ({ ...e, at: dayBefore(e.at) })) });
+  });
   await popup.click('#scan');
   await popup.waitForFunction(() => /3 ready to post/.test(document.querySelector('.meta')?.textContent || '')); // the day-2 to-do list is on screen until the rescan ends
   assert.match(await popup.textContent('.panel'), /Just became ready\s*1[\s\S]*2025 Ram 1500 Tradesman[\s\S]*photos added, now at Waynesburg/);
@@ -225,9 +298,10 @@ try {
 
   // "Select the next N" ticks the first N in the CURRENT order: with 2 posts
   // left today and three cars, "longest" ticks the Tradesman and the Hellcat,
-  // "newest" the Silverado and the Hellcat.
+  // "newest" the Silverado and the Hellcat. The cap is 3: the Ram marked
+  // posted today and taken down since is still one of today's posts.
   await popup.click('#settingsBtn');
-  await popup.fill('input[name="dailyCap"]', '2');
+  await popup.fill('input[name="dailyCap"]', '3');
   await popup.click('#panel button[type="submit"]');
   await popup.waitForFunction(() => (document.querySelector('#saved')?.textContent || '').length > 0);
   await tab(popup, 'ready').click();
@@ -277,6 +351,7 @@ try {
   assert.match(await popup.textContent('#status'), /Open your dealership's website/);
 
   assert.deepEqual(errors, [], 'no console errors');
+  facebook.assertNone();
   console.log('E2E passed. Screenshots in test/e2e/screenshots/');
 } catch (e) {
   // Say what the popup was showing, so a failure is diagnosable from the log.

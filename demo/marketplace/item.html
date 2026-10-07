@@ -13,8 +13,8 @@
     the person marks it sold, prose that itself contains the word "sold" (so
     the extension's read-only sign check has something to get wrong, and
     doesn't), and buttons only a person clicks: Edit listing, Mark as sold,
-    Delete. A deleted or unknown listing reads "This content isn't available
-    right now."
+    Delete (marketplace.js counts the clicks on the last two). A deleted or
+    unknown listing reads "This content isn't available right now."
   -->
   <div class="sample">Sample Marketplace listing for the Lot Current sandbox. This is not Facebook.</div>
   <header class="mp"><div class="logo">Sample Marketplace</div><nav><a href="selling.html">Your listings</a><a href="create.html">Create listing</a></nav></header>
@@ -48,8 +48,8 @@
           <button type="button" class="plain" id="delete">Delete</button>
           <span class="hint">Only you click these.</span>
         </div>`;
-      document.getElementById('markSold').addEventListener('click', () => { mp.update(id, { sold: true }); location.reload(); });
-      document.getElementById('delete').addEventListener('click', () => { mp.update(id, { deleted: true }); location.reload(); });
+      document.getElementById('markSold').addEventListener('click', () => { mp.noteClick('markSold'); mp.update(id, { sold: true }); location.reload(); });
+      document.getElementById('delete').addEventListener('click', () => { mp.noteClick('delete'); mp.update(id, { deleted: true }); location.reload(); });
     })();
   </script>
 </body>

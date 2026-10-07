@@ -11,7 +11,8 @@
 //   - the shim defines every chrome.* member the extension code references;
 //   - index.html carries the sandbox banner and loads nothing from elsewhere;
 //   - the sandbox's own code has no selector for Publish, Update, Delete or
-//     Mark as sold (non-negotiable 1 holds in the sandbox too).
+//     Mark as sold (non-negotiable 1 holds in the sandbox too), and the sample
+//     Marketplace counts the clicks on each of those buttons for the drive.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -25,6 +26,9 @@ import { trimRecord } from '../extension/adapters/dealerInspire.js';
 import { parseVehiclePage } from '../extension/adapters/schemaOrgParse.js';
 import { normalizeVehicle as normalizeStandard } from '../extension/adapters/schemaOrgNormalize.js';
 import { assessVehicle, DECISION } from '../extension/src/classify.js';
+import { stripComments } from './helpers.js';
+import { ACCOUNT, accountsConfigured } from '../extension/src/accountConfig.js';
+import { errorText } from '../extension/src/account.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const demo = join(root, 'demo');
@@ -235,7 +239,7 @@ test('the second sample website is its own kind of website, and switching to it 
 test('the shim defines every chrome.* member the extension code references', () => {
   const refs = new Set();
   for (const file of walk(join(root, 'extension')).filter((f) => f.endsWith('.js'))) {
-    const src = readFileSync(file, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    const src = stripComments(readFileSync(file, 'utf8'));
     for (const m of src.matchAll(/\bchrome\.([a-zA-Z.]+)/g)) refs.add(m[1].replace(/\.+$/, ''));
   }
   assert.ok(refs.size >= 25, `found only ${refs.size} chrome.* references`);
@@ -348,6 +352,34 @@ test('the shim\'s permissions behave like Chrome\'s: granted hosts only, a reque
   assert.equal(await clicked.permissions.request({ origins: [photoHost] }), true);
 });
 
+// src/accountConfig.js names the production project, so the extension's
+// pages in the sandbox would sign in and sync there for real: a visitor of
+// the test drive could create an account in production. Inside a sandbox
+// frame every request to the account server is answered by the shim.
+test('inside a sandbox frame a request to the account server is answered by the shim, never sent', async () => {
+  const sent = [];
+  const realFetch = async (input) => { sent.push(String(input)); return new Response('{}', { status: 200 }); };
+  const ctx = vm.createContext({ window: {}, setTimeout, clearTimeout, console, structuredClone, URL, Response });
+  vm.runInContext(read('demo/chrome-shim.js'), ctx, { filename: 'chrome-shim.js' });
+  const hub = ctx.window.LotSyncShim.createHub({ manifest: JSON.parse(read('extension/manifest.json')) });
+  const frame = vm.createContext({ window: { parent: { __lotSyncHub: hub }, fetch: realFetch, Response, addEventListener() {} }, setTimeout, clearTimeout, console, structuredClone, URL, Response });
+  vm.runInContext(read('demo/chrome-shim.js'), frame, { filename: 'chrome-shim.js' });
+  const fetch = frame.window.fetch;
+  const servers = ['https://abcdefghijklmnopqrst.supabase.co/auth/v1/otp', 'https://abcdefghijklmnopqrst.supabase.co/functions/v1/sync'];
+  if (accountsConfigured()) servers.push(ACCOUNT.url + '/auth/v1/otp', (ACCOUNT.functionsUrl || ACCOUNT.url + '/functions/v1') + '/sync');
+  for (const url of servers) {
+    const res = await fetch(url, { method: 'POST', body: '{}' });
+    assert.equal(res.status, 503, url);
+    const body = await res.json();
+    assert.equal(errorText(body, res.status), 'The test drive does not sign in or sync: accounts work in the installed extension only', 'the Account section shows why');
+  }
+  assert.deepEqual(sent, [], 'nothing reached an account server');
+  await fetch('https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/X?format=json');
+  await fetch(new URL('https://sample-motors.test/used-vehicles/'));
+  assert.deepEqual(sent, ['https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/X?format=json', 'https://sample-motors.test/used-vehicles/'], 'everything else goes through as before');
+  assert.equal(ctx.window.LotSyncShim.isAccountServer('https://supabase.co.example.test/x'), false);
+});
+
 test('index.html carries the sandbox banner and loads nothing from another site', () => {
   const html = read('demo/index.html');
   assert.match(html, /Sandbox with sample data\. Nothing here is Facebook or a real dealership\./);
@@ -369,14 +401,43 @@ test('index.html carries the sandbox banner and loads nothing from another site'
 });
 
 test('the sandbox\'s own code has no way to click Publish, Update, Delete or Mark as sold', () => {
-  const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   for (const rel of ['demo/chrome-shim.js', 'demo/demo.js', 'demo/site-standard/inventory.js', 'demo/site-standard/index.html']) {
-    const code = strip(read(rel)).toLowerCase();
+    const code = stripComments(read(rel)).toLowerCase();
     for (const word of ['#publish', '#update', 'mark as sold', "'publish'", '"publish"', '.click(']) {
       assert.ok(!code.includes(word), `${rel} contains ${word}`);
     }
   }
   // the fake pages count the person's clicks so the drive can prove it
-  assert.match(read('demo/marketplace/create.html'), /notePublishClick\(\)/);
+  assert.match(read('demo/marketplace/create.html'), /noteClick\('publish'\)/);
   assert.match(read('demo/drive.mjs'), /publishClicks\(\), 0, 'the extension must not publish'/);
+});
+
+// The sample Marketplace says it counts the clicks on all four buttons only
+// a person clicks, and the drive says it checks them: each button's handler
+// counts its own kind, the counts are kept apart and cleared by a reset, and
+// the drive checks Update and Mark as sold were not clicked before the
+// person's own click and were clicked once after it.
+test('the sample Marketplace counts clicks on Publish, Update, Mark as sold and Delete, and the drive checks each', () => {
+  const items = new Map();
+  const sessionStorage = { getItem: (k) => (items.has(k) ? items.get(k) : null), setItem: (k, v) => items.set(k, String(v)), removeItem: (k) => items.delete(k) };
+  const ctx = vm.createContext({ window: { sessionStorage, location: { search: '', href: 'http://sandbox.test/demo/marketplace/item.html' } }, URL, URLSearchParams });
+  vm.runInContext(read('demo/marketplace/marketplace.js'), ctx, { filename: 'marketplace.js' });
+  const mp = ctx.window.SandboxMarketplace;
+  assert.equal(typeof mp.noteClick, 'function', 'marketplace.js has a counter for every button');
+  for (const [kind, times] of [['publish', 2], ['update', 1], ['markSold', 3], ['delete', 1]]) for (let i = 0; i < times; i += 1) mp.noteClick(kind);
+  assert.deepEqual(['publish', 'update', 'markSold', 'delete'].map((k) => mp.clicks(k)), [2, 1, 3, 1]);
+  assert.equal(items.get('lotSyncSandbox.publishClicks'), '2', 'Publish keeps the key the drive and the sandbox read');
+  assert.throws(() => mp.noteClick('save'), /unknown button/);
+  mp.reset();
+  assert.deepEqual(['publish', 'update', 'markSold', 'delete'].map((k) => mp.clicks(k)), [0, 0, 0, 0]);
+  // each button's own handler counts it, before it changes the listing
+  const item = read('demo/marketplace/item.html');
+  assert.match(item, /getElementById\('markSold'\)\.addEventListener\('click', \(\) => \{ mp\.noteClick\('markSold'\); mp\.update\(id, \{ sold: true \}\)/);
+  assert.match(item, /getElementById\('delete'\)\.addEventListener\('click', \(\) => \{ mp\.noteClick\('delete'\); mp\.update\(id, \{ deleted: true \}\)/);
+  assert.match(read('demo/marketplace/edit.html'), /addEventListener\('submit', \(e\) => \{\s*e\.preventDefault\(\);\s*mp\.noteClick\('update'\);/);
+  for (const key of ['publishClicks', 'updateClicks', 'markSoldClicks', 'deleteClicks']) assert.match(read('demo/demo.js'), new RegExp(`'${key}'`), `the sandbox's Reset clears ${key}`);
+  // the drive checks each count before and after the person's own click
+  const drive = read('demo/drive.mjs');
+  assert.match(drive, /clicks\(\), \{ publish: 2, update: 0, markSold: 0, delete: 0 \}, 'the extension clicked nothing on the listing'\);[\s\S]*#update'\)\.click\(\); \/\/ the person saves[\s\S]*clicks\(\), \{ publish: 2, update: 1, markSold: 0, delete: 0 \}/);
+  assert.match(drive, /clicks\(\), \{ publish: 2, update: 1, markSold: 0, delete: 0 \}, 'the extension clicked neither Mark as sold nor Delete'\);[\s\S]*Mark as sold'\)\.click\(\); \/\/ the person[\s\S]*clicks\(\), \{ publish: 2, update: 1, markSold: 1, delete: 0 \}/);
 });

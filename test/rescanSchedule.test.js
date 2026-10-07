@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { todoCountFor, badgeText, notificationFor, isDue, latestOf, originsFor, RESCAN_PERIOD_MINUTES } from '../extension/src/rescanSchedule.js';
+import { todoCountFor, badgeText, notificationFor, isDue, latestOf, originsFor, RESCAN_PERIOD_MINUTES, RESCAN_ALARM, SYNC_RETRY_MINUTES, syncRetryAlarm, originOfSyncRetryAlarm } from '../extension/src/rescanSchedule.js';
 import { scanWithSearch, siteForSnapshot, performScan, probeTab, UNSUPPORTED_MESSAGE } from '../extension/src/scanRunner.js';
 import dealerInspire from '../extension/adapters/dealerInspire.js';
 import { fixtures, MY_STORE, fakeDealerPage, fakeChrome } from './helpers.js';
@@ -13,6 +13,18 @@ test('the badge counts only the salesperson\'s own to-dos', () => {
   assert.equal(badgeText(0), '');
   assert.equal(badgeText(2), '2');
   assert.equal(badgeText(150), '99');
+});
+
+test('a sync retry alarm is named after its website and read back only from its own name', () => {
+  const origin = 'https://www.example-motors.test';
+  assert.equal(syncRetryAlarm(origin), `sync-retry:${origin}`, 'the alarm is named after the website alone (never the old product name)');
+  assert.equal(originOfSyncRetryAlarm(syncRetryAlarm(origin)), origin);
+  assert.notEqual(syncRetryAlarm(origin), syncRetryAlarm('https://www.example-sister-store.test'), 'one per website');
+  assert.notEqual(syncRetryAlarm(origin), RESCAN_ALARM);
+  assert.equal(originOfSyncRetryAlarm(RESCAN_ALARM), null, 'the rescan alarm is not a retry');
+  assert.equal(originOfSyncRetryAlarm(syncRetryAlarm('')), null, 'no website, no retry');
+  assert.equal(originOfSyncRetryAlarm(undefined), null);
+  assert.equal(SYNC_RETRY_MINUTES, 1, 'the account server\'s brake counts the last minute');
 });
 
 test('a notification only when the count went up', () => {
@@ -50,6 +62,23 @@ test('the host permissions a site needs: its own origin plus what its adapter as
   assert.deepEqual(originsFor({ origin: 'https://www.dealer.com' }, { unknown: true }), ['https://www.dealer.com/*']);
   assert.deepEqual(originsFor(null, null), []);
   assert.deepEqual(originsFor(null, []), []);
+});
+
+test('the host permissions a site needs never name one of Facebook\'s servers: such a site needs nothing Chrome can grant', () => {
+  const ANY = '/' + '*';
+  const FB = ['https://www.facebook.com', 'https://facebook.com', 'https://m.facebook.com', 'https://web.facebook.com', 'https://www.fb.com', 'https://scontent.xx.fbcdn.net', 'https://lookaside.fbsbx.com', 'https://connect.facebook.net', 'https://www.messenger.com', 'https://WWW.FACEBOOK.COM.'];
+  for (const fb of FB) {
+    // a site record on Facebook itself
+    assert.deepEqual(originsFor({ origin: fb }, []), [], fb);
+    assert.deepEqual(originsFor({ origin: fb, adapter: 'dealerInspire' }, { search: 'https://websites-search.api.carscommerce.inc/api/v1/listings/1' }), [], fb);
+    // a dealer website whose service (or adapter list) points at Facebook: nothing, not the dealer's half
+    assert.deepEqual(originsFor({ origin: 'https://www.dealer.test', adapter: 'dealerInspire' }, { search: fb + '/marketplace/api/1' }), [], fb);
+    assert.deepEqual(originsFor({ origin: 'https://www.dealer.test' }, [fb + ANY]), [], fb);
+    assert.deepEqual(originsFor({ origin: 'https://www.dealer.test' }, [fb + '/marketplace' + ANY]), [], fb);
+  }
+  assert.deepEqual(originsFor({ origin: 'https://www.dealer.test' }, ['https://*.facebook.com' + ANY]), [], 'a wildcard over Facebook');
+  // look-alikes are other people's servers, not Facebook's
+  assert.deepEqual(originsFor({ origin: 'https://www.notfacebook.com' }, ['https://facebook.com.dealer.test' + ANY]), ['https://www.notfacebook.com' + ANY, 'https://facebook.com.dealer.test' + ANY]);
 });
 
 const ALL = Object.entries(fixtures).filter(([k]) => k !== '_about').map(([, r]) => r);
@@ -135,7 +164,7 @@ test('performScan on a Dealer Inspire look-alike: neutral probe, the adapter\'s 
     const no = await performScan({ tabId: 3, origin });
     assert.equal(no.ok, false);
     assert.equal(no.message, UNSUPPORTED_MESSAGE);
-    assert.match(no.message, /What it reads today: Dealer Inspire; DealerOn; Dealer.com; Standard vehicle data \(schema\.org\)\./);
+    assert.match(no.message, /Checked on a real dealership website: Dealer Inspire\. Also tries, not yet checked on a real dealership website: DealerOn; Dealer\.com; Standard vehicle data \(schema\.org\)\./);
     assert.ok(!/Dealer Inspire's search service/.test(no.message));
   } finally {
     delete globalThis.chrome;

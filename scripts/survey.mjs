@@ -69,7 +69,7 @@ const scanLimits = { carPages: opts.scanCarPages, listPages: DEFAULTS.scanListPa
 // the standard-data adapter and of the inventory-data reader (DealerOn,
 // Dealer.com) lowered so one survey reads a handful of pages.
 function extensionCopy(urls) {
-  const dir = mkdtempSync(join(tmpdir(), 'lot-sync-survey-ext-'));
+  const dir = mkdtempSync(join(tmpdir(), 'lot-current-survey-ext-'));
   cpSync(join(root, 'extension'), dir, { recursive: true });
   const manifestPath = join(dir, 'manifest.json');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
@@ -141,7 +141,7 @@ async function surveySite(url) {
   };
 
   const extDir = extensionCopy([url]);
-  const profileDir = mkdtempSync(join(tmpdir(), 'lot-sync-survey-profile-'));
+  const profileDir = mkdtempSync(join(tmpdir(), 'lot-current-survey-profile-'));
   let context;
   let phase = 'start';
   const phaseHosts = { list: new Set() };
