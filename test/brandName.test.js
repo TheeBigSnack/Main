@@ -2,11 +2,12 @@
 // because LotSync LLC already uses that name for dealership software). This
 // test keeps the old name out of everything people can see: every text file in
 // the repo, code comments included (the owner and the testers read those), in
-// any spelling (with or without a space, hyphen, dot, underscore,
-// a non-breaking or zero-width space, an HTML entity, a JS escape or a URL
-// escape, Markdown emphasis or an inline HTML or SVG tag between the words,
-// and across a wrapped line), and in file names, the names of images and
-// other binary files included.
+// any case, with or without what can sit between the words (a space,
+// hyphen, dot or underscore, a non-breaking, zero-width or other invisible
+// space or mark, any of them written plainly or as an HTML entity, a JS
+// escape or a URL escape, Markdown emphasis, an inline HTML or SVG tag, or a
+// wrapped line; SEP below lists the marks), and in file names, the names of
+// images and other binary files included.
 //
 // Some internal names keep the old spelling on purpose: renaming them would
 // break data on pilot installs, the database, CI or Stripe, and no customer
@@ -46,10 +47,13 @@ const SELF = posix(relative(root, fileURLToPath(import.meta.url)));
 
 // Anything that can sit between "lot" and "sync" on one line: whitespace other
 // than a line break (the non-breaking space included), soft hyphens,
-// zero-width spaces and joiners, the Unicode hyphens and dashes, the minus
-// sign, underscore, dot and hyphen, and Markdown's emphasis and code marks
-// (* _ ~ and the backtick).
-const SEP = '[\\t\\v\\f\\r \\u00a0\\u00ad\\u1680\\u2000-\\u200d\\u2010-\\u2015\\u2028\\u2029\\u202f\\u205f\\u2060\\u2212\\u3000\\ufeff_.*`~\\-]*';
+// zero-width spaces and joiners, the direction marks (U+200E, U+200F), the
+// invisible operators (U+2061 to U+2064), the combining grapheme joiner
+// (U+034F), the Mongolian vowel separator (U+180E), the Unicode hyphens and
+// dashes, the minus sign, underscore, dot and hyphen, and Markdown's emphasis
+// and code marks (* _ ~ and the backtick). A visible mark that is none of
+// these, such as a middle dot ("Lot·Sync"), is not read as a separator.
+const SEP = '[\\t\\v\\f\\r \\u00a0\\u00ad\\u034f\\u1680\\u180e\\u2000-\\u200f\\u2010-\\u2015\\u2028\\u2029\\u202f\\u205f\\u2060-\\u2064\\u2212\\u3000\\ufeff_.*`~\\-]*';
 // A line break, optionally followed by the comment or quote marker that
 // starts a wrapped comment or quote line (// # * -- > ; <!--).
 const WRAP = `(?:\\n${SEP}(?:(?://|/?\\*|#|--|>|;|<!--)${SEP})?)?`;
@@ -85,7 +89,8 @@ const OLD_NAME = new RegExp(`${LOT}${SEP}${WRAP}${SYNC}`, 'g');
 const OLD_NAME_ONE = new RegExp(`${LOT}${SEP}${SYNC}`);
 
 // HTML entities, JS escapes and URL escapes are decoded first, so
-// "Lot&nbsp;Sync", "Lot\u00a0Sync" written as an escape, "Lot%20Sync" in an
+// "Lot&nbsp;Sync", "Lot\u00a0Sync" or "Lot\tSync" written as an escape
+// (\n and \r read as a space, as a page shows them), "Lot%20Sync" in an
 // address and "subject=Lot+Sync" in a mail link are caught too. A plus is read
 // as a space only in a key=value pair after a ? or & (an address's query, a
 // mail link's subject), so "lot+sync" and "x &=lot+sync" in code are left
@@ -102,11 +107,19 @@ const OLD_NAME_ONE = new RegExp(`${LOT}${SEP}${SYNC}`);
 // inside an attribute (title="...", href="...", download="...") is still
 // caught.
 const INLINE_TAG = /<\/?(?:wbr|br|b|i|em|strong|span|u|s|mark|small|abbr|sup|sub|a|code|kbd|tspan|font|del|ins|q|cite|var|dfn|bdi|bdo|time|data|label)\b[^>]*>/gi;
+// HTML's names for the characters SEP allows (every one in HTML's table of
+// named characters), and for the ampersand.
 const NAMED = {
-  nbsp: '\u00a0', shy: '\u00ad', ZeroWidthSpace: '\u200b', zwnj: '\u200c', zwj: '\u200d', NoBreak: '\u2060',
-  ensp: '\u2002', emsp: '\u2003', thinsp: '\u2009', hairsp: '\u200a', hyphen: '\u2010', dash: '\u2010',
-  ndash: '\u2013', mdash: '\u2014', minus: '\u2212', period: '.', lowbar: '_', UnderBar: '_', amp: '&', AMP: '&',
+  Tab: '\t', NewLine: ' ', nbsp: '\u00a0', NonBreakingSpace: '\u00a0', shy: '\u00ad',
+  ensp: '\u2002', emsp: '\u2003', emsp13: '\u2004', emsp14: '\u2005', numsp: '\u2007', puncsp: '\u2008',
+  thinsp: '\u2009', ThinSpace: '\u2009', hairsp: '\u200a', VeryThinSpace: '\u200a', MediumSpace: '\u205f', ThickSpace: '\u205f\u200a',
+  ZeroWidthSpace: '\u200b', NegativeVeryThinSpace: '\u200b', NegativeThinSpace: '\u200b', NegativeMediumSpace: '\u200b', NegativeThickSpace: '\u200b',
+  zwnj: '\u200c', zwj: '\u200d', lrm: '\u200e', rlm: '\u200f', NoBreak: '\u2060',
+  af: '\u2061', ApplyFunction: '\u2061', it: '\u2062', InvisibleTimes: '\u2062', ic: '\u2063', InvisibleComma: '\u2063',
+  hyphen: '\u2010', dash: '\u2010', ndash: '\u2013', mdash: '\u2014', horbar: '\u2015', minus: '\u2212',
+  period: '.', lowbar: '_', UnderBar: '_', ast: '*', midast: '*', grave: '`', DiacriticalGrave: '`', amp: '&', AMP: '&',
 };
+const JS_SPACE = { t: '\t', v: '\v', f: '\f', n: ' ', r: ' ' };
 const char = (n) => (n === 10 || n === 13 ? ' ' : n >= 0 && n <= 0x10ffff ? String.fromCodePoint(n) : '');
 // One run of %XX escapes: from each byte, the UTF-8 sequence its first byte
 // announces if the bytes make one, else that one byte as Latin-1.
@@ -124,8 +137,9 @@ function decode(line, { tags = true } = {}) {
   return (tags ? line.replace(INLINE_TAG, '') : line)
     .replace(/&#x([0-9a-f]{1,6});?/gi, (_, h) => char(parseInt(h, 16)))
     .replace(/&#(\d{1,7});?/g, (_, d) => char(Number(d)))
-    .replace(/&([A-Za-z]+);/g, (m, name) => NAMED[name] ?? m)
+    .replace(/&([A-Za-z][A-Za-z0-9]*);/g, (m, name) => (Object.hasOwn(NAMED, name) ? NAMED[name] : m))
     .replace(/\\u\{([0-9a-f]{1,6})\}|\\u([0-9a-f]{4})|\\x([0-9a-f]{2})/gi, (_, a, b, c) => char(parseInt(a || b || c, 16)))
+    .replace(/\\([tvfnr])/g, (_, c) => JS_SPACE[c])
     .replace(/[?&][\w.~-]+=[^\s"'<>&#]*/g, (pair) => pair.replace(/\+/g, ' '))
     .replace(/%u([0-9a-f]{4})/gi, (_, h) => char(parseInt(h, 16)))
     .replace(/(?:%[0-9a-f]{2})+/gi, urlRun);
@@ -497,12 +511,42 @@ test('the scan catches the old name in every spelling, in any file that is not e
     // escape()'s %u form, and a run that mixes a UTF-8 sequence with a stray Latin-1 byte
     'https://www.example.com/Lot%u200BSync',
     'https://www.example.com/Lot%E2%80%8B%A0Sync',
+    // invisible marks between the words: the direction marks, the invisible operators, the
+    // combining grapheme joiner and the Mongolian vowel separator
+    'Lot\u200eSync',
+    'Lot\u200fSync',
+    'Lot\u2061Sync',
+    'Lot\u2062Sync',
+    'Lot\u2063Sync',
+    'Lot\u2064Sync',
+    'Lot\u034fSync',
+    'Lot\u180eSync',
+    // more of HTML's names for spaces and marks, and a numeric one for a direction mark
+    'Lot&ThinSpace;Sync',
+    'Lot&MediumSpace;Sync',
+    'Lot&numsp;Sync',
+    'Lot&puncsp;Sync',
+    'Lot&emsp13;Sync',
+    'Lot&lrm;Sync',
+    'Lot&rlm;Sync',
+    'Lot&#x200E;Sync',
+    // a JS escape for a tab, a line break or another white space
+    String.raw`title: 'Lot\tSync'`,
+    String.raw`title: 'Lot\nSync'`,
+    String.raw`title: 'Lot\r\nSync'`,
+    String.raw`title: 'Lot\vSync'`,
+    String.raw`title: 'Lot\fSync'`,
   ];
   for (const text of spellings) {
     for (const path of ['docs/help.md', 'extension/popup.js', 'site/index.html', 'marketing/sales-sheet.md']) {
       assert.deepEqual(hitsIn(path, `first line\n${text}\nlast line`), [`${path}:2: ${text.trim()}`], `${JSON.stringify(text)} in ${path}`);
     }
   }
+  // every HTML name in NAMED for a mark SEP allows is read as that mark
+  const onlySep = new RegExp(`^${SEP.replace(/\*$/, '+')}$`);
+  const sepNames = Object.keys(NAMED).filter((name) => onlySep.test(NAMED[name]));
+  assert.ok(sepNames.length >= 40, `only ${sepNames.length} names`);
+  for (const name of sepNames) assert.equal(hitsIn('docs/help.md', `Lot&${name};Sync`).length, 1, `&${name};`);
   // across a wrapped line, plain or in a comment, reported where it starts
   assert.deepEqual(hitsIn('docs/help.md', 'Open Lot\nSync from the toolbar.'), ['docs/help.md:1: Open Lot']);
   assert.deepEqual(hitsIn('extension/popup.js', '// the Lot\n// Sync popup'), ['extension/popup.js:1: // the Lot']);
