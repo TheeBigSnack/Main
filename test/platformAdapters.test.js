@@ -90,8 +90,12 @@ test('priceKind: selling, base, plain, named and everything that is not the pric
   for (const label of ['MSRP', 'Was', 'Doc Fee', 'Conditional Offer', 'Payment', 'Est. Monthly', 'Dealer Discount', 'Factory Rebate', 'Cash Back', 'Total Savings',
     'KBB Price', 'Kelley Blue Book Value', 'Market Price', 'Market Value', 'Employee Price', 'Supplier Price', 'Military Price', 'Loyalty Price', 'Wholesale Price',
     'Previous Price', 'Prior Price', 'Lowest Price', 'Highest Price', 'Estimated Value', 'Book Value', 'Trade-In Value']) {
-    assert.equal(k(label, '', false, 'KBB Market Employee Wholesale Motors'), 'other', label);
+    // the dealership's name holds the words, but not at its opening: they keep their meaning
+    assert.equal(k(label, '', false, 'Springfield KBB Market Employee Wholesale Motors'), 'other', label);
   }
+  // as the opening words of the dealership's name they are its own price (R-8, repair round 2)
+  assert.equal(k('KBB Price', '', false, 'KBB Market Employee Wholesale Motors'), 'selling');
+  assert.equal(k('Market Price', '', false, 'KBB Market Employee Wholesale Motors'), 'other', 'not the name\'s opening words');
   assert.equal(k('Final price', 'finalPrice', true), 'selling');
 });
 
@@ -1072,4 +1076,45 @@ test('DealerOn and Dealer.com: a car whose page fails holds back only itself, sc
     assert.deepEqual(third.diff.takeDown.map((t) => [t.vin, t.why]), [[sold.vin, 'gone']], `${platform}: the sold car goes on To do`);
     assert.deepEqual(third.diff.needsALook.map((i) => i.vin).sort(), [a.vin, b.vin, c.vin].sort());
   }
+});
+
+// R-8, repair round 2: a dealership whose own name holds a guide's, an
+// offer's or a not-the-price word ("Kelley", "Market", "Value", "Old",
+// "Trade", "Wholesale", "Book"). DealerOn labels the price "<Dealer> Price"
+// and Dealer.com its final price "<First word> Price"; both are the
+// dealership's own price, so the car keeps its selling price and stays
+// Ready. Before, the own label was tested against the not-the-price words
+// before the dealer name was looked at, and every car of such a dealership
+// got no price (DealerOn) or its base price without the fee (Dealer.com).
+// A guide's label the dealer name does not explain still blocks.
+const NAMES_WITH_PRICE_WORDS = ['Kelley Chevrolet', 'Old Town Ford', 'Value Auto Mart', 'Auto Market of Springfield', 'Wholesale Auto Outlet', 'Military Auto Sales', 'Trade Winds Toyota', 'Prior Lake Chevrolet', 'Book Motors', 'Sample Motors'];
+
+test('R-8: a dealership whose name holds a guide or not-the-price word keeps its own "<Dealer> Price" on DealerOn and Dealer.com', () => {
+  const [c] = platformCars(1, { from: 570 });
+  const car = { ...c, certified: false };
+  for (const dealer of NAMES_WITH_PRICE_WORDS) {
+    const on = normalizeInventoryRecord(dealerOnCard(car, { dealer }).VehicleCard, { origin: DEALERON_ORIGIN });
+    assert.deepEqual([on.price, on.priceLabel, on.priceBeforeFees], [car.base + car.fee, 'Internet Price', car.base], `DealerOn, ${dealer}`);
+    assert.equal(assessVehicle(on, withDefaults({})).decision, DECISION.READY, `DealerOn, ${dealer}: Ready`);
+    const com = normalizeInventoryRecord(dealerComRecord(car, { dealer }), { origin: DEALERCOM_ORIGIN });
+    assert.deepEqual([com.price, com.priceLabel, com.priceBeforeFees], [car.base + car.fee, `${dealer.split(' ')[0]} Price`, car.base], `Dealer.com, ${dealer}`);
+    assert.equal(assessVehicle(com, withDefaults({})).decision, DECISION.READY, `Dealer.com, ${dealer}: Ready`);
+  }
+  // a label the dealership's name does not explain still blocks, and is quoted
+  const quoted = (label) => `the list labels its price "${label}", which Lot Current does not read as the selling price`;
+  for (const [dealer, label] of [['Kelley Chevrolet', 'Kelley Blue Book Price'], ['Kelley Chevrolet', 'Market Value'], ['Auto Market of Springfield', 'Market Value'], ['Value Auto Mart', 'KBB Value'], ['Book Motors', 'Instant Cash Offer'], ['Power Chevrolet', 'J.D. Power Price']]) {
+    const v = normalizeInventoryRecord({ ...dealerOnCard(car, { dealer }).VehicleCard, VehiclePriceLabel: label }, { origin: DEALERON_ORIGIN });
+    assert.deepEqual([v.price, v.priceLabel], [null, quoted(label)], `DealerOn, ${dealer}, "${label}"`);
+  }
+  for (const [dealer, label] of [['Kelley Chevrolet', 'Kelley Blue Book Price'], ['Old Town Ford', 'KBB Value'], ['Power Chevrolet', 'J.D. Power Price']]) {
+    const record = dealerComRecord(car, { dealer });
+    const dprice = record.pricing.dprice.map((e) => (e.isFinalPrice ? { ...e, label } : e));
+    const v = normalizeInventoryRecord({ ...record, pricing: { ...record.pricing, dprice } }, { origin: DEALERCOM_ORIGIN });
+    assert.deepEqual([v.price, v.priceBeforeFees], [car.base, null], `Dealer.com, ${dealer}, "${label}": the guide's figure is not the price`);
+  }
+  // the words a dealer name explains are only that name's: "Kelley Price" is no dealer's own price at another store
+  assert.equal(priceKind({ label: 'Kelley Price', key: 'dprice.internetPrice', final: true, value: 1 }, 'Sample Chevrolet'), 'other');
+  assert.equal(priceKind({ label: 'Kelley Price', key: 'dprice.internetPrice', final: true, value: 1 }, 'Kelley Chevrolet'), 'selling');
+  assert.equal(priceKind({ label: 'Old Town Price', key: '', final: false, value: 1 }, 'Old Town Ford'), 'selling');
+  assert.equal(priceKind({ label: 'Old Town Price', key: '', final: false, value: 1 }, 'New Town Ford'), 'other');
 });

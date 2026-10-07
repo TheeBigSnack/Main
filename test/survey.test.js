@@ -244,6 +244,11 @@ test('jsonEndpoint lays out the car records as the platform readers see them, ke
     { key: 'VehiclePriceLabel', label: 'Market Value', notThePrice: true, cars: 1 },
   ]);
   assert.equal(own.records.filled.price, 1, 'the "Market Value" car has no price');
+  // a dealership whose name holds a guide's word ("Kelley"): its own "<Dealer> Price" is no guide's label, as the reader takes it
+  const kelley = { DisplayCards: [{ VehicleCard: { ...dealerOn.DisplayCards[0].VehicleCard, DealerName: 'Kelley Chevrolet', VehiclePriceLabel: 'Kelley Chevrolet Price' } }] };
+  const named = jsonEndpoint({ url: SITE + '/api/vhcliaa/vehicle-pages/cosmos/srp/vehicles/123/456', status: 200, contentType: 'application/json', body: JSON.stringify(kelley) });
+  assert.deepEqual(named.records.ownLabels, [{ key: 'VehiclePriceLabel', label: 'Kelley Chevrolet Price', notThePrice: false, cars: 1 }]);
+  assert.equal(named.records.filled.price, 1);
   assert.equal(jsonEndpoint({ url: SITE + '/vin-lookup', body: JSON.stringify({ note: 'ask about ' + VIN }), contentType: 'application/json' }).records, undefined, 'a VIN outside a list is no car list');
 });
 

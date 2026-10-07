@@ -13,7 +13,7 @@
 import { extractJsonLd, vehicleNodes, pageFacts } from '../extension/adapters/schemaOrgParse.js';
 import { vinInAddress, looksLikeCarAddress } from '../extension/adapters/schemaOrg.js';
 import { vinCheckDigit } from '../extension/src/vin.js';
-import { findCardList, totalCount, labeledPrices, priceKind, ownPriceLabel, labelIsNotThePrice, normalizeInventoryRecord } from '../extension/adapters/inventoryJson.js';
+import { findCardList, totalCount, labeledPrices, priceKind, ownPriceLabel, labelIsNotThePrice, isDealerPrice, normalizeInventoryRecord } from '../extension/adapters/inventoryJson.js';
 
 export const DEFAULTS = Object.freeze({
   out: 'survey-out',
@@ -550,7 +550,7 @@ export function recordsShape(json, href) {
       const key = scrub(own.key);
       const label = scrub(own.label);
       const id = `${key}|${label}`;
-      if (!ownLabels.has(id)) ownLabels.set(id, { key, label, notThePrice: labelIsNotThePrice(own.label), cars: 0 });
+      if (!ownLabels.has(id)) ownLabels.set(id, { key, label, notThePrice: labelIsNotThePrice(own.label) && !isDealerPrice(own.label, dealer), cars: 0 });
       ownLabels.get(id).cars += 1;
     }
   });

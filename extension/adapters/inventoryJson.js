@@ -268,33 +268,53 @@ export function labeledPrices(record) {
   return out;
 }
 
-// Words of a name, for matching a "<Dealer> Price" label to the dealership.
-const nameWords = (text) => String(text || '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter((w) => w.length > 1);
+// Words of a name, for matching a "<Dealer> Price" label to the dealership:
+// every word, single letters too ("J.D." is "j d"), so "J.D. Power Price" is
+// never explained by a "Power Chevrolet".
+const nameWords = (text) => String(text || '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter(Boolean);
+
+/**
+ * Whether a label is the dealership's own price, "<Dealer> Price": every
+ * word before "Price" is in the dealership's name as the record gives it
+ * ("Sample Price" at "Sample Chevrolet"). A dealership's name can hold a word
+ * that otherwise says a figure is not the price ("Kelley Chevrolet", "Old
+ * Town Ford", "Value Auto Mart", "Trade Winds Toyota"); such a label is the
+ * dealer's own only when its words open the name, as the platforms write it
+ * (DealerOn the whole name, Dealer.com its first word): "Kelley Price" at
+ * "Kelley Chevrolet" is the dealer's price, "Market Price" at "Auto Market of
+ * Springfield" is not, and with no dealership name on the record nothing is.
+ * @param {string} label
+ * @param {string} [dealer]
+ */
+export function isDealerPrice(label, dealer = '') {
+  if (!NAMED_PRICE.test(String(label || ''))) return false;
+  const before = String(label).replace(/\s+price\s*:?\s*$/i, '');
+  const own = nameWords(before);
+  const theirs = nameWords(dealer);
+  if (!own.length || !own.every((w) => theirs.includes(w))) return false;
+  return !labelIsNotThePrice(before) || own.every((w, i) => theirs[i] === w);
+}
 
 /**
  * What one labeled price is: 'selling', 'base', 'plain' (just "Price"),
  * 'named' (a "<Something> Price" this record's dealership name does not
- * explain) or 'other' (never used). "<Dealer> Price" is a selling price
- * only when every word before "Price" is in the dealership's own name as
- * the record gives it ("Sample Price" at "Sample Chevrolet"): a "KBB Price"
- * or "Market Price" is never mistaken for the dealer's.
+ * explain) or 'other' (never used). "<Dealer> Price" (isDealerPrice) is a
+ * selling price, and the dealership's name in it never makes it something
+ * else: a "KBB Price" or "Market Price" the name does not explain is never
+ * mistaken for the dealer's.
  * @param {{ label: string, key: string, final: boolean }} entry
  * @param {string} [dealer]  the dealership name the record carries
  */
 export function priceKind(entry, dealer = '') {
-  const words = `${entry.label} ${spaced(entry.key)}`;
+  const dealers = isDealerPrice(entry.label, dealer);
+  const words = `${dealers ? '' : entry.label} ${spaced(entry.key)}`;
   if (labelIsNotThePrice(words)) return 'other';
   if (entry.final) return 'selling';
   if (BASE_WORDS.test(words)) return 'base';
   if (SELLING_WORDS.test(words)) return 'selling';
   if (GENERIC_PRICE.test(entry.label) || /^price$/i.test(keyName(entry.key.split('.').pop()))) return 'plain';
-  const named = NAMED_PRICE.exec(entry.label);
-  if (named) {
-    const own = nameWords(entry.label.replace(/\s+price\s*:?\s*$/i, ''));
-    const theirs = new Set(nameWords(dealer));
-    return own.length && own.every((w) => theirs.has(w)) ? 'selling' : 'named';
-  }
-  return 'other';
+  if (dealers) return 'selling';
+  return NAMED_PRICE.test(entry.label) ? 'named' : 'other';
 }
 
 const NO_PRICE = (label) => ({ price: null, priceLabel: label, priceBeforeFees: null });
@@ -351,14 +371,15 @@ export const labelIsNotThePrice = (label) => NOT_THE_PRICE.test(label) || GUIDE_
  * ("Market Price", "Instant Cash Offer") gets no price either, and the label
  * quotes them (guideLabelled). So does a record whose own label for its
  * price (`label`, ownPriceLabel's label) names something other than the selling
- * price ("Market Value", "Instant Cash Offer", "MSRP"): the price it labels
+ * price ("Market Value", "Instant Cash Offer", "MSRP") and is not the
+ * dealership's own "<Dealer> Price" (isDealerPrice): the price it labels
  * is that figure whatever its field is called, and with the website's own
  * price unknown no other figure on the record is taken instead.
  * @param {{ value: number, label: string, key: string, final: boolean }[]} entries
  * @param {{ dealer?: string, label?: string|null }} [context]
  */
 export function choosePrices(entries, { dealer = '', label = null } = {}) {
-  if (label && labelIsNotThePrice(label)) return NO_PRICE(quoteLabels([label]));
+  if (label && labelIsNotThePrice(label) && !isDealerPrice(label, dealer)) return NO_PRICE(quoteLabels([label]));
   const kinds = (entries || []).map((e) => ({ ...e, kind: priceKind(e, dealer) }));
   const of = (kind) => kinds.filter((e) => e.kind === kind);
   const selling = of('selling');
