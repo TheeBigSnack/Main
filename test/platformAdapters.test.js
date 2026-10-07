@@ -1800,3 +1800,129 @@ test('Rule 4 and R-8: offers.price is still the price, "Year End Sale" is still 
   assert.equal(labelWords('Your Carvana Offer<span>1</span><span>2</span>'), 'Your Carvana Offer');
   assert.equal(labelWords('Your Carvana Offer<sup>1</sup><a href="#n2">2</a>'), 'Your Carvana Offer');
 });
+
+// Rule 4, repair cycle 3 round 7 (the reviewer's records): a figure inside a
+// package, a warranty, an accessory, an add-on or a price history was the
+// car's price when its own name or the name of what held it had a selling
+// word ("Dealer Installed Accessories", "Your Floor Mats", "Internet
+// Bundle", "dealerAddOns", "salePackage"), or when the key holding it had
+// "pric" in it ("priceHistory"), so a car with only a retail price beside it
+// went out Ready at that figure. Only the record's own fields, its price
+// lists ("pricing", "prices", "dprice", "offers") and its fields named for a
+// price give the car's price now; a figure held anywhere else never does. A
+// selling price kept anywhere else ("Internet Price" in a details object)
+// holds the car instead, so the retail price is not taken past it.
+test('Rule 4: a figure inside a package, a warranty, an add-on or a price history is never the car\'s price, whatever it is named, on DealerOn and Dealer.com', () => {
+  const [c] = platformCars(1, { from: 781 });
+  const car = { ...c, certified: false };
+  // the reviewer's retail-only records: DealerOn without its internet price and label, Dealer.com's dprice cut to its retail price and fee
+  const { VehicleInternetPrice, VehiclePriceLabel, ...onCard } = dealerOnCard(car).VehicleCard;
+  assert.ok(VehicleInternetPrice && VehiclePriceLabel);
+  const comFull = dealerComRecord(car);
+  const comCard = { ...comFull, pricing: { ...comFull.pricing, dprice: comFull.pricing.dprice.slice(0, 2) } };
+  const both = (patch) => [
+    ['DealerOn', normalizeInventoryRecord({ ...onCard, ...patch }, { origin: DEALERON_ORIGIN }), 'Retail Price'],
+    ['Dealer.com', normalizeInventoryRecord({ ...comCard, ...patch }, { origin: DEALERCOM_ORIGIN }), 'retail Price'],
+  ];
+  for (const [, v, retail] of both({})) assert.deepEqual([v.price, v.priceLabel, assessVehicle(v, withDefaults({})).decision], [car.base, retail, DECISION.READY], 'the baseline');
+  const extras = [
+    { packages: [{ name: 'Dealer Installed Accessories', price: 995 }] },
+    { packages: [{ name: 'Dealer Protection Package', price: 1295 }] },
+    { warranty: { name: 'Dealer Warranty', price: 1295 } },
+    { accessories: [{ title: 'Your Floor Mats', price: 199 }] },
+    { addOns: [{ title: 'Our Appearance Package', price: 599 }] },
+    { protection: { displayName: 'Internet Bundle', amount: 899 } },
+    { dealerAddOns: { price: 1295 } },
+    { salePackage: { price: 1295 } },
+    { priceHistory: [{ date: '2026-09-01', price: 125500 }] },
+    { priceHistory: [{ date: '2026-09-01', internetPrice: 125500, label: 'Internet Price' }] },
+    { packages: [{ name: 'Dealer Protection Package', price: 'Call' }] },
+    { dealerAddOns: { price: 'Call' } },
+    { warranty: { name: 'Dealer Warranty', price: 'Included', isFinalPrice: false } },
+  ];
+  for (const extra of extras) {
+    for (const [what, v, retail] of both(extra)) {
+      assert.deepEqual([v.price, v.priceLabel, v.priceBeforeFees], [car.base, retail, null], `${what} with ${JSON.stringify(extra)}: the retail price, never the figure beside it`);
+      assert.equal(assessVehicle(v, withDefaults({})).decision, DECISION.READY, `${what} with ${JSON.stringify(extra)}`);
+    }
+  }
+  // on the full DealerOn card, with its internet price, a package changes nothing either
+  const full = normalizeInventoryRecord({ ...dealerOnCard(car).VehicleCard, packages: [{ name: 'Dealer Protection Package', price: 1295 }] }, { origin: DEALERON_ORIGIN });
+  assert.deepEqual([full.price, full.priceBeforeFees], [car.base + car.fee, car.base], 'DealerOn with its internet price and a package');
+  assert.equal(assessVehicle(full, withDefaults({})).decision, DECISION.READY);
+  // a selling price kept outside the price fields and lists holds the car: no price, the label quoted, never the retail price past it
+  const held = (label) => `the list labels its price "${label}", which Lot Current does not read as the selling price`;
+  for (const [extra, label] of [[{ details: { internetPrice: 124490 } }, 'internet Price'], [{ details: { internetPrice: 'Call' } }, 'internet Price'], [{ details: [{ label: 'Sale Price', value: '$124,490' }] }, 'Sale Price'], [{ vehicle: { finalPrice: '$124,490' } }, 'final Price']]) {
+    for (const [what, v] of both(extra)) {
+      assert.deepEqual([v.price, v.priceLabel, v.priceBeforeFees], [null, held(label), null], `${what} with ${JSON.stringify(extra)}`);
+      assert.equal(assessVehicle(v, withDefaults({})).decision, DECISION.NOT_READY, `${what} with ${JSON.stringify(extra)}: Not ready`);
+    }
+  }
+  // the record's price lists and price fields still give the price, read or not
+  for (const extra of [{ priceInfo: { internetPrice: 124490 } }, { trackingPricing: { internetPrice: '$124,490' } }, { prices: [{ label: 'Internet Price', value: '$124,490' }] }, { offers: { price: 124490 } }]) {
+    for (const [what, v] of both(extra)) assert.equal(v.price, 124490, `${what} with ${JSON.stringify(extra)}`);
+  }
+  for (const [what, v] of both({ priceInfo: { internetPrice: 'Call' } })) assert.deepEqual([v.price, v.priceLabel], [null, 'the list\'s "internet Price" reads "Call", which Lot Current does not read as an amount'], what);
+});
+
+// Rule 4, repair cycle 3 round 7 (the reviewer's records): a field named for
+// the selling price with a word after "price" ("VehicleInternetPriceFormatted",
+// "finalPriceText", "salePriceDisplay") was the price when it read and was
+// dropped when it held "$124,490*" or "Call", and a selling price written as
+// an object ({ amount }, { value }) was never read at all, so the car went
+// out Ready at the retail price. The same name test now decides both ways,
+// and an object's amount or value is read.
+test('Rule 4: a selling price field with a word after "price", or holding an object, that can\'t be read leaves the car with no price, quoted, on DealerOn and Dealer.com', () => {
+  const [c] = platformCars(1, { from: 781 });
+  const car = { ...c, certified: false };
+  const { VehicleInternetPrice, VehiclePriceLabel, ...onCard } = dealerOnCard(car).VehicleCard;
+  const comFull = dealerComRecord(car);
+  const comCard = { ...comFull, pricing: { ...comFull.pricing, dprice: comFull.pricing.dprice.slice(0, 2) } };
+  const both = (patch) => [
+    ['DealerOn', normalizeInventoryRecord({ ...onCard, ...patch }, { origin: DEALERON_ORIGIN })],
+    ['Dealer.com', normalizeInventoryRecord({ ...comCard, ...patch }, { origin: DEALERCOM_ORIGIN })],
+  ];
+  const why = (label, text) => `the list's "${label}" reads "${text}", which Lot Current does not read as an amount`;
+  const cases = [
+    [{ VehicleInternetPriceFormatted: '$124,490*' }, why('Internet Price Formatted', '$124,490*')],
+    [{ finalPriceText: 'Call' }, 'the list\'s final price, "final Price Text", reads "Call", which Lot Current does not read as an amount'],
+    [{ salePriceDisplay: 'Call for Price' }, why('sale Price Display', 'Call for Price')],
+    [{ SalePrice: { value: '$124,490*' } }, why('Sale Price', '$124,490*')],
+    [{ SalePrice: { amount: 'Call' } }, why('Sale Price', 'Call')],
+    [{ SalePrice: { currency: 'USD' } }, 'the list\'s "Sale Price" has no amount'],
+    [{ internetPriceDisplay: '' }, 'the list\'s "internet Price Display" has no amount'],
+  ];
+  for (const [patch, reason] of cases) {
+    for (const [what, v] of both(patch)) {
+      assert.deepEqual([v.price, v.priceLabel, v.priceBeforeFees], [null, reason, null], `${what} with ${JSON.stringify(patch)}`);
+      assert.equal(assessVehicle(v, withDefaults({})).decision, DECISION.NOT_READY, `${what} with ${JSON.stringify(patch)}: Not ready, never Ready at the retail price`);
+    }
+  }
+  // the same fields that read are the price, as before; an object's amount or value is read
+  const reads = [
+    [{ VehicleInternetPriceFormatted: '$124,490' }, 'Internet Price Formatted'],
+    [{ finalPriceText: '$124,490' }, 'final Price Text'],
+    [{ SalePrice: { amount: 124490 } }, 'Sale Price'],
+    [{ SalePrice: { value: '$124,490' } }, 'Sale Price'],
+  ];
+  for (const [patch, label] of reads) {
+    for (const [what, v] of both(patch)) {
+      assert.deepEqual([v.price, v.priceLabel, v.priceBeforeFees], [124490, label, car.base], `${what} with ${JSON.stringify(patch)}`);
+      assert.equal(assessVehicle(v, withDefaults({})).decision, DECISION.READY);
+    }
+  }
+  // Dealer.com: a dprice entry typed internetPrice whose value is an object
+  const withEntry = (entry) => normalizeInventoryRecord({ ...comCard, pricing: { ...comCard.pricing, dprice: [...comCard.pricing.dprice, { typeClass: 'internetPrice', label: 'Internet Deal', isFinalPrice: false, ...entry }] } }, { origin: DEALERCOM_ORIGIN });
+  const deal = withEntry({ value: { amount: '$124,490' } });
+  assert.deepEqual([deal.price, deal.priceLabel, deal.priceBeforeFees], [124490, 'Internet Deal', car.base], 'value { amount: "$124,490" }');
+  for (const value of [{ amount: '$124,490*' }, { amount: 'Call' }, {}]) {
+    const v = withEntry({ value });
+    assert.equal(v.price, null, `value ${JSON.stringify(value)}`);
+    assert.match(v.priceLabel, /^the list's "Internet Deal" (?:reads|has no amount)/, `value ${JSON.stringify(value)}`);
+    assert.equal(assessVehicle(v, withDefaults({})).decision, DECISION.NOT_READY);
+  }
+  // what is about a price but not its amount never blocks the retail price: a label, a currency, a date, a flag
+  for (const patch of [{ salePriceType: 'Internet Price' }, { internetPriceCurrency: 'USD' }, { salePriceDate: '2026-09-01' }, { showInternetPrice: 'Y', isFinalPrice: false, hideSalePrice: 1 }, { internetPriceDisclaimer: 'Plus tax and fees' }]) {
+    for (const [what, v] of both(patch)) assert.deepEqual([v.price, v.priceBeforeFees, assessVehicle(v, withDefaults({})).decision], [car.base, null, DECISION.READY], `${what} with ${JSON.stringify(patch)}`);
+  }
+});

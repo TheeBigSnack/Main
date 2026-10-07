@@ -289,13 +289,62 @@ const PRICE_NAME = /price|\bspecials?\b/i;
 const NAMED_PRICE = /^\s*[A-Za-z][\w.&'’ -]{0,40}\s+price\s*:?\s*$/i;
 // In a list of prices, a line about a sale or the dealer that is not a
 // price ("Sale Event", "Sale ends Sunday", "Dealer Notes"; "Year End Sale"
-// is still a price's label), and an amount
-// added to or taken off the price ("-$500", "+$499"): a price is never
-// signed.
+// is still a price's label), unless it also holds one of the website's own
+// price words ("Internet Sale - Ends 10/31" is a price's label), and an
+// amount added to or taken off the price ("-$500", "+$499", "($500)"): a
+// price is never signed. Text in brackets that is not an amount ("(Call for
+// Price)") is not signed.
 const LIST_NOTE = /\b(?:events?|ends|expires?|notes?|disclaimers?|details)\b/i;
-const SIGNED = /^\s*[-+−–(]/;
+const LIST_PRICE_WORDS = /\binternet|\bfinal|selling|e-?price/i;
+const isListNote = (label) => LIST_NOTE.test(label) && !LIST_PRICE_WORDS.test(label);
+const SIGNED = /^\s*(?:[-+−–]\s*\$?\s*\d|\(\s*[-+−–]?\s*\$?\s*\d)/;
 // Where a label/value entry holds its amount.
 const VALUE_FIELDS = ['value', 'amount', 'price', 'displayValue'];
+// The amount an entry holds: its value, amount, price or displayValue, or
+// the amount or value of an object there ({ value: { amount: "$24,490" } }).
+function valueIn(x) {
+  const raw = x.value ?? x.amount ?? x.price ?? x.displayValue;
+  return isPlain(raw) ? raw.amount ?? raw.value ?? raw.displayValue : raw;
+}
+
+// What a key says about prices, by its name:
+//   'list'   a list or object of the car's prices: "pricing" (Dealer.com's
+//            "pricing", "trackingPricing"), "prices", "dprice", "offers"
+//            (where standard vehicle data keeps the car's price);
+//   'field'  a field named for a price: "price", "pricing" or "prices" with
+//            nothing after it, or with a word for how the amount is written
+//            or held ("VehicleInternetPrice", "VehicleInternetPriceFormatted",
+//            "finalPriceText", "salePriceDisplay", "priceInfo"), whatever it
+//            holds: an amount, text, nothing, or an object with the amount
+//            ({ amount }, { value });
+//   'about'  a field about a price but not its amount (PRICE_ABOUT: its
+//            label, currency, date, history, a change: "VehiclePriceLabel",
+//            "priceCurrency", "priceHistory", "internetPriceDrop"): never read;
+//   ''       anything else. An object under such a key (a package, a
+//            warranty, an accessory, an add-on, a protection plan) holds
+//            figures that are not the car's price, whatever they are named.
+// The same name test decides whether a field's amount is the price when it
+// reads and whether it is kept when it can't be read.
+const PRICE_ABOUT = /^(?:label|title|caption|heading|name|notes?|disclaimers?|desc|description|type|class|kind|currency|units?|code|id|date|time|history|histories|source|rank|count|format|style|colou?r|rules?|tier|range|drops?|changes?|diff|difference|reduction|delta|reason|status|visible|hidden|enabled|flag)$/;
+export function priceKeyKind(key) {
+  const n = keyName(key);
+  if (/^(?:dprice|offers?)$/.test(n)) return 'list';
+  const at = n.lastIndexOf('pric');
+  if (at < 0) return '';
+  const tail = n.slice(at);
+  const pricing = tail.startsWith('pricing');
+  if (!pricing && !tail.startsWith('price')) return '';
+  const rest = tail.slice(pricing ? 7 : 5);
+  if (PRICE_ABOUT.test(rest) || PRICE_ABOUT.test(rest.replace(/^s/, ''))) return 'about';
+  return (pricing && rest === '') || rest === 's' ? 'list' : 'field';
+}
+// A field that says something about a price ("isFinalPrice",
+// "showInternetPrice"), not one, and a yes or no in a field named
+// "display...": never an amount.
+const FLAG = /^(?:is|has|show|hide|use|enable|allow|include)[a-z]/;
+const isFlag = (name, v) => typeof v === 'boolean' || FLAG.test(name) || (/^display/.test(name) && /^(?:true|false|yes|no|y|n|0|1)$/i.test(String(v).trim()));
+// The platform's final price as a field ("finalPrice", "finalPriceText").
+const FINAL_FIELD = /^finalprice(?:formatted|text|displayed|display|value|amount|string|raw)?$/;
 
 // "finalPrice" -> "final Price", "VehicleInternetPrice" -> "Vehicle Internet Price".
 const spaced = (key) => String(key).replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').trim();
@@ -314,29 +363,38 @@ function amount(value) {
  * Every amount the record labels as a price, with its label and where it
  * came from: label/value objects (Dealer.com's pricing entries:
  * { label, value, typeClass, isFinalPrice }), fields named for a price
- * (finalPrice, VehicleInternetPrice, retailPrice) and fields named for a
- * guide's value or an offer (VehicleMarketValue, kbbValue: never the price,
- * read so a car with only such a figure has its label quoted). Nested up to
- * four levels; never inside photos or features.
+ * (finalPrice, VehicleInternetPrice, retailPrice, priceKeyKind) and fields
+ * named for a guide's value or an offer (VehicleMarketValue, kbbValue: never
+ * the price, read so a car with only such a figure has its label quoted).
+ * Nested up to four levels; never inside photos or features.
+ *
+ * Only the record's own fields, its price lists and objects ("pricing",
+ * "prices", "dprice", "offers") and its fields named for a price give the
+ * car's price. A figure inside anything else (a package, a warranty, an
+ * accessory, an add-on, a protection plan, whatever it or what holds it is
+ * named) is kept marked `aside`, and choosePrices never takes it as the
+ * price; a field about a price but not its amount (a price history, a
+ * label) is not read at all.
  *
  * The website's own price is kept even when its value is not a plain amount
- * ("$40,590*", "Call for Price", "$24,499 + tax", nothing at all), as an
- * unreadable entry ({ value: null, text }): the price the platform marks
- * final (an entry with isFinalPrice or isFinal, a finalPrice field, or what
- * a finalPrice field holds); a selling price, written as text that is not
- * an amount or as nothing at all, when the platform types it as one (a
- * typeClass or a field named "internetPrice", "salePrice"), its label says
- * so ("Internet Special", "Sale Price") or a list of prices labels it as
- * one ("Internet Deal", "Sale", "Now", "Our Deal"; never a sale event or a
- * note, "Sale Event", "Dealer Notes", nor an amount added or taken off,
- * "-$500"); and, holding text that is not an amount, a plain "Price" and,
- * in a list of labelled prices, a "<Something> Price" (the dealer's own,
- * "Sample Price", which only choosePrices can tell, from the dealership's
- * name). A field that holds null is a field the record leaves empty, as one
- * left out. choosePrices then gives the car no price and quotes it, instead
- * of taking the plain, base or starting price beside it.
+ * ("$40,590*", "Call for Price", "$24,499 + tax", nothing at all, an object
+ * with no amount in it), as an unreadable entry ({ value: null, text }): the
+ * price the platform marks final (an entry with isFinalPrice or isFinal, a
+ * finalPrice field, or what a finalPrice field holds); a selling price,
+ * written as text that is not an amount or as nothing at all, when the
+ * platform types it as one (a typeClass or a field named "internetPrice",
+ * "salePrice", "VehicleInternetPriceFormatted"), its label says so
+ * ("Internet Special", "Sale Price") or a list of prices labels it as one
+ * ("Internet Deal", "Sale", "Now", "Our Deal"; never a sale event or a note,
+ * "Sale Event", "Dealer Notes", nor an amount added or taken off, "-$500");
+ * and, holding text that is not an amount, a plain "Price" and, in a list
+ * of labelled prices, a "<Something> Price" (the dealer's own, "Sample
+ * Price", which only choosePrices can tell, from the dealership's name). A
+ * field that holds null is a field the record leaves empty, as one left
+ * out. choosePrices then gives the car no price and quotes it, instead of
+ * taking the plain, base or starting price beside it.
  * @param {object} record
- * @returns {{ value: number|null, text?: string, label: string, key: string, final: boolean }[]}
+ * @returns {{ value: number|null, text?: string, label: string, key: string, final: boolean, aside?: boolean }[]}
  */
 export function labeledPrices(record) {
   const out = [];
@@ -360,62 +418,69 @@ export function labeledPrices(record) {
     const named = PRICE_NAME.test(labelWords(entry.label));
     if (kind === 'selling') {
       const typed = held || PRICE_NAME.test(spaced(String(entry.key).split('.').pop()));
-      const inList = listed && !LIST_NOTE.test(labelWords(entry.label)) && !SIGNED.test(entry.text);
+      const inList = listed && !isListNote(labelWords(entry.label)) && !SIGNED.test(entry.text);
       if ((named || typed || inList) && (written || (labelled && (present || listed) && raw === undefined))) out.push(entry);
       return;
     }
     if (!written || !entry.text || !named) return;
     if (kind === 'plain' || (labelled && kind === 'named')) out.push(entry);
   };
-  // a field that says something about a price ("isFinalPrice", "showInternetPrice"), not one
-  const FLAG = /^(?:is|has|show|hide|display|use|enable|allow|include)[a-z]/;
-  const visit = (x, key, depth, markedFinal = false) => {
+  // `outside`: below a key that is not a price list or field (a package, a
+  // warranty): what is found there is marked aside. `fieldName`: the name of
+  // the price field holding this object, for an amount with no label of its
+  // own ({ SalePrice: { amount: 24490 } } is "Sale Price").
+  const visit = (x, key, depth, { markedFinal = false, outside = false, fieldName = '' } = {}) => {
     if (depth > 4 || !x || typeof x !== 'object') return;
     if (Array.isArray(x)) {
-      for (const el of x) visit(el, key, depth + 1, markedFinal);
+      for (const el of x) visit(el, key, depth + 1, { markedFinal, outside, fieldName });
       return;
     }
+    const aside = outside ? { aside: true } : {};
     const label = textOf(x.label ?? x.title ?? x.displayName ?? '');
     const kind = textOf(x.typeClass ?? x.type ?? x.name ?? '');
-    const raw = x.value ?? x.amount ?? x.price ?? x.displayValue;
+    const raw = valueIn(x);
     // an entry with a value field that holds nothing ({ label, value: null })
     const present = VALUE_FIELDS.some((f) => Object.prototype.hasOwnProperty.call(x, f));
     const value = amount(raw);
     const final = markedFinal || truthy(x.isFinalPrice) || truthy(x.isFinal);
-    const name = label || spaced(kind) || (markedFinal ? spaced(key).replace(/^Vehicle\s+/i, '') : '');
-    if (value !== null && (name || final)) {
-      out.push({ value, label: name, key: `${key}.${kind}`, final });
+    const name = label || spaced(kind) || fieldName;
+    if (depth > 0 && value !== null && (name || final)) {
+      out.push({ value, label: name, key: `${key}.${kind}`, final, ...aside });
       return;
     }
-    const listed = /pric/.test(keyName(key));
+    const listed = !outside && /pric/.test(keyName(key)) && priceKeyKind(key) !== '';
     // a named entry's own value, judged by its name here, is not read again
     // below under its field's name ("price")
     let ownField = null;
     if (depth > 0 && (final || name)) {
       const before = out.length;
-      unreadable({ value: null, text: textOf(raw).slice(0, 60), label: name, key: `${key}.${kind}`, final }, raw, { labelled: true, listed, present });
+      unreadable({ value: null, text: textOf(raw).slice(0, 60), label: name, key: `${key}.${kind}`, final, ...aside }, raw, { labelled: true, listed, present });
       if (out.length > before || final) return;
       ownField = VALUE_FIELDS.find((f) => x[f] !== undefined && x[f] !== null) || null;
     }
-    // Below the record's top level and outside a price container
-    // ("pricing", "prices", "dprice", or "offers", where standard vehicle
-    // data keeps the car's price), a field named just "price" is the figure
-    // of what holds it (a package, a warranty, an incentive, an accessory):
-    // labelled by that, as a named entry is, so it is never the car's plain
-    // "Price", read or not.
-    const holder = depth > 0 && !listed && !/^offers?$/.test(keyName(key)) ? name || spaced(key) : '';
+    // Inside a package, a warranty, an incentive or an accessory, a field
+    // named just "price" is the figure of what holds it: labelled by that,
+    // as a named entry is, and marked aside.
+    const holder = outside ? name || spaced(key) : '';
     for (const [k, v] of Object.entries(x)) {
       if (/image|photo|picture|feature|option|media|attribute/i.test(k)) continue;
-      if (k === ownField && typeof v !== 'object') continue;
-      const named = /price/i.test(k) || GUIDE_LABEL.test(labelWords(spaced(k)));
-      const n = named ? amount(v) : null;
-      const held = Boolean(holder) && keyName(k) === 'price';
+      if (k === ownField) continue;
+      const n = keyName(k);
+      const what = priceKeyKind(k);
+      if (what === 'about' || (what && isFlag(n, v))) continue;
+      const isFinal = FINAL_FIELD.test(n);
+      if (v && typeof v === 'object') {
+        if (what === 'field') visit(v, k, depth + 1, { markedFinal: isFinal, outside, fieldName: spaced(k).replace(/^Vehicle\s+/i, '') });
+        else visit(v, k, depth + 1, { outside: outside || !what });
+        continue;
+      }
+      if (!what && !GUIDE_LABEL.test(labelWords(spaced(k)))) continue;
+      const held = outside && n === 'price';
       const fieldLabel = held ? holder : spaced(k).replace(/^Vehicle\s+/i, '');
       const fieldKey = held ? `${key}.${kind}` : k;
-      const isFinal = keyName(k) === 'finalprice';
-      if (n !== null) out.push({ value: n, label: fieldLabel, key: fieldKey, final: isFinal });
-      else if (v && typeof v === 'object') visit(v, k, depth + 1, isFinal);
-      else if (named && /price$/.test(keyName(k)) && !FLAG.test(keyName(k)) && v !== undefined && typeof v !== 'boolean') unreadable({ value: null, text: textOf(v).slice(0, 60), label: fieldLabel, key: fieldKey, final: isFinal }, v, { typed: held });
+      const got = amount(v);
+      if (got !== null) out.push({ value: got, label: fieldLabel, key: fieldKey, final: isFinal, ...aside });
+      else if (what && v !== undefined) unreadable({ value: null, text: textOf(v).slice(0, 60), label: fieldLabel, key: fieldKey, final: isFinal, ...aside }, v, { typed: held });
     }
   };
   visit(record, '', 0);
@@ -563,7 +628,16 @@ export const labelIsNotThePrice = (label) => NOT_THE_PRICE.test(labelWords(label
  */
 export function choosePrices(entries, { dealer = '', label = null } = {}) {
   if (label && labelIsNotThePrice(label) && !isDealerPrice(label, dealer)) return NO_PRICE(quoteLabels([label]));
-  const all = (entries || []).map((e) => ({ ...e, kind: priceKind(e, dealer) }));
+  const every = (entries || []).map((e) => ({ ...e, kind: priceKind(e, dealer) }));
+  const all = every.filter((e) => !e.aside);
+  // A selling price the record keeps outside its price lists and fields
+  // (labeledPrices marks it aside: "Internet Price" in a details object, a
+  // final price in a nested vehicle object) is never taken. When no selling
+  // price of the record's own reads, it holds the car: the website may sell
+  // at it, so no retail, base or plain price is taken past it. A figure
+  // there that does not name a selling price (a package, a warranty, an
+  // add-on: "Dealer Installed Accessories", "Internet Bundle") is left out.
+  const elsewhere = every.filter((e) => e.aside && e.kind === 'selling' && (e.final || PRICE_NAME.test(labelWords(e.label))));
   // The entry the platform marks as the website's price (Dealer.com's
   // isFinalPrice) set aside as not the price: an offer ("Special Offer"), a
   // guide's value ("Market Value"), an MSRP. The website's price is that
@@ -597,6 +671,7 @@ export function choosePrices(entries, { dealer = '', label = null } = {}) {
     // an empty one beside the record's own label: that label is what a person sees
     return !first.text && !first.final && ownIsSelling ? ownUnread() : NO_PRICE(unreadablePrice(first));
   }
+  if (elsewhere.length && !sellingReads) return NO_PRICE(quoteLabels(elsewhere.map((e) => e.label || spaced(e.key))));
   const of = (kind) => kinds.filter((e) => e.kind === kind);
   const selling = of('selling');
   const plain = of('plain');
