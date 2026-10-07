@@ -53,15 +53,23 @@ const SEP = '[\\t\\v\\f\\r \\u00a0\\u00ad\\u1680\\u2000-\\u200d\\u2010-\\u2015\\
 // A line break, optionally followed by the comment or quote marker that
 // starts a wrapped comment or quote line (// # * -- > ; <!--).
 const WRAP = `(?:\\n${SEP}(?:(?://|/?\\*|#|--|>|;|<!--)${SEP})?)?`;
-// "lot" where a word starts: not straight after a letter ("pilot sync",
-// "ballotSync" and "slotsync" are other words; after a digit it starts one,
-// as in "2026lotsync.csv"), except a capital L after a small letter, which
-// starts the next word of a camelCase name ("initLotSync"), and "Lot" after a
-// capital, the next word after an acronym ("UILotSync"). In all capitals no
-// word start shows ("PILOTSYNC" is the pilot's sync), so an L inside a run of
-// capitals starts no word. The case is spelled out in the classes, so the
-// expressions carry no i flag, which would make that capital L match any l.
-const LOT = '(?:(?<![A-Za-z])[Ll][Oo][Tt]|(?<=[a-z])L[Oo][Tt]|(?<=[A-Z])Lot)';
+// "lot" where a word starts: not straight after a letter (after a digit it
+// starts one, as in "2026lotsync.csv"), a capital L after a small letter,
+// which starts the next word of a camelCase name ("initLotSync"), and "Lot"
+// after a capital, the next word after an acronym ("UILotSync"). In all
+// capitals no word start shows ("PILOTSYNC" is the pilot's sync), so an L
+// inside a run of capitals starts no word. A small "lot" glued after a small
+// letter, as in a domain, a hashtag or a file name ("getlotsync.com",
+// "#trylotsync"), counts too, unless it ends one of the English words in
+// LOT_WORDS ("the pilot sync", "ballotSync" and "slotsync" are other words).
+// So a few glued spellings still pass: the old name straight after one of
+// those words' stems ("getslotsync", read as "get slot sync"). The case is
+// spelled out in the classes, so the expressions carry no i flag, which would
+// make that capital L match any l.
+const LOT_WORDS = ['pilot', 'ballot', 'allot', 'slot', 'plot', 'blot', 'clot', 'zealot', 'harlot', 'shallot', 'ocelot', 'camelot', 'matelot', 'cachalot', 'polyglot'];
+const anyCase = (s) => s.replace(/[a-z]/g, (c) => `[${c.toUpperCase()}${c}]`);
+const STEMS = LOT_WORDS.map((w) => anyCase(w.slice(0, -3))).join('|');
+const LOT = `(?:(?<![A-Za-z])[Ll][Oo][Tt]|(?<=[a-z])L[Oo][Tt]|(?<=[A-Z])Lot|(?<=[a-z])(?<!${STEMS})l[Oo][Tt])`;
 const SYNC = '[Ss][Yy][Nn][Cc]';
 const OLD_NAME = new RegExp(`${LOT}${SEP}${WRAP}${SYNC}`, 'g');
 const OLD_NAME_ONE = new RegExp(`${LOT}${SEP}${SYNC}`);
@@ -432,6 +440,11 @@ test('the scan catches the old name in every spelling, in any file that is not e
     'the UILotSync panel',
     'Download 2026lotsync.csv',
     'v2lot-sync',
+    // glued after a small word, as in a domain, a hashtag or a file name
+    'Visit getlotsync.com',
+    '<a href="https://mylotsync.example/terms">terms</a>',
+    'Follow #trylotsync',
+    'thelotsync',
     // the spellings a careless edit is most likely to bring back
     'Lot-Sync',
     'lot_sync',
@@ -461,11 +474,14 @@ test('the scan catches the old name in every spelling, in any file that is not e
   // a file name
   assert.deepEqual(hitsIn('docs/lot-sync-guide.md', 'clean'), ['docs/lot-sync-guide.md: the file name carries the old name']);
   // and nothing else
-  // nor a longer word that ends in "lot" ("pilot", "ballot", "slot", "allot")
+  // nor a longer word that ends in "lot" ("pilot", "ballot", "slot", "allot"), however it is glued;
+  // the list holds whole words in small letters, so each stem is the word less its "lot"
+  for (const w of LOT_WORDS) assert.match(w, /^[a-z]+lot$/, `LOT_WORDS: ${w}`);
   // nor a plus that is not in a key=value pair after a ? or & (code's "&=" and "??=" included), an
   // escaped plus (a plus, not a space), an escaped mark that is no separator, or a broken UTF-8
   // escape (read as Latin-1, its letters are no separator either)
   for (const text of ['Lot Current', 'the lot is in sync with the website', 'a parking lot; sync later', 'lots synced', 'the **lot** is in `sync`', '<b>lot</b> and <i>sync</i>', 'the pilot sync runs nightly', 'ballotSync()', 'a slot-sync job', 'PILOTSYNC', 'allot_sync', 'PilotSync',
+    'autopilotsync', 'copilot-sync', 'timeslotsync', 'a subplot syncs', 'inkblot_sync', 'bloodclotSync', 'zealotsync', 'harlot sync', 'shallotsync', 'ocelotsync', 'Camelotsync', 'matelotsync', 'cachalotsync', 'polyglotSync',
     'const n = lot+sync;', '?tags=lot+%26+sync', 'x &=lot+sync;', 'a ??=lot+sync', '?q=lot%2Bsync', 'a lot%E2%80sync']) {
     assert.deepEqual(hitsIn('docs/help.md', text), [], text);
   }
