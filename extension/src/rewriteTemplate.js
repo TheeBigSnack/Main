@@ -137,10 +137,14 @@ export const PRICE_NOTE_UNLESS = Object.freeze({
 // whole ("A\u200Bbe" is "Abe"); one that changes the direction of the text
 // is refused. Its only digits are dollar amounts ("$499", "$1,299.00") and
 // percentages ("6%", "6.25 %"), and its only other marks are the
-// punctuation between words (NOTE_MARKS). Anything else (a name, a way to
-// get in touch, a payment route, "in person", a phone number, a year, an
-// emoji, a word with a look-alike letter from another alphabet) refuses the
-// note, and the reason quotes it (noteSteerWords). A note without those
+// punctuation between words (NOTE_MARKS). A word joined to the next by "."
+// or ":" with no space between is a web link even when its words are listed
+// ("dealer.to/sale", "cash.sale"), so it is refused whole, unless it is
+// written so in the dealership's own name or city ("J.D. Example Motors").
+// Anything else (a name, a way to get in touch, a payment route, "in
+// person", a phone number, a year, an emoji, a word with a look-alike
+// letter from another alphabet) refuses the note, and the reason quotes it
+// (noteSteerWords). A note without those
 // phrases is read as before. The list holds no pronoun but "our", no word
 // for a person or a role, no way to get in touch or to pay, no place but a
 // government fee place (FEE_PLACE's words, but "your") and no word for
@@ -678,6 +682,8 @@ const NOTE_AMOUNT = /(?<![\p{L}\p{N}])(?:\$\s?(?:\d{1,3}(?:,\d{3})+|\d{1,6})(?:\
 const NOTE_MARKS = /^[\s.,;:!?'"\u2018\u2019\u201c\u201d()[\]\-\u2010-\u2015/&*+]$/u;
 const NOTE_EDGE_MARKS = /^[.,;:!?'"\u2018\u2019\u201c\u201d()[\]\-\u2010-\u2015/&*+]+|[.,;:!?'"\u2018\u2019\u201c\u201d()[\]\-\u2010-\u2015/&*+]+$/gu;
 const NOTE_NUMBER = /\S*\p{N}\S*/gu;
+// a word joined to the next by "." or ":" with no space between, as in a web link ("dealer.to/sale", "cash.sale")
+const NOTE_LINK = /\S*[\p{L}\p{M}][.:]\p{L}\S*/gu;
 const NOTE_WORD = /\p{L}[\p{L}\p{M}]*(?:['\u2019\u2010-]\p{L}[\p{L}\p{M}]*)*/gu;
 // an invisible character: read as nothing, unless it changes the direction of the text
 const NOTE_HIDDEN = /\p{Default_Ignorable_Code_Point}/gu;
@@ -685,7 +691,8 @@ const NOTE_DIRECTION = /\p{Bidi_Control}/u;
 const lettersOf = (s) => String(s ?? '').normalize('NFKC').replace(NOTE_HIDDEN, '').toLowerCase().match(/\p{L}[\p{L}\p{M}]*/gu) || [];
 const blank = (s) => ' '.repeat(s.length);
 // What a price note says that is not price and fee wording, in the order it
-// says it, each once, quoted as it shows: a number that is not an amount or
+// says it, each once, quoted as it shows: a web link (NOTE_LINK) that is
+// not in the dealership's name or city, a number that is not an amount or
 // a percentage, a word (with its apostrophe or hyphen parts) one of whose
 // parts is neither on PRICE_NOTE_WORDS nor in the dealership's name or city,
 // any other mark, and, unquoted, "an invisible direction mark". [] when
@@ -702,6 +709,14 @@ function noteSteerWords(note, dealer) {
     }
     found.push({ at: at - gone, text: 'an invisible direction mark' });
     return ' ';
+  });
+  const ownSaid = [d.name, d.city].map((s) => String(s ?? '').normalize('NFKC').replace(NOTE_HIDDEN, '').toLowerCase()).join('\n');
+  rest = rest.replace(NOTE_LINK, (said, at) => {
+    const bare = said.replace(NOTE_EDGE_MARKS, '');
+    // the dealership's own name or city as set, dots and all ("J.D. Example Motors"), is read word by word
+    if (new RegExp(`(?<![\\p{L}\\p{N}])${escapeRe(bare.toLowerCase())}(?![\\p{L}\\p{N}])`, 'u').test(ownSaid)) return said;
+    found.push({ at, text: `"${bare}"` });
+    return blank(said);
   });
   rest = rest.replace(NOTE_AMOUNT, blank);
   rest = rest.replace(NOTE_NUMBER, (said, at) => {

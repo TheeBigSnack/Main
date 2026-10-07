@@ -189,6 +189,10 @@ const contexts = [
   { vehicle, dealer, priceNote: 'Tax and fees go to your state, not the dealer. Your price requires financing.', price: 28995 },
   { vehicle, dealer, priceNote: 'Tax, title and fees go to the state, not the dealer. Cash price paid to A\u200Bbe, A\u00ADna or S\uFEFFam from the \u202Eper\u202C; t\u00ADhe doc fee and the\u0336 tax.', price: 28995 },
   { vehicle, dealer, priceNote: 'Price excludes t\u00ADhe doc fee\u200B. Tax, title and fees go to the state, not the dealer.', price: 28995 },
+  // a word joined to the next by "." or ":" with no space (a web link of listed words), and the dealership's own name with its dots
+  { vehicle, dealer, priceNote: 'Tax, title and fees go to the state, not the dealer. Cash price at dealer.to/sale, cash.sale, price.is or Example-Motors.city; dealer:sale, dealer\u2024to, dealer.\u200Bto. Tags extra.Doc fee $499.', price: 28995 },
+  { vehicle, dealer: { name: 'J.D. Example Motors', city: 'Springfield' }, priceNote: 'All J.D. Example Motors prices plus tax and tags. Tax, title and fees go to the state, not the dealer.', price: 28995 },
+  { vehicle, dealer, priceNote: 'All J.D. Example Motors prices plus tax and tags. Tax, title and fees go to the state, not the dealer.', price: 28995 },
   { vehicle: { ...vehicle, features: [...vehicle.features, 'New Tires/Brakes', 'New Brake Pads & Rotors', 'Brake Assist', 'Battery Saver', 'Wipers - Rain Sensing', 'Rear Wiper/Washer'], descriptionRaw: 'Recent service: new tires, brakes and rotors, plus new shocks.' }, dealer, priceNote: '', price: 28995 },
   {},
 ];

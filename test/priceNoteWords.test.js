@@ -92,7 +92,7 @@ test('a "not the dealer" note with any word that is not price and fee wording is
     ['DM for the best price.', '"DM" and "best"'], ['Buy privately and save.', '"Buy", "privately" and "save"'], ['In person only.', '"person"'],
     ['Ask for the 2nd shift salesperson.', '"Ask", "2nd", "shift" and "salesperson"'],
     // an address, a link, a phone number written any way, a symbol
-    ['Email sales@carmail.com.', '"Email", "@", "carmail" and "com"'], ['See https://carmail.com/deals', '"See", "https", "carmail", "com" and "deals"'],
+    ['Email sales@carmail.com.', '"Email" and "sales@carmail.com"'], ['See https://carmail.com/deals', '"See" and "https://carmail.com/deals"'], ['Email sales @ carmail.', '"Email", "@" and "carmail"'],
     ['555-123-4567.', '"555-123-4567"'], ['Call (555) 123-4567.', '"Call", "555" and "123-4567"'], ['Call 5551234567.', '"Call" and "5551234567"'],
     ['５５５-１２３-４５６７.', '"555-123-4567"'], ['\u{1F4DE}', '"\u{1F4DE}"'],
     // a year or a number that is not a dollar amount or a percentage
@@ -210,6 +210,32 @@ test('dollar amounts and percentages pass; any other digits are refused', () => 
   ]) {
     assert.deepEqual(problems(withNote(`${FEES} ${extra}`)), [{ code: 'banned-phrase', text: REASON(out) }], extra);
   }
+});
+
+test('a word joined to the next by "." or ":" with no space between (a web link, even one made only of listed words) is refused, and quoted whole', () => {
+  for (const [extra, out] of [
+    ['Cash price at dealer.to/sale', '"dealer.to/sale"'], ['Prices: cash.sale', '"cash.sale"'], ['Our price is at price.is', '"price.is"'],
+    ['Price at Example-Motors.city.', '"Example-Motors.city"'], ['Cash price at (dealer.to).', '"dealer.to"'], ['Price at dealer:sale.', '"dealer:sale"'],
+    // a one-dot leader reads as "."; an invisible character between hides nothing
+    ['Price at dealer․to.', '"dealer.to"'], ['Price at dealer.​to.', '"dealer.to"'],
+    // a full stop with no space after it is refused the same way: put a space after it
+    ['Tax and tags extra.Doc fee $499.', '"extra.Doc"'],
+  ]) {
+    const note = `${FEES} ${extra}`;
+    assert.deepEqual(problems(withNote(note)), [{ code: 'banned-phrase', text: REASON(out) }], JSON.stringify(extra));
+    assert.equal(priceNoteWarning(note, EXAMPLE), REASON(out), JSON.stringify(extra));
+  }
+  // amounts, percentages and the dealership's own name as set, dots and all, still pass
+  const jd = { name: 'J.D. Example Motors', city: 'Springfield' };
+  for (const [note, dealer] of [
+    [`${FEES} A $1,299.00 dealer fee and 6.25 % sales tax apply.`, EXAMPLE], [`J.D. Example Motors prices plus tax. ${FEES}`, jd], [`All J.D. Example Motors prices plus tax and tags. ${FEES}`, jd],
+  ]) {
+    assert.deepEqual(problems(withNote(note, dealer)), [], note);
+    assert.equal(priceNoteWarning(note, dealer), '', note);
+  }
+  assert.equal(priceNoteWarning(`J.D. Example Motors prices plus tax. ${FEES}`, EXAMPLE), REASON('"J.D"'));
+  // a note without "not the dealer" is read as before
+  assert.deepEqual(problems(withNote('Tax and tags extra.Doc fee $499 at dealer.to/sale.')), []);
 });
 
 test('the sentence rule still comes first: "not the dealer" that does not end where the fees go is refused as before', () => {
