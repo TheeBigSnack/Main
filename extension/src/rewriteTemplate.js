@@ -704,9 +704,11 @@ const lettersOf = (s) => String(s ?? '').normalize('NFKC').replace(NOTE_HIDDEN, 
 const blank = (s) => ' '.repeat(s.length);
 // Whether a run of characters with no space in it is written as a word of
 // the dealership's own name or city as set (ownSaid, in lower case), not
-// inside a longer word or number.
+// inside a longer word or number. Each run is looked for once, and only
+// when the name or city has it at all.
 function ownWritten(bare, ownSaid, seen) {
   const key = bare.toLowerCase();
+  if (!ownSaid.includes(key)) return false;
   if (!seen.has(key)) seen.set(key, new RegExp(`(?<![\\p{L}\\p{N}])${escapeRe(key)}(?![\\p{L}\\p{N}])`, 'u').test(ownSaid));
   return seen.get(key);
 }

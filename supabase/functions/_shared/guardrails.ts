@@ -460,9 +460,11 @@ const NOTE_HIDDEN = /\p{Default_Ignorable_Code_Point}/gu;
 const NOTE_DIRECTION = /\p{Bidi_Control}/u;
 const lettersOf = (s: unknown): string[] => String(s ?? '').normalize('NFKC').replace(NOTE_HIDDEN, '').toLowerCase().match(/\p{L}[\p{L}\p{M}]*/gu) || [];
 const blank = (s: string): string => ' '.repeat(s.length);
-// Whether a run of characters with no space in it is written as a word of the dealership's own name or city as set.
+// Whether a run of characters with no space in it is written as a word of the dealership's own name or city as set
+// (each run looked for once, and only when the name or city has it at all).
 function ownWritten(bare: string, ownSaid: string, seen: Map<string, boolean>): boolean {
   const key = bare.toLowerCase();
+  if (!ownSaid.includes(key)) return false;
   if (!seen.has(key)) seen.set(key, new RegExp(`(?<![\\p{L}\\p{N}])${escapeRe(key)}(?![\\p{L}\\p{N}])`, 'u').test(ownSaid));
   return seen.get(key) as boolean;
 }

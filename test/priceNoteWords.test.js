@@ -278,6 +278,20 @@ test('a phone number written as several dollar amounts or percentages is refused
   }
 });
 
+test('a very long note is read in a moment as it is typed: distinct numbers, runs of amounts, web links and the dealership\'s own numbers', () => {
+  const route = { name: 'Route 19 Motors', city: 'Springfield' };
+  for (const [extra, refused] of [
+    [Array.from({ length: 20000 }, (_, i) => `${i}`).join(' '), true], ['$1 '.repeat(20000), true], ['$1 fee '.repeat(20000), false],
+    ['Route 19 '.repeat(20000), false], [Array.from({ length: 20000 }, (_, i) => `a${i}.b`).join(' '), true],
+  ]) {
+    const started = Date.now();
+    const warning = priceNoteWarning(`${FEES} ${extra}`, route);
+    const took = Date.now() - started;
+    assert.equal(Boolean(warning), refused, extra.slice(0, 20));
+    assert.ok(took < 2000, `${extra.slice(0, 20)}: ${took} ms`);
+  }
+});
+
 test('a word joined to the next by "." or ":" with no space between (a web link, even one made only of listed words) is refused, and quoted whole', () => {
   for (const [extra, out] of [
     ['Cash price at dealer.to/sale', '"dealer.to/sale"'], ['Prices: cash.sale', '"cash.sale"'], ['Our price is at price.is', '"price.is"'],
