@@ -151,10 +151,11 @@ export function withSeenBasis(posted, previous, current) {
 }
 
 // The website's price now for a posted listing, on the basis the listing
-// carries (postedBasis): what Update price and My listings compare with the
-// listed price, and what Updated records, so a switch of Price to post never
-// reads as a price change in either place. `seen`: the scans the basis of an
-// entry without one is read from, oldest first (by default this one).
+// carries (postedBasis). `seen`: the scans the basis of an entry without one
+// is read from, oldest first (by default this one). The extension itself
+// reads the same thing through postedBasis + basisPrice (diffScans, the side
+// panel's Update price) and listingLine (My listings); the tests use this one
+// to check that those agree.
 export function listingWebsitePrice(entry, now, basis = 'website', seen = [now]) {
   return basisPrice(now, postedBasis(entry, basis, seen));
 }

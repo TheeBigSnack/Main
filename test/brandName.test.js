@@ -47,13 +47,15 @@ const SELF = posix(relative(root, fileURLToPath(import.meta.url)));
 
 // Anything that can sit between "lot" and "sync" on one line: whitespace other
 // than a line break (the non-breaking space included), soft hyphens,
-// zero-width spaces and joiners, the direction marks (U+200E, U+200F), the
-// invisible operators (U+2061 to U+2064), the combining grapheme joiner
+// zero-width spaces and joiners, the direction marks (U+200E, U+200F and
+// the Arabic letter mark U+061C), the direction embeddings, overrides and
+// isolates (U+202A to U+202E, U+2066 to U+2069), the word joiner and the
+// invisible operators (U+2060 to U+2064), the combining grapheme joiner
 // (U+034F), the Mongolian vowel separator (U+180E), the Unicode hyphens and
 // dashes, the minus sign, underscore, dot and hyphen, and Markdown's emphasis
 // and code marks (* _ ~ and the backtick). A visible mark that is none of
 // these, such as a middle dot ("Lot·Sync"), is not read as a separator.
-const SEP = '[\\t\\v\\f\\r \\u00a0\\u00ad\\u034f\\u1680\\u180e\\u2000-\\u200f\\u2010-\\u2015\\u2028\\u2029\\u202f\\u205f\\u2060-\\u2064\\u2212\\u3000\\ufeff_.*`~\\-]*';
+const SEP = '[\\t\\v\\f\\r \\u00a0\\u00ad\\u034f\\u061c\\u1680\\u180e\\u2000-\\u200f\\u2010-\\u2015\\u2028\\u2029\\u202a-\\u202f\\u205f\\u2060-\\u2064\\u2066-\\u2069\\u2212\\u3000\\ufeff_.*`~\\-]*';
 // A line break, optionally followed by the comment or quote marker that
 // starts a wrapped comment or quote line (// # * -- > ; <!--).
 const WRAP = `(?:\\n${SEP}(?:(?://|/?\\*|#|--|>|;|<!--)${SEP})?)?`;
@@ -540,6 +542,11 @@ test('the scan catches the old name in every spelling, in any file that is not e
     'Lot\u2062Sync',
     'Lot\u2063Sync',
     'Lot\u2064Sync',
+    // the Arabic letter mark, a direction override and a direction isolate
+    'Lot\u061cSync',
+    'Lot\u202eSync',
+    'Lot\u2066Sync',
+    'Lot\u2069Sync',
     'Lot\u034fSync',
     'Lot\u180eSync',
     // more of HTML's names for spaces and marks, and a numeric one for a direction mark
