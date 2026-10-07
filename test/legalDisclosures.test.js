@@ -381,9 +381,12 @@ test('while the published texts say they apply to no one and the pilot agreement
   const pilot = read('PILOT.md');
   const before = pilot.slice(pilot.indexOf('### Before every pilot'), pilot.indexOf('## During the pilot'));
   assert.match(before, /^- \[ \] \*\*No sign-in while the texts are drafts\.\*\*[^\n]*Until the attorney answers `legal\/questions-for-attorney\.md` 10\.2, each salesperson clicks \*\*Skip for now\*\* at set-up's Account step and does not sign in/m, 'PILOT.md lets pilot salespeople sign in while the texts the pilot agreement applies say they apply to no one');
-  // the day-0 email walks each salesperson through set-up, so it says the same at the Account step
+  // the day-0 email walks each salesperson through set-up: the pilot zip it sends has no Account step, and a
+  // copy from the Web Store, which has one, is skipped past it and kept signed out
   const day0 = section(read('marketing/onboarding-emails.md'), '## Day 0: install and set-up (10 minutes)');
-  assert.match(day0, /your account \(click \*\*Skip for now\*\*: this pilot runs without Lot Current accounts, so don't sign in under Settings later either\)/, 'the day-0 email walks the salesperson through set-up without saying to skip the Account step');
+  assert.match(day0, /This pilot runs without Lot Current accounts: the zip I sent has no account step and no sign-in\./, 'the day-0 email does not say the pilot runs without accounts');
+  assert.match(day0, /If you installed from a Chrome Web Store link instead and set-up asks you to sign in, click \*\*Skip for now\*\*, and don't sign in under Settings later either\./, 'the day-0 email walks the salesperson through set-up without saying to skip the Account step');
+  assert.match(pilot, /gets the pilot zip, `lot-current-extension-<version>-pilot\.zip` \(`npm run pack -- --pilot`/, 'PILOT.md does not hand pilot salespeople the zip without sign-in');
   assert.match(pilot, /A second dealership runs on the Milestone 4 accounts[^\n]*once the Terms and Privacy Policy are final or the attorney has answered `legal\/questions-for-attorney\.md` 10\.2/, 'the second dealership\'s pilot runs on accounts before the texts are settled');
   const q10 = section(read('legal/questions-for-attorney.md'), '## 10. The Pilot Agreement\'s list of what is recorded');
   assert.match(q10, /^- \*\*10\.2\*\* Section 1 says the Terms of Service and the Privacy Policy apply during the Pilot, but the website publishes both as drafts marked "Not in effect/m, 'the attorney is not asked which text binds during a pilot signed before the texts are final');

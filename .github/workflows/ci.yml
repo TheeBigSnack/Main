@@ -41,6 +41,9 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e:${{ matrix.flow }}
+      # set-up on the pilot zip too: its copy has no Account step and no sign-in (docs/release.md)
+      - if: matrix.flow == 'wizard'
+        run: npm run pack -- --pilot && npm run test:e2e:wizard -- --zip "$(ls dist/*-pilot.zip)"
       - if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -111,6 +114,7 @@ jobs:
         with:
           node-version-file: .nvmrc
       - run: npm run pack
+      - run: npm run pack -- --pilot
       - run: npm run store-check
       - uses: actions/upload-artifact@v4
         with:

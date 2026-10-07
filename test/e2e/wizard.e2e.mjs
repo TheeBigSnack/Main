@@ -6,37 +6,62 @@
 // after the name too when src/accountConfig.js is filled in, skipped here) ->
 // Ready to post is right -> the salesperson marks a car posted -> the mock
 // site "sells" it -> the service worker rescans it by calling the inventory
-// service directly (no tab) -> the badge shows 1 and the popup's To do agrees.
+// service directly (no tab) -> the badge shows 1 and the popup's To do agrees
+// -> Settings shows sign-in only in a copy with accounts.
+//
+// --zip <file> runs the same flow on a packed zip's files instead of
+// extension/, so a release checks set-up on the pilot zip, which has no
+// Account step (docs/release.md step 3):
+//   npm run test:e2e:wizard -- --zip dist/lot-current-extension-<version>-pilot.zip
 //
 // The real facebook.com is never automated. Run: npm run test:e2e:wizard
 
 import { chromium } from 'playwright';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { startMockSite } from './mock-dealer-site.mjs';
 import { LEGAL, legalHosted } from '../../extension/src/legalLinks.js';
-import { wizardSteps } from '../../extension/src/wizardSteps.js';
-import { accountsConfigured } from '../../extension/src/accountConfig.js';
+import { wizardSteps, termsSummary } from '../../extension/src/wizardSteps.js';
+import { NOT_CONFIGURED } from '../../extension/src/accountFlow.js';
+import { readZip } from '../../scripts/store-check.mjs';
+import { loadAccountConfig } from '../../scripts/pilot-config.mjs';
 import { blockFacebook } from './noFacebook.mjs';
-
-// The step numbers come from the wizard's own list, so filling in the
-// account config (supabase/README.md step 6) adds the Account step here too.
-const STEPS = wizardSteps(accountsConfigured());
-if (!accountsConfigured()) assert.equal(STEPS.length, 10, 'the shipped wizard without accounts has ten steps');
-const stepOf = (name) => {
-  assert.ok(STEPS.includes(name), `no ${name} step`);
-  return new RegExp(`step ${STEPS.indexOf(name) + 1} of ${STEPS.length}(?!\\d)`); // the heading follows with no space
-};
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const shots = join(root, 'test/e2e/screenshots');
 mkdirSync(shots, { recursive: true });
 
+// The copy under test: extension/, or the files of the zip --zip names.
+const zipAt = process.argv.indexOf('--zip');
+const zipFile = zipAt > 0 ? process.argv[zipAt + 1] || '' : '';
+if (zipAt > 0 && !zipFile) throw new Error('--zip needs a file: npm run test:e2e:wizard -- --zip dist/lot-current-extension-<version>-pilot.zip');
 const extDir = mkdtempSync(join(tmpdir(), 'lot-current-ext-')); // a fresh folder, so flows can run side by side
-cpSync(join(root, 'extension'), extDir, { recursive: true });
+if (zipFile) {
+  for (const e of readZip(readFileSync(resolve(process.cwd(), zipFile)), true)) {
+    assert.ok(!e.name.split('/').includes('..') && !e.name.startsWith('/'), `${zipFile} holds ${e.name}, outside its own folder`);
+    mkdirSync(dirname(join(extDir, e.name)), { recursive: true });
+    writeFileSync(join(extDir, e.name), e.data);
+  }
+} else {
+  cpSync(join(root, 'extension'), extDir, { recursive: true });
+}
+
+// The step numbers come from the wizard's own list and the copy's own
+// account config: the committed one names the production project (an
+// Account step after the name), the pilot zip's is empty (no Account step).
+const { accountsConfigured } = await loadAccountConfig(readFileSync(join(extDir, 'src/accountConfig.js'), 'utf8'));
+const configured = accountsConfigured();
+if (zipFile && /-pilot\.zip$/.test(zipFile)) assert.equal(configured, false, 'the pilot zip offers no sign-in');
+const STEPS = wizardSteps(configured);
+if (!configured) assert.equal(STEPS.length, 10, 'the wizard without accounts has ten steps');
+const stepOf = (name) => {
+  assert.ok(STEPS.includes(name), `no ${name} step`);
+  return new RegExp(`step ${STEPS.indexOf(name) + 1} of ${STEPS.length}(?!\\d)`); // the heading follows with no space
+};
+console.log(`Set-up on ${zipFile || 'extension/'}: ${configured ? 'with' : 'without'} accounts, ${STEPS.length} steps.`);
 const manifest = JSON.parse(readFileSync(join(extDir, 'manifest.json'), 'utf8'));
 manifest.host_permissions = ['http://127.0.0.1/*'];
 manifest.permissions = manifest.permissions.filter((p) => p !== 'sidePanel'); // no real side panel in tests
@@ -99,6 +124,7 @@ try {
   await panel.waitForSelector('#wizNext');
   assert.match(await panel.textContent('#panel'), /Set up Lot Current for this dealership/);
   assert.match(await panel.textContent('#panel'), stepOf('welcome'));
+  assert.equal(/your dealership's account \(optional\)/.test(await panel.textContent('#panel')), configured, 'the welcome names the Account step only when there is one');
   await panel.click('#wizNext'); // -> read the website (runs by itself)
   await panel.waitForSelector('.banner.good', { timeout: 30000 });
   assert.match(await panel.textContent('.banner.good'), /6 used cars read from Ron Lewis Chrysler Dodge Jeep Ram Waynesburg\. 3 stores found\./);
@@ -116,6 +142,8 @@ try {
     assert.match(await panel.textContent('#panel'), stepOf('account'));
     assert.equal((await panel.textContent('#wizNext')).trim(), 'Skip for now', 'signing in is optional');
     await panel.click('#wizNext'); // -> address, signed out
+  } else {
+    assert.equal(await panel.$('#wizEmail'), null, 'no Account step in a copy without accounts');
   }
   await panel.waitForSelector('#wizZip');
   assert.match(await panel.textContent('#panel'), stepOf('address'));
@@ -153,6 +181,7 @@ try {
   await panel.click('#wizNext'); // -> permission
   assert.match(await panel.textContent('#panel'), /Automatic rescans/);
   assert.match(await panel.textContent('#panel'), stepOf('permission'));
+  assert.equal(/signed in to a Lot Current account/.test(await panel.textContent('#panel')), configured, 'rescans sync only in a copy with accounts');
   await panel.click('#wizGrant'); // the test copy already has this host; Chrome answers without a prompt
   await panel.waitForSelector('.banner.good');
   assert.match(await panel.textContent('.banner.good'), /Permission granted/);
@@ -172,6 +201,7 @@ try {
   await panel.waitForSelector(termsReady);
   assert.match(await panel.textContent('#panel'), stepOf('terms'));
   assert.match(await panel.textContent('#panel'), /Terms and privacy[\s\S]*never your Facebook login[\s\S]*not affiliated with Meta Platforms, Inc\./);
+  assert.equal(await panel.textContent('#termsSummary'), termsSummary(configured), 'the summary names the sync only in a copy with accounts');
   if (!hosted) {
     assert.match(await panel.textContent('#legalPending'), /being finalised/);
     assert.match(await panel.textContent('#legalPending'), /accept them in Settings/, 'says where the acceptance will happen');
@@ -235,6 +265,16 @@ try {
   await popup.click('button[data-action="takenDown"]');
   await popup.waitForFunction(() => document.querySelector('.tabs button[data-view="todo"] .count').textContent === '0');
   await popup.waitForFunction(async () => (await chrome.action.getBadgeText({})) === '');
+
+  // ---- 5. Settings, Account: a sign-in only in a copy with accounts ----
+  await popup.click('#settingsBtn');
+  await popup.waitForSelector('.settings');
+  if (configured) {
+    assert.ok(await popup.$('input[name="accountEmail"]'), 'Settings offers sign-in');
+  } else {
+    assert.equal((await popup.textContent('#accountStatus')).trim(), NOT_CONFIGURED, 'Settings shows one line about accounts');
+    assert.equal(await popup.$('input[name="accountEmail"]'), null, 'and no sign-in');
+  }
   await popup.close();
   await panel.close();
 

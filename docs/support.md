@@ -150,7 +150,7 @@ The weekly loop in `PILOT.md` applies to every dealer, not only the pilot:
 1. Reproduce the report against the mock Marketplace form (`test/e2e/mock-marketplace.mjs`) or the mock dealer site (`test/e2e/mock-dealer-site.mjs`), adding the behaviour to the mock when it is new.
 2. A Facebook field: fix it in `extension/facebook/formMap.js` (a name pattern) or `fillForm.js` (a behaviour), nowhere else. A listing page reading differently: `listingSigns.js`. A website record: the adapter under `extension/adapters/`.
 3. `npm test`, then the end-to-end flow that covers it.
-4. Commit, a line in `CHANGELOG.md`, `npm run pack`, and the new zip with the update steps from `docs/help.md` to every salesperson at every dealer on that version.
+4. Commit, a line in `CHANGELOG.md`, `npm run pack` (and `npm run pack -- --pilot` for anyone on the pilot zip), and the new zip of the kind each person has, with the update steps from `docs/help.md`, to every salesperson at every dealer on that version.
 
 ## What is never done in support
 
