@@ -29,6 +29,7 @@ import { NOT_CONFIGURED } from '../../extension/src/accountFlow.js';
 import { readZip } from '../../scripts/store-check.mjs';
 import { loadAccountConfig, pilotAccountConfig } from '../../scripts/pilot-config.mjs';
 import { blockFacebook } from './noFacebook.mjs';
+import { until } from './until.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const shots = join(root, 'test/e2e/screenshots');
@@ -298,7 +299,7 @@ try {
   await popup.screenshot({ path: join(shots, 'wizard-5-badge-todo.png') });
   await popup.click('button[data-action="takenDown"]');
   await popup.waitForFunction(() => document.querySelector('.tabs button[data-view="todo"] .count').textContent === '0');
-  await popup.waitForFunction(async () => (await chrome.action.getBadgeText({})) === '');
+  await until(popup, async () => (await chrome.action.getBadgeText({})) === '', undefined, { what: 'the badge cleared' });
 
   // ---- 5. Settings, Account: a sign-in only in a copy with accounts ----
   await popup.click('#settingsBtn');

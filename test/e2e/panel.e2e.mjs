@@ -23,6 +23,7 @@ import assert from 'node:assert/strict';
 import { startMockSite } from './mock-dealer-site.mjs';
 import { startMockMarketplace, INITIAL_LISTINGS } from './mock-marketplace.mjs';
 import { blockFacebook } from './noFacebook.mjs';
+import { until } from './until.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const shots = join(root, 'test/e2e/screenshots');
@@ -151,12 +152,14 @@ try {
   // saving the order, redrawing and putting the focus back on the menu land in
   // turns of their own, and the first row can be the same under the old order:
   // wait for all three rather than read any of them once
-  await panel.waitForFunction(
+  await until(
+    panel,
     async (o) =>
       document.activeElement?.id === 'panelSort' &&
       document.querySelector('#panelList .row .name')?.textContent.trim() === '2019 Ram 1500 Classic Express' &&
       (await chrome.storage.local.get(`settings:${o}`))[`settings:${o}`]?.readySort === 'name',
     origin,
+    { what: 'the order by name saved, drawn and focused' },
   );
 
   // another website in the registry: the choice appears, and a website with no scan says how to start
@@ -308,10 +311,10 @@ try {
   // the review's own save is waited for, so no save of this panel lands after
   // the other window's post is written (it would take that post over, since
   // the other window has no side panel open)
-  await panel.waitForFunction(async ({ k, vin }) => {
+  await until(panel, async ({ k, vin }) => {
     const f = (await chrome.storage.local.get(k))[k] || {};
     return f.vin === vin && f.step === 'review' && Boolean(f.description);
-  }, { k: flowKey, vin: first }, { timeout: 20000 });
+  }, { k: flowKey, vin: first }, { timeout: 20000, what: 'the review saved' });
   for (let last = null, i = 0; i < 20; i++) { // and any save after it: the post is left alone for a second
     const now = (await savedFlow()).saveId;
     if (now === last) break;
@@ -327,10 +330,10 @@ try {
   await panel.click('#photo-0');
   // the pick itself is waited for: the panel may save once on its own when it
   // brings the post back, which renews the save mark before the pick is saved
-  await panel.waitForFunction(async (k) => {
+  await until(panel, async (k) => {
     const f = (await chrome.storage.local.get(k))[k] || {};
     return Array.isArray(f.photoPick);
-  }, flowKey, { timeout: 10000 }).catch(() => {});
+  }, flowKey).catch(() => {});
   const picked = await savedFlow();
   assert.notEqual(picked.photoPick, null, 'the pick made here saved while the copy was the post as it stood');
   assert.notEqual(picked.saveId, theirs.saveId, 'saved as a new save of the post');
