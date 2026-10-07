@@ -305,14 +305,35 @@ try {
   });
   await panel.click(`button[data-post-vin="${first}"]`);
   await panel.waitForSelector('#openForm', { timeout: 20000 });
+  // the review's own save is waited for, so no save of this panel lands after
+  // the other window's post is written (it would take that post over, since
+  // the other window has no side panel open)
+  await panel.waitForFunction(async ({ k, vin }) => {
+    const f = (await chrome.storage.local.get(k))[k] || {};
+    return f.vin === vin && f.step === 'review' && Boolean(f.description);
+  }, { k: flowKey, vin: first }, { timeout: 20000 });
+  for (let last = null, i = 0; i < 20; i++) { // and any save after it: the post is left alone for a second
+    const now = (await savedFlow()).saveId;
+    if (now === last) break;
+    last = now;
+    await panel.waitForTimeout(1000);
+  }
   const theirs = { ...(await savedFlow()), windowId: otherWindow.windowId };
   assert.equal(theirs.vin, first);
   await setFlow(theirs);
   await panel.reload();
   await panel.waitForSelector('#description', { timeout: 20000 });
+  assert.equal((await savedFlow()).windowId, otherWindow.windowId, 'the panel here brought back the other window\'s post');
   await panel.click('#photo-0');
-  await panel.waitForFunction(async ({ k, saveId }) => ((await chrome.storage.local.get(k))[k] || {}).saveId !== saveId, { k: flowKey, saveId: theirs.saveId });
-  assert.notEqual((await savedFlow()).photoPick, null, 'the pick made here saved while the copy was the post as it stood');
+  // the pick itself is waited for: the panel may save once on its own when it
+  // brings the post back, which renews the save mark before the pick is saved
+  await panel.waitForFunction(async (k) => {
+    const f = (await chrome.storage.local.get(k))[k] || {};
+    return Array.isArray(f.photoPick);
+  }, flowKey, { timeout: 10000 }).catch(() => {});
+  const picked = await savedFlow();
+  assert.notEqual(picked.photoPick, null, 'the pick made here saved while the copy was the post as it stood');
+  assert.notEqual(picked.saveId, theirs.saveId, 'saved as a new save of the post');
   const newer = { ...theirs, step: 'publish', fbTabId: otherWindow.tabId, saveId: 'saved-in-the-other-window' };
   await setFlow(newer);
   const typed = 'Typed in this window, with my own closing line: ask for me by name.';
