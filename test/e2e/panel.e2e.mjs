@@ -7,8 +7,9 @@
 // filled, the test clicking Publish as the salesperson would (the extension
 // never does), Post another car, Rescan the website from the panel, "Post the
 // next N" as a queue, a copy of a post another window's side panel changed
-// since (the save refused here is said, and the text typed here kept to
-// copy), and the daily cap taking the Post buttons away.
+// since (the save refused here is said, the text typed here kept to copy,
+// and Back to the list leaves that window's post), and the daily cap taking
+// the Post buttons away.
 //
 // The real facebook.com is never automated. Screenshots go to test/e2e/screenshots/.
 // Run: npm run test:e2e:panel   (needs Playwright + Chromium installed)
@@ -329,11 +330,22 @@ try {
   assert.deepEqual(await savedFlow(), newer, 'the other window\'s post is not written over');
   assert.equal(context.pages().filter((p) => p.url().startsWith(marketOrigin)).length, 0, 'no form opened');
   await panel.screenshot({ path: join(shots, 'panel-4b-not-saved.png'), fullPage: true });
-  // the other window's post is finished there and its window closed; Back to the list here
+  // the other window closes with the car's form at Publish (it may have
+  // posted from there); Back to the list here leaves that post, which this
+  // panel never held, and a side panel opened next brings it back and asks
+  // whether it posted: here it didn't, and the post is stopped
   await panel.evaluate(async (id) => chrome.windows.remove(id), otherWindow.windowId);
   await panel.click('#back');
   await panel.waitForSelector('#panelReady');
-  assert.equal(await savedFlow(), null, 'with no window holding it, the leftover post goes');
+  assert.deepEqual(await savedFlow(), newer, 'Back to the list here leaves the other window\'s post');
+  await panel.reload();
+  await panel.waitForSelector('#notPosted', { timeout: 20000 });
+  assert.match(await panel.textContent('#detected'), /The Facebook tab was closed\. Did it post\?/);
+  await panel.click('#notPosted');
+  await panel.waitForSelector('#stopPost');
+  await panel.click('#stopPost');
+  await panel.waitForSelector('#panelReady');
+  assert.equal(await savedFlow(), null, 'stopped');
 
   // ---- 9. At the daily cap the list keeps its cars and loses its Post buttons ----
   await panel.evaluate(async (o) => {

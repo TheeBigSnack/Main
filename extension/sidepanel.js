@@ -283,14 +283,20 @@ async function dropSavedFlow(origin) {
 // Resolves the new count (flowRun): the number of the post started next.
 // keepSaved: the saved post is left as it is (it is another panel's now).
 // Without it, the saved post is removed unless another window's side panel
-// has it under way (dropSavedFlow).
+// has it under way (dropSavedFlow). A panel showing a refused save
+// (notSaved) holds no post: it left its copy, and the saved post is the
+// other window's, even once that window's side panel is closed (a panel
+// reopened there brings it back), so nothing that clears this panel then
+// (Back to the list, set-up starting here) removes it. A post started here
+// takes the website over only as saveFlow lets any post.
 async function clearFlow({ keepSaved = false } = {}) {
   const run = ++flowRun;
   if (watcher) watcher.cancel();
   watcher = null;
   const { vin, origin } = state;
+  const holdsNone = state.step === 'notSaved';
   if (vin) await pilotNote((p) => endPost(p, vin, 'abandoned')); // only an attempt still open changes
-  if (origin && !keepSaved) await dropSavedFlow(origin);
+  if (origin && !keepSaved && !holdsNone) await dropSavedFlow(origin);
   if (run !== flowRun) return run; // cleared again meanwhile (another post started): that clear empties the state, and this one must not empty the new post's
   Object.assign(state, {
     vin: null, dealerTabId: null, windowId: null, vehicle: null, price: null, priceBasis: null, readAt: null, opening: false, description: '', descriptionSource: 'template', note: '', guardrails: null,

@@ -3139,11 +3139,11 @@ function twoPanels({ panelsOpen = [1, 2], fillSaves = false, pilot = false } = {
       origin: ORIGIN, posted: {}, vin: null, step: 'idle', map: FORM_MAP, snapshotVehicles: { AAA: { name: NAMES.AAA }, BBB: { name: NAMES.BBB } },
       settings: { rulesReadAt: '2026-09-30T12:00:00.000Z', salesperson: { name: 'Pat' }, dealer: DEALER, defaults: {} },
     };
-    const names = ['startFlow', 'clearFlow', 'saveFlow', 'dropSavedFlow', 'liveElsewhere', 'postElsewhere', 'elsewhereText', 'giveWay', 'openForm', 'resumeFlow', 'notSavedHere'].filter((n) => new RegExp(`(async )?function ${n}\\(`).test(src));
+    const names = ['startFlow', 'clearFlow', 'saveFlow', 'dropSavedFlow', 'liveElsewhere', 'postElsewhere', 'elsewhereText', 'giveWay', 'openForm', 'resumeFlow', 'notSavedHere', 'onClick'].filter((n) => new RegExp(`(async )?function ${n}\\(`).test(src));
     let fns = null;
     fns = compileMany(names, {
       state, panelWindowId: windowId, flowRun: 0, watcher: null, LIVE_STEPS, FORM_STEPS, FLOW_FIELDS, FORM_MAP, updateKey, withLock, // one lock for both panels, as Chrome's Web Locks are
-      notSavedReport, $: (id) => els[id] || null, inputTimer: null,
+      notSavedReport, $: (id) => els[id] || null, inputTimer: null, promptOpen: false,
       siteKeys: (o) => ({ flow: 'postFlow:' + o }),
       GLOBAL_KEYS: { postRequest: 'postRequest', lastPostOrigin: 'lastPostOrigin', devOverrides: 'devOverrides' },
       chrome: {
@@ -3168,7 +3168,9 @@ function twoPanels({ panelsOpen = [1, 2], fillSaves = false, pilot = false } = {
       buildListingData: () => ({ fields: {} }), pickedPhotos: () => [], applyOverrides: (m) => m, waitForTabLoad: async () => {}, sleep: async () => {},
       runFill: async () => { state.step = 'publish'; if (fillSaves) await fns.saveFlow(); }, runProbe: never('runProbe'),
     }, /^const flowStorage = /m.test(src) ? ['flowStorage'] : []);
-    return { state, calls, fns, reads, els };
+    // a click on one of the panel's buttons, as onClick runs it
+    const click = (id) => fns.onClick({ target: { closest: () => ({ id, dataset: {} }) } });
+    return { state, calls, fns, reads, els, click };
   };
   const until = async (ok) => { for (let i = 0; i < 200 && !ok(); i++) await later(); assert.ok(ok(), 'the panels got there'); };
   const A = panel(1);
@@ -3415,9 +3417,57 @@ test('a save refused in a second window\'s side panel is said there, with the te
   const attempts = (t.record.pilot.posts || []).map((x) => ({ vin: x.vin, outcome: x.outcome || 'open', formOpened: Boolean(x.formOpenedAt) }));
   assert.deepEqual(attempts, [{ vin: 'AAA', outcome: 'open', formOpened: true }], 'the attempt stays open: window 1 carries it on');
   // Back to the list in window 2: the post stays window 1's
-  await B.fns.clearFlow();
+  await B.click('back');
   assert.deepEqual([B.state.step, B.state.notSaved], ['idle', null]);
   assert.deepEqual(t.store[key], formPost);
+});
+
+// The same refused save in window 2, of a copy window 1's side panel has
+// at review (text typed there since), and then window 1's side panel closes,
+// with no Marketplace form open there. The post is window 1's still: a side
+// panel reopened in window 1 brings it back, with the text typed there.
+// Window 2's panel holds no post once it said the save was refused, so
+// nothing it does from there removes that post: not Back to the list, nor
+// anything else that clears it (set-up starting there, say). Run with
+// sidepanel.js's own onClick, clearFlow, saveFlow, notSavedHere and the
+// window checks.
+test('Back to the list after a refused save in a second window leaves the other window\'s post, with that window\'s side panel closed', async () => {
+  const open = [1, 2];
+  const t = twoPanels({ panelsOpen: open });
+  const { A, B } = t;
+  const key = 'postFlow:' + t.ORIGIN;
+  const a = A.fns.startFlow({ origin: t.ORIGIN, vin: 'AAA', dealerTabId: null, windowId: 1, queue: false });
+  await t.until(() => A.reads.length === 1);
+  await t.answer(A);
+  await a;
+  await B.fns.resumeFlow(t.ORIGIN, JSON.parse(JSON.stringify(t.store[key])));
+  A.state.description = 'typed in window 1';
+  assert.equal(await A.fns.saveFlow(), null);
+  const theirs = JSON.parse(JSON.stringify(t.store[key]));
+  assert.equal(theirs.description, 'typed in window 1');
+  B.state.description = 'typed in window 2';
+  B.els.description = { value: 'typed in window 2' };
+  assert.deepEqual(await B.fns.saveFlow(), { where: 'review', vin: 'AAA', name: '2020 Make Model A' });
+  assert.equal(B.state.step, 'notSaved');
+  // window 1's side panel closes, its post at review with no form open
+  open.splice(0, open.length, 2);
+  await B.click('back');
+  assert.deepEqual([B.state.step, B.state.notSaved], ['idle', null], 'Back goes to the list');
+  assert.deepEqual(t.store[key], theirs, 'window 1\'s post is still there for its side panel to bring back');
+  // what else clears window 2's panel from that screen (set-up starting there) leaves it too
+  B.state.description = 'typed in window 2 again';
+  B.els.description = { value: 'typed in window 2 again' };
+  open.splice(0, open.length, 1, 2);
+  await B.fns.resumeFlow(t.ORIGIN, JSON.parse(JSON.stringify(t.store[key])));
+  A.state.description = 'typed in window 1, more';
+  assert.equal(await A.fns.saveFlow(), null);
+  const later = JSON.parse(JSON.stringify(t.store[key]));
+  B.els.description = { value: 'typed in window 2, more' };
+  await B.fns.saveFlow();
+  assert.equal(B.state.step, 'notSaved');
+  open.splice(0, open.length, 2);
+  await B.fns.clearFlow();
+  assert.deepEqual(t.store[key], later, 'a clear from that screen leaves window 1\'s post');
 });
 
 // Continue in the side panel (a post request for the car under way) in a
