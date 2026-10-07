@@ -21,7 +21,7 @@ import { updateKey, withLock } from '../extension/src/storage.js';
 import { runGuardrails, ruleProblems, buildTemplateDescription } from '../extension/src/rewriteTemplate.js';
 import { buildListingData, listingChanges } from '../extension/src/listingData.js';
 import { recheck } from '../extension/src/vehicleDetails.js';
-import { basisPrice, snapshotEntry, listingWebsitePrice, pendingText, scanCar } from '../extension/src/rescan.js';
+import { basisPrice, snapshotEntry, postedBasis, pendingText, scanCar } from '../extension/src/rescan.js';
 import { assessVehicle, DECISION } from '../extension/src/classify.js';
 import { draftRecord, draftPill, draftScanCar } from '../extension/src/drafts.js';
 import { shortLocation, storeNames } from '../extension/src/normalize.js';
@@ -3452,18 +3452,18 @@ test('a price update reads the car on the website the way a post does, on the li
     const asked = [];
     const state = { siteInfo: { adapter: 'dealerInspire', service: {} }, snapshotVehicles: { [car.vin]: { url: 'https://www.example-motors.test/car/1', price: car.price, ...scanned } }, snapshotTakenAt: takenAt, posted: { [car.vin]: entry }, settings: { basis, myStores } };
     const upkeepPriceNow = compile('upkeepPriceNow', {
-      state, recheck, listingWebsitePrice, pendingText, scanCar, DECISION, hostOf: (o) => new URL(o).host,
+      state, recheck, basisPrice, postedBasis, pendingText, scanCar, DECISION, hostOf: (o) => new URL(o).host,
       readCarForPost: async (req) => { asked.push(req); return typeof read === 'function' ? read(req) : read; },
     });
     const r = await upkeepPriceNow({ origin: ORIGIN, vin: car.vin.toLowerCase(), kind: 'price', price: 27000, dealerTabId: 4 });
     return { r, asked };
   };
   const ok = await run({ read: { ok: true, vehicle: { ...v } } });
-  assert.deepEqual(ok.r, { ok: true, price: 27163 });
+  assert.deepEqual(ok.r, { ok: true, price: 27163, basis: 'website' }, 'with the basis the price is on, which the update records on a listing that carries none');
   assert.deepEqual(ok.asked, [{ tabId: 4, origin: ORIGIN, info: { adapter: 'dealerInspire', service: {} }, vin: v.vin, url: 'https://www.example-motors.test/car/1' }], 'through the To do item\'s dealer tab, as a post reads');
   // a listing posted on the before-fees basis: the website's before-fees price, whatever Settings says now
-  assert.deepEqual((await run({ read: { ok: true, vehicle: { ...v } }, entry: { price: 26900, basis: 'beforeFees' } })).r, { ok: true, price: 26673 });
-  assert.deepEqual((await run({ read: { ok: true, vehicle: { ...v } }, entry: { price: 26900, basis: 'website' }, basis: 'beforeFees' })).r, { ok: true, price: 27163 });
+  assert.deepEqual((await run({ read: { ok: true, vehicle: { ...v } }, entry: { price: 26900, basis: 'beforeFees' } })).r, { ok: true, price: 26673, basis: 'beforeFees' });
+  assert.deepEqual((await run({ read: { ok: true, vehicle: { ...v } }, entry: { price: 26900, basis: 'website' }, basis: 'beforeFees' })).r, { ok: true, price: 27163, basis: 'website' });
   // A listing with no basis recorded (brought by a sync) reads it off the last
   // scan only when that scan was taken once the listing had its price
   // (rescan.js scanCar), as the To do item's price was read (diffScans). The
@@ -3472,8 +3472,8 @@ test('a price update reads the car on the website the way a post does, on the li
   // price, $26,673, on Jan 3rd. The website now shows $26,500 / $26,010.
   const lastScan = { scanned: { price: 27163, priceBeforeFees: 26673 }, takenAt: '2026-01-02T12:00:00.000Z' };
   const moved = { ok: true, vehicle: { ...v, price: 26500, priceBeforeFees: 26010 } };
-  assert.deepEqual((await run({ read: moved, entry: { price: 26673, postedAt: '2026-01-03T12:00:00.000Z' }, ...lastScan })).r, { ok: true, price: 26500 }, 'a scan from before the post never makes its second price the listing\'s basis');
-  assert.deepEqual((await run({ read: moved, entry: { price: 26673, postedAt: '2026-01-01T12:00:00.000Z' }, ...lastScan })).r, { ok: true, price: 26010 }, 'posted before that scan: the scan shows the listing at its second price');
+  assert.deepEqual((await run({ read: moved, entry: { price: 26673, postedAt: '2026-01-03T12:00:00.000Z' }, ...lastScan })).r, { ok: true, price: 26500, basis: 'website' }, 'a scan from before the post never makes its second price the listing\'s basis');
+  assert.deepEqual((await run({ read: moved, entry: { price: 26673, postedAt: '2026-01-01T12:00:00.000Z' }, ...lastScan })).r, { ok: true, price: 26010, basis: 'beforeFees' }, 'posted before that scan: the scan shows the listing at its second price');
   // stops, each saying why
   const stops = [
     [{ ok: false, needsPermission: true, origins: [ORIGIN + '/*'], message: 'To re-check this car...' }, /^Lot Current reads this car on www\.example-motors\.test again before it fills a new price, and Chrome hasn't let it read www\.example-motors\.test from here\. Open www\.example-motors\.test's used inventory page, then click Open & update price in the popup there\.$/],
@@ -3500,9 +3500,9 @@ test('a price update reads the car on the website the way a post does, on the li
   // held back from a new post only: the listing is up, so its price follows the website
   const elsewhere = await run({ read: { ok: true, vehicle: { ...v, location: 'Another Store', photoCount: 0, inTransit: true } }, myStores: ['Our Store'] });
   assert.equal(recheck({ ...v, location: 'Another Store', photoCount: 0, inTransit: true }, { myStores: ['Our Store'] }).ok, false, 'a post would stop here');
-  assert.deepEqual(elsewhere.r, { ok: true, price: 27163 });
+  assert.deepEqual(elsewhere.r, { ok: true, price: 27163, basis: 'website' });
   // no price on the website now: upkeep.js says so (priceStop)
-  assert.deepEqual((await run({ read: { ok: true, vehicle: { ...v, price: null, priceLabel: 'Call for price' } } })).r, { ok: true, price: null });
+  assert.deepEqual((await run({ read: { ok: true, vehicle: { ...v, price: null, priceLabel: 'Call for price' } } })).r, { ok: true, price: null, basis: 'website' });
 });
 
 test("the form's tab counts as loaded once Chrome says it is, even when Chrome's 'complete' update never comes", async () => {

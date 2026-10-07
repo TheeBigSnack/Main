@@ -11,7 +11,7 @@
 //
 // This file never clicks anything on the Facebook page.
 
-import { markPosted, basisPrice, listingWebsitePrice, pendingText, scanCar } from './src/rescan.js';
+import { markPosted, basisPrice, postedBasis, pendingText, scanCar } from './src/rescan.js';
 import { DECISION } from './src/classify.js';
 import { draftRecord, draftPill, draftScanCar } from './src/drafts.js';
 import { shortLocation, storeNames } from './src/normalize.js';
@@ -2118,11 +2118,12 @@ function renderList() {
 // need a look. Another store, no photos or not yet on the lot hold back a
 // new post but not this: the listing is up, and its price should match the
 // website. The price is the website's now, on the basis the listing was
-// posted at (listingWebsitePrice), as the To do item's was: a listing with
+// posted at (rescan.js postedBasis), as the To do item's was: a listing with
 // no basis recorded reads it off the last scan only when that scan was taken
 // once the listing had its price (rescan.js scanCar), then off this read.
-// Resolves { ok, price } or { ok: false, message }; upkeep.js fills nothing
-// on a stop or when there is no price.
+// Resolves { ok, price, basis } or { ok: false, message }; upkeep.js fills
+// nothing on a stop or when there is no price, and records the basis with
+// the price on a listing that carries none (rescan.js markPriceUpdated).
 async function upkeepPriceNow(req) {
   const vin = String(req.vin || '').toUpperCase();
   const host = hostOf(req.origin);
@@ -2141,7 +2142,8 @@ async function upkeepPriceNow(req) {
   if (held) return { ok: false, message: `${held}, so its price was not updated. Rescan the website: To do then lists it to take down.` };
   const check = recheck(fresh.vehicle, state.settings);
   if (!check.ok && check.assessment.decision !== DECISION.NOT_READY) return { ok: false, message: `${check.message} Its price was not updated: rescan the website to see what to do with this listing.` };
-  return { ok: true, price: listingWebsitePrice(state.posted[vin], fresh.vehicle, state.settings.basis, [scanCar(state.posted[vin], { takenAt: state.snapshotTakenAt, vehicles: state.snapshotVehicles }, vin), fresh.vehicle]) };
+  const basis = postedBasis(state.posted[vin], state.settings.basis, [scanCar(state.posted[vin], { takenAt: state.snapshotTakenAt, vehicles: state.snapshotVehicles }, vin), fresh.vehicle]);
+  return { ok: true, price: basisPrice(fresh.vehicle, basis), basis };
 }
 
 const upkeepCtx = {
