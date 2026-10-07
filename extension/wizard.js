@@ -26,7 +26,7 @@ import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { signInStart, signInFinish, currentSession, rewriteEndpointFor } from './src/accountFlow.js';
 import { loadSession, redeemInvite } from './src/account.js';
 import { wizardSteps, accountStepModel, joinedFrom, rewriteAtAccount, termsSummary, TERMS_PENDING, addressHint } from './src/wizardSteps.js';
-import { settingNumberWarning, settingNumberNotice } from './src/rewriteTemplate.js';
+import { settingNumberWarning, settingNumberNotice, priceNoteWarning, priceNoteNotice } from './src/rewriteTemplate.js';
 
 const steps = () => wizardSteps(accountsConfigured());
 // The Account step's own state: what was typed and answered, never a token.
@@ -97,6 +97,17 @@ function youWarnings(typed) {
 }
 const youWarningHtml = (list) => list.map((text) => `<div class="banner warn">${esc(text)}</div>`).join('');
 const youWarningRegion = (typed) => `<div id="wizYouWarn">${youWarningHtml(youWarnings(typed))}</div><div id="wizYouSay" class="sr" aria-live="polite">${esc(youWarnings(typed).join(' '))}</div>`;
+// A price note that says "not the dealer" may say only where the fees go and
+// what the price includes (src/rewriteTemplate.js priceNoteWarning): the
+// price step says so under the note, read with the dealership's name and
+// city as set-up holds them, as it is typed; Next still keeps the note.
+// Its live region (wizPriceNoteSay) leaves out the quoted words, so it is
+// spoken once, when the warning comes or goes. Settings says the same (popup.js).
+const noteWarningHtml = (note) => {
+  const text = priceNoteWarning(note, dealerNow());
+  return text ? `<div class="banner warn">${esc(text)}</div>` : '';
+};
+const noteWarningRegion = (note) => `<div id="wizPriceNoteWarn">${noteWarningHtml(note)}</div><div id="wizPriceNoteSay" class="sr" aria-live="polite">${esc(priceNoteNotice(note, dealerNow()))}</div>`;
 const money = (n) => (typeof n === 'number' && Number.isFinite(n) ? '$' + Math.round(n).toLocaleString('en-US') : '—');
 const key = (origin) => siteKeys(origin).wizard; // the wizard's own persisted state
 // The Price step's model from the last read (showsLower, gap, example); empty for a read saved before the step existed.
@@ -361,7 +372,8 @@ export function wizardHtml() {
       return `${progress}<h3>The price to post</h3>
         ${choice}
         ${gapNote}
-        <label class="block">Price note in every description <input type="text" id="wizPriceNote" value="${esc(s.priceNote)}" placeholder="${esc(suggested || NOTE_PLACEHOLDER)}" /></label>
+        <label class="block">Price note in every description <input type="text" id="wizPriceNote" value="${esc(s.priceNote)}" placeholder="${esc(suggested || NOTE_PLACEHOLDER)}" aria-describedby="wizPriceNoteWarn wizPriceHint" /></label>
+        ${noteWarningRegion(s.priceNote)}
         <p class="hint" id="wizPriceHint">${esc(priceHint(suggested))}</p>
         ${nav()}`;
     }
@@ -631,6 +643,14 @@ export function handleWizardInput(target) {
     if (shown) shown.innerHTML = youWarningHtml(list);
     const say = document.getElementById('wizYouSay');
     if (say && say.textContent !== list.join(' ')) say.textContent = list.join(' ');
+  }
+  if (target.id === 'wizPriceNote') {
+    const shown = document.getElementById('wizPriceNoteWarn');
+    if (shown) shown.innerHTML = noteWarningHtml(target.value);
+    const say = document.getElementById('wizPriceNoteSay');
+    const notice = priceNoteNotice(target.value, dealerNow());
+    if (say && say.textContent !== notice) say.textContent = notice;
+    return;
   }
   if (!Object.hasOwn(WARNED_FIELDS, target.id)) return;
   const shown = document.getElementById(`${target.id}Warn`);
