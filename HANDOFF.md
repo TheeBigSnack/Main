@@ -737,8 +737,8 @@ CHANGELOG "Unreleased" ends with the full list. In short:
 1. Run verify first.
 2. Apply 0009 to 0016 with the database step, in number order, before the functions step. The functions step deploys nothing while production still has a migration to apply, and the new sync function writes the columns 0015 and 0016 add.
 3. Redeploy all four functions, then run verify again. Until the rewrite function is redeployed, it checks drafts by the old description rules.
-4. Add `SUPABASE_PROJECT_REF` on `manager-view` and `MANAGER_URL` on `production`.
-5. At Stripe step 5: `ALLOWED_ORIGINS`, `billing: true` and the Dashboard's "Cancel the subscription".
+4. Add `SUPABASE_PROJECT_REF` on `manager-view`. Leave `MANAGER_URL` off `production` until Stripe step 5: before `ALLOWED_ORIGINS` names the manager view, it turns every Supabase workflow run red (`docs/production-setup.md` step 6, item 7).
+5. At Stripe step 5: `ALLOWED_ORIGINS`, `MANAGER_URL` on `production`, `billing: true` and the Dashboard's "Cancel the subscription".
 6. Leave CAPTCHA off.
 7. Optional: limit `production` to the default branch and add a required reviewer.
 8. Copy the legal texts into the attorney packet again if they change before it is sent (it was rebuilt from this branch on 2026-10-06).
