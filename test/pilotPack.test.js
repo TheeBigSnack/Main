@@ -1,10 +1,10 @@
 // The pilot zip (npm run pack -- --pilot): the normal zip's files, byte for
 // byte, except src/accountConfig.js, whose url, anonKey and functionsUrl are
 // empty so accountsConfigured() is false: no Account step in set-up, no
-// sign-in under Settings, no sync, no request to the account server. The
-// committed file is never written; the pack builds that one entry in memory,
-// loads it as a module and refuses when it does not give accounts off or
-// when the committed file no longer has the shape the rewrite expects.
+// sign-in under Settings, no sync with an account. The committed file is
+// never written; the pack builds that one entry in memory, loads it as a
+// module and refuses when it does not give accounts off or when the
+// committed file no longer has the shape the rewrite expects.
 // Without --pilot the pack is what it was: same name, same bytes.
 //
 // The packs run on a copy of the repository's extension/, scripts/ and
@@ -228,6 +228,11 @@ test('the rewrite is a pure function: the values emptied, the comments kept, one
   const after = out.split('\n');
   assert.equal(after[0], PILOT_LINE, 'the added line comes first');
   assert.match(PILOT_LINE, /^\/\/ .*packed for a pilot without accounts/i);
+  // it claims only what the empty config does: no sign-in, no sync. The
+  // rewrite service is still asked at the address the synced profile holds
+  // when the writer is on, whatever server that is.
+  assert.match(PILOT_LINE, /offers no sign-in and syncs nothing/);
+  assert.doesNotMatch(PILOT_LINE, /account server|no request|sends nothing|contacts/i);
   assert.equal(after.length, before.length + 1, 'one line added, none removed');
   const changed = before.map((l, i) => [l, after[i + 1]]).filter(([a, b]) => a !== b);
   assert.ok(changed.length <= 3, 'at most the three value lines change');

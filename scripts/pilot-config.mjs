@@ -6,8 +6,9 @@
 // While the pilot runs signed out (PILOT.md, "No sign-in while the texts are
 // drafts") testers get a zip whose copy of that file has every value empty:
 // accountsConfigured() is then false, so set-up has no Account step,
-// Settings shows one line instead of a sign-in, nothing syncs and nothing is
-// sent to the account server.
+// Settings shows one line instead of a sign-in and nothing syncs. (The
+// rewrite service, when the writer is on in Settings, is still asked at the
+// address the synced profile holds, as in any build.)
 //
 // pilotAccountConfig() is a text edit of that one file, built in memory: the
 // committed file is never written. It knows exactly one shape (the frozen
@@ -25,7 +26,7 @@
 export const PILOT_CONFIG_PATH = 'src/accountConfig.js';
 
 // The line the pilot copy gets at its top, above the committed comments.
-export const PILOT_LINE = '// Packed for a pilot without accounts (npm run pack -- --pilot): every value below is empty, so this copy offers no sign-in, syncs nothing and contacts no account server.';
+export const PILOT_LINE = '// Packed for a pilot without accounts (npm run pack -- --pilot): every value below is empty, so this copy offers no sign-in and syncs nothing.';
 
 const FIELDS = Object.freeze(['url', 'anonKey', 'functionsUrl']);
 // A single-quoted string with no line break in it.
