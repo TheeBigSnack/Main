@@ -231,6 +231,40 @@ function exemptLines(path, lines, problems, self) {
 // (images, PDFs, zips) as well as the ones scanFiles reads.
 const nameHits = (paths) => paths.filter((p) => OLD_NAME_ONE.test(decode(p))).map((p) => `${p}: the file name carries the old name`);
 
+// One file: its hits and its broken exemptions. removers are the KEPT
+// entries that apply to this file, each with a global copy of its pattern.
+function scanFile(path, text, removers, self) {
+  const hits = nameHits([path]);
+  const problems = [];
+  const lines = text.split(/\r?\n/);
+  const exempt = exemptLines(path, lines, problems, self);
+  const seen = new Set();
+  // Each line is read twice: with inline tags removed, then with them kept.
+  for (const tags of [true, false]) {
+    const clean = lines.map((line, i) => {
+      if (exempt[i]) return '<exempt>';
+      let s = decode(line, { tags });
+      for (const k of removers) s = s.replace(k.all, '<kept>');
+      return s;
+    });
+    const starts = [];
+    let at = 0;
+    for (const s of clean) { starts.push(at); at += s.length + 1; }
+    for (const m of clean.join('\n').matchAll(OLD_NAME)) {
+      let i = starts.length - 1;
+      while (starts[i] > m.index) i--;
+      seen.add(i);
+    }
+  }
+  for (const i of [...seen].sort((a, b) => a - b)) hits.push(`${path}:${i + 1}: ${lines[i].trim().slice(0, 200)}`);
+  return { hits, problems };
+}
+
+// Each file's result, kept for a later scan given the same file object with
+// the same KEPT list: the proofs below rescan the whole repo with one file
+// changed, so only that file is read again.
+const scanned = new WeakMap();
+
 // files: [{ path, text }] with repo-relative, forward-slash paths.
 // Returns { hits, problems }: hits are "path:line: text" for every line still
 // carrying the old name; problems are broken exemptions.
@@ -238,29 +272,15 @@ function scanFiles(files, { kept = KEPT, self = SELF } = {}) {
   const hits = [];
   const problems = [];
   const removers = kept.map((k) => ({ ...k, all: everywhere(k.re) }));
-  for (const { path, text } of files) {
-    hits.push(...nameHits([path]));
-    const lines = text.split(/\r?\n/);
-    const exempt = exemptLines(path, lines, problems, self);
-    const seen = new Set();
-    // Each line is read twice: with inline tags removed, then with them kept.
-    for (const tags of [true, false]) {
-      const clean = lines.map((line, i) => {
-        if (exempt[i]) return '<exempt>';
-        let s = decode(line, { tags });
-        for (const k of removers) if (appliesTo(k, path)) s = s.replace(k.all, '<kept>');
-        return s;
-      });
-      const starts = [];
-      let at = 0;
-      for (const s of clean) { starts.push(at); at += s.length + 1; }
-      for (const m of clean.join('\n').matchAll(OLD_NAME)) {
-        let i = starts.length - 1;
-        while (starts[i] > m.index) i--;
-        seen.add(i);
-      }
+  for (const file of files) {
+    const { path, text } = file;
+    let done = scanned.get(file);
+    if (!done || done.kept !== kept || done.self !== self || done.path !== path || done.text !== text) {
+      done = { kept, self, path, text, ...scanFile(path, text, removers.filter((k) => appliesTo(k, path)), self) };
+      scanned.set(file, done);
     }
-    for (const i of [...seen].sort((a, b) => a - b)) hits.push(`${path}:${i + 1}: ${lines[i].trim().slice(0, 200)}`);
+    hits.push(...done.hits);
+    problems.push(...done.problems);
   }
   return { hits, problems };
 }
