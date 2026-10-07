@@ -1503,3 +1503,48 @@ test('Rule 3: a grade or badge with "new" in it ("Like New", "New Arrival") is n
     assert.equal(assessVehicle(v, withDefaults({})).decision, DECISION.REVIEW, `${word}: Needs a look`);
   }
 });
+
+// Rule 3, repair cycle 2 round 3: the round before read a "new" word in the
+// other condition fields only when the field reads as a new condition, and
+// let that narrower reading also decide whether the certified flag renames
+// the record's own condition. So a certified record whose condition is a new
+// phrase the narrower reading leaves out ("New In Stock", "New Model", "Like
+// New") was renamed Certified Used, read as pre-owned, and could reach
+// Ready, where before the rounds it was skipped as new or went to Needs a
+// look. The record's own condition now stops the rename whenever it reads as
+// new at all, as before, and a new status in another field ("New In Stock",
+// "New - In Transit") counts as a new word there.
+test('Rule 3: a certified record whose own condition is any new phrase ("New In Stock", "Like New") is never Certified Used and never Ready', () => {
+  const [c] = platformCars(1, { from: 770 });
+  const car = { ...c, certified: true };
+  const carfaxUrl = `https://www.carfax.com/VehicleHistory/p/Report.cfx?vin=${c.vin}`;
+  const title = `${c.year} ${c.make} ${c.model} ${c.trim}`;
+  for (const phrase of ['New In Stock', 'New - In Transit', 'New Arrival', 'Like New', 'New 2025', 'NEW.', 'New Model', 'NEW CAR SPECIAL']) {
+    // the reviewer's records: an address with no condition word and a Carfax report; the fixture's certified address; DealerOn with a title that says nothing
+    const plain = normalizeInventoryRecord({ ...dealerComRecord(car), inventoryType: phrase, link: `/vehicle/${c.vin}.htm`, carfaxUrl }, { origin: DEALERCOM_ORIGIN });
+    const linked = normalizeInventoryRecord({ ...dealerComRecord(car), inventoryType: phrase }, { origin: DEALERCOM_ORIGIN });
+    const on = normalizeInventoryRecord({ ...dealerOnCard(car).VehicleCard, VehicleCondition: phrase, VehicleName: title }, { origin: DEALERON_ORIGIN });
+    for (const [what, v, decision] of [['Dealer.com with a Carfax report', plain, DECISION.SKIP], ['Dealer.com with its certified address', linked, DECISION.REVIEW], ['DealerOn', on, DECISION.REVIEW]]) {
+      assert.equal(v.inventoryType, phrase, `${what}, "${phrase}": never renamed Certified Used`);
+      assert.equal(assessVehicle(v, withDefaults({})).decision, decision, `${what}, "${phrase}"`);
+    }
+  }
+  // the record's own new phrase beside a used word in another field: Needs a look naming both
+  const both = normalizeInventoryRecord({ ...dealerComRecord(car), inventoryType: 'New In Stock', type: 'Used' }, { origin: DEALERCOM_ORIGIN });
+  assert.deepEqual([both.inventoryType, both.readableType], ['New In Stock', 'Used']);
+  assert.equal(checkPreOwned(both).reason, 'The website disagrees with itself: it lists the car as "New In Stock" and as "Used". Check its condition before posting.');
+  assert.equal(assessVehicle(both, withDefaults({})).decision, DECISION.REVIEW);
+  // a new status in another field counts as a new word there, certified or not
+  for (const status of ['New In Stock', 'New - In Transit', 'NEW IN-TRANSIT', 'New 2025', 'NEW.', 'New Vehicle - In Stock']) {
+    for (const certified of [false, true]) {
+      const v = normalizeInventoryRecord({ ...dealerComRecord({ ...c, certified }), stockType: status }, { origin: DEALERCOM_ORIGIN });
+      const what = `stockType "${status}"${certified ? ', certified' : ''}`;
+      assert.deepEqual([v.inventoryType, v.readableType], ['used', status], what);
+      assert.equal(assessVehicle(v, withDefaults({})).decision, DECISION.REVIEW, `${what}: Needs a look`);
+    }
+  }
+  // a used record graded Like New in another field is still Certified Used, as the round before kept it
+  const graded = normalizeInventoryRecord({ ...dealerComRecord(car), condition: 'Like New' }, { origin: DEALERCOM_ORIGIN });
+  assert.deepEqual([graded.inventoryType, graded.readableType], ['Certified Used', null]);
+});
+
