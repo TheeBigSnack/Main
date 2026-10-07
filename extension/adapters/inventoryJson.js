@@ -203,6 +203,21 @@ export function totalCount(json) {
 // where "Value Price $24,995" is a selling price. The shared list decides
 // what is never the price whatever sits beside it, and what is quoted.
 const NOT_THE_PRICE = /msrp|\bwas\b|original|previous|prior|\bold\b|list ?price|^list|compare|strike|payment|per ?month|monthly|\bmo\b|lease|financ|rebate|incentive|saving|discount|conditional|\bfees?\b|docfee|\btax|invoice|trade|down ?payment|\bapr\b|cash ?back|bonus|wholesale|employee|supplier|military|loyalty|conquest|lowest|highest|market|book|estimat|\bvalue\b(?<!retail value)/i;
+// A label as every label test below reads it: without the footnote and
+// trademark marks a website puts after it ("Internet Price*", "Your Offer™",
+// "Market Value†", "Our Offer¹", "Best Offer!"), nor the spaces, colons and
+// full stops among them (the tests already allow one colon or full stop at
+// the end). Before, "Your Carvana Offer*" did not end in "Offer" for the
+// offer test, so "your" made it a selling price again. Read from the end one
+// character at a time, so a long label costs one pass. The label is still
+// quoted as the website writes it.
+const TRAILING_MARK = /[\s*!:.\u00a7\u00ae\u00b2\u00b3\u00b9\u2020\u2021\u2070\u2074-\u2079\u2120\u2122]/;
+export function labelWords(label) {
+  const text = String(label || '');
+  let end = text.length;
+  while (end > 0 && TRAILING_MARK.test(text[end - 1])) end -= 1;
+  return text.slice(0, end);
+}
 // A guide's value, an estimate or an offer for the car ("KBB Value",
 // "Market Price", "Instant Cash Offer"): the standard-data reader's own list
 // (schemaOrgNormalize.js GUIDE_PRICE_WORDS), so the two readers never
@@ -229,7 +244,7 @@ const SELLING_WORDS = new RegExp(String.raw`${SELLER_WORDS.source}|\bour\b|\byou
 // do not make it the website's price. Only the website's own selling words
 // do ("Internet Offer", "Sale Offer"), as before.
 const OFFER_END = /\boffers?\s*[:.]?\s*$/i;
-const isOfferForTheCar = (label) => OFFER_END.test(String(label || '')) && !SELLER_WORDS.test(String(label));
+const isOfferForTheCar = (label) => OFFER_END.test(labelWords(label)) && !SELLER_WORDS.test(String(label || ''));
 const GENERIC_PRICE = /^\s*(?:the\s+)?price\s*:?\s*$/i;
 const NAMED_PRICE = /^\s*[A-Za-z][\w.&'’ -]{0,40}\s+price\s*:?\s*$/i;
 
@@ -274,7 +289,7 @@ export function labeledPrices(record) {
     }
     for (const [k, v] of Object.entries(x)) {
       if (/image|photo|picture|feature|option|media|attribute/i.test(k)) continue;
-      const n = /price/i.test(k) || GUIDE_LABEL.test(spaced(k)) ? amount(v) : null;
+      const n = /price/i.test(k) || GUIDE_LABEL.test(labelWords(spaced(k))) ? amount(v) : null;
       if (n !== null) out.push({ value: n, label: spaced(k).replace(/^Vehicle\s+/i, ''), key: k, final: keyName(k) === 'finalprice' });
       else if (v && typeof v === 'object') visit(v, k, depth + 1);
     }
@@ -302,8 +317,9 @@ const nameWords = (text) => String(text || '').toLowerCase().replace(/[^a-z0-9 ]
  * @param {string} [dealer]
  */
 export function isDealerPrice(label, dealer = '') {
-  if (!NAMED_PRICE.test(String(label || ''))) return false;
-  const before = String(label).replace(/\s+price\s*:?\s*$/i, '');
+  const text = labelWords(label);
+  if (!NAMED_PRICE.test(text)) return false;
+  const before = text.replace(/\s+price\s*:?\s*$/i, '');
   const own = nameWords(before);
   const theirs = nameWords(dealer);
   if (!own.length || !own.every((w) => theirs.includes(w))) return false;
@@ -321,15 +337,16 @@ export function isDealerPrice(label, dealer = '') {
  * @param {string} [dealer]  the dealership name the record carries
  */
 export function priceKind(entry, dealer = '') {
-  const dealers = isDealerPrice(entry.label, dealer);
-  const words = `${dealers ? '' : entry.label} ${spaced(entry.key)}`;
-  if (labelIsNotThePrice(words) || (!dealers && isOfferForTheCar(entry.label))) return 'other';
+  const label = labelWords(entry.label);
+  const dealers = isDealerPrice(label, dealer);
+  const words = `${dealers ? '' : label} ${spaced(entry.key)}`;
+  if (labelIsNotThePrice(words) || (!dealers && isOfferForTheCar(label))) return 'other';
   if (entry.final) return 'selling';
   if (BASE_WORDS.test(words)) return 'base';
   if (SELLING_WORDS.test(words)) return 'selling';
-  if (GENERIC_PRICE.test(entry.label) || /^price$/i.test(keyName(entry.key.split('.').pop()))) return 'plain';
+  if (GENERIC_PRICE.test(label) || /^price$/i.test(keyName(entry.key.split('.').pop()))) return 'plain';
   if (dealers) return 'selling';
-  return NAMED_PRICE.test(entry.label) ? 'named' : 'other';
+  return NAMED_PRICE.test(label) ? 'named' : 'other';
 }
 
 const NO_PRICE = (label) => ({ price: null, priceLabel: label, priceBeforeFees: null });
@@ -345,7 +362,7 @@ function quoteLabels(labels) {
 // label their own selling price that way ("Market Price"), and the price is
 // still not taken. A payment or an incentive is not such a label.
 function guideLabelled(entries) {
-  const labels = entries.map((e) => e.label || spaced(e.key)).filter((l) => GUIDE_LABEL.test(l) || isOfferForTheCar(l));
+  const labels = entries.map((e) => e.label || spaced(e.key)).filter((l) => GUIDE_LABEL.test(labelWords(l)) || isOfferForTheCar(l));
   return labels.length ? quoteLabels(labels) : null;
 }
 
@@ -372,7 +389,7 @@ export function ownPriceLabel(record) {
 // Whether a label names something other than the selling price: a guide's
 // value, an offer for the car, an MSRP, a payment (the words priceKind reads
 // as 'other').
-export const labelIsNotThePrice = (label) => NOT_THE_PRICE.test(label) || GUIDE_PRICE.test(label) || isOfferForTheCar(label);
+export const labelIsNotThePrice = (label) => NOT_THE_PRICE.test(labelWords(label)) || GUIDE_PRICE.test(labelWords(label)) || isOfferForTheCar(label);
 
 /**
  * The website's price and, when it shows one, the lower base price.

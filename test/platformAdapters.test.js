@@ -1234,3 +1234,48 @@ test('R-8: a final price set aside as an offer or a guide\'s value leaves the ca
   // an offer that is not the final price changes nothing: the final price stands
   assert.deepEqual(P([{ label: 'Price', value: '$24,000' }, { label: 'Special Offer', value: '$22,000' }, { label: 'Sample Price', value: '$24,499', isFinalPrice: true }]), { price: 24499, priceLabel: 'Sample Price', priceBeforeFees: 24000 });
 });
+
+// R-8, second repair cycle: a footnote or trademark mark after a price's
+// label ("Your Carvana Offer*", "Our Offer™", "Market Value†", "Sample
+// Price*"). Before, the label tests read the mark as part of the label, so
+// an offer with a mark after it was a selling price again ("your", "our"),
+// taken ahead of a plain "Price" when marked final and alone made the car
+// Ready at the offer. The marks are now set aside before every label test
+// (labelWords), and the label is quoted as the website writes it.
+test('R-8: a footnote or trademark mark after a price\'s label changes nothing: an offer stays an offer, a guide\'s value a guide\'s value, the dealer\'s price the dealer\'s', () => {
+  const quoted = (label) => `the list labels its price "${label}", which Lot Current does not read as the selling price`;
+  const none = (label) => ({ price: null, priceLabel: quoted(label), priceBeforeFees: null });
+  const P = (dprice) => choosePrices(labeledPrices({ pricing: { dprice } }), { dealer: 'Sample Chevrolet' });
+  const MARKED = ['Your Carvana Offer*', 'Our Offer™', 'Your Offer†', 'Sell Us Your Car Offer‡', 'Best Offer®', 'Your Trade Offer¹', 'Your Offer!', 'Our Offer*:', 'Your Cash-Offer**', 'Market Value†', 'KBB Value*', 'Kelley Blue Book® Value™', 'Trade-In Value²', 'Fair-Market Price*'];
+  for (const label of MARKED) {
+    assert.deepEqual(P([{ label: 'Price', value: '$21,000' }, { label, value: '$19,000' }]), { price: 21000, priceLabel: 'Price', priceBeforeFees: null }, `"${label}" beside a plain price`);
+    assert.deepEqual(P([{ label: 'Price', value: '$21,000' }, { label, value: '$19,000', isFinalPrice: true }]), none(label), `"${label}" marked final beside a plain price`);
+    assert.deepEqual(P([{ label, value: '$19,000' }]), none(label), `"${label}" alone is quoted`);
+    assert.equal(priceKind({ label, key: 'dprice.x', final: false, value: 1 }, 'Sample Chevrolet'), 'other', label);
+    assert.equal(priceKind({ label, key: 'dprice.x', final: true, value: 1 }, 'Sample Chevrolet'), 'other', `${label}, final`);
+  }
+  // through the whole readers: the only price an offer with a mark is Not ready, quoted
+  const [c] = platformCars(1, { from: 720 });
+  const car = { ...c, certified: false };
+  const com = normalizeInventoryRecord({ ...dealerComRecord(car), pricing: { dprice: [{ typeClass: 'x', label: 'Your Carvana Offer*', value: '$19,000' }] } }, { origin: DEALERCOM_ORIGIN });
+  assert.deepEqual([com.price, com.priceLabel], [null, quoted('Your Carvana Offer*')]);
+  assert.equal(assessVehicle(com, withDefaults({})).decision, DECISION.NOT_READY);
+  for (const label of ['Your Offer™', 'Our Offer*', 'Market Value†']) {
+    const on = normalizeInventoryRecord({ ...dealerOnCard(car).VehicleCard, VehiclePriceLabel: label }, { origin: DEALERON_ORIGIN });
+    assert.deepEqual([on.price, on.priceLabel], [null, quoted(label)], `DealerOn's own label "${label}"`);
+  }
+  // the selling side reads the same with a mark: the dealer's own price, a plain price, a named price
+  assert.equal(priceKind({ label: 'Sample Price*', key: '', final: false, value: 1 }, 'Sample Chevrolet'), 'selling');
+  assert.equal(priceKind({ label: 'Internet Price†', key: '', final: false, value: 1 }, 'Sample Chevrolet'), 'selling');
+  assert.equal(priceKind({ label: 'Price*', key: '', final: false, value: 1 }, 'Sample Chevrolet'), 'plain');
+  assert.equal(priceKind({ label: 'Other Price¹', key: '', final: false, value: 1 }, 'Sample Chevrolet'), 'named');
+  assert.equal(priceKind({ label: 'Internet Offer*', key: '', final: false, value: 1 }, 'Sample Chevrolet'), 'selling', 'the website\'s own selling words still make an offer its price');
+  for (const label of ['Sample Motors Price*', 'Sample Motors Price®']) {
+    const on = normalizeInventoryRecord({ ...dealerOnCard(car).VehicleCard, VehiclePriceLabel: label }, { origin: DEALERON_ORIGIN });
+    assert.deepEqual([on.price, on.priceBeforeFees], [car.base + car.fee, car.base], `DealerOn's own label "${label}" is the dealer's price`);
+  }
+  const record = dealerComRecord(car);
+  const dprice = record.pricing.dprice.map((e) => (e.isFinalPrice ? { ...e, label: `${e.label}*`, isFinalPrice: false } : e));
+  const named = normalizeInventoryRecord({ ...record, pricing: { ...record.pricing, dprice } }, { origin: DEALERCOM_ORIGIN });
+  assert.deepEqual([named.price, named.priceLabel, named.priceBeforeFees], [car.base + car.fee, 'Sample Price*', car.base], 'Dealer.com: "Sample Price*" not marked final is still the dealer\'s own price');
+});
