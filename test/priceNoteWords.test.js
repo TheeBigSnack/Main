@@ -65,6 +65,7 @@ test('realistic price notes that say "not the dealer" pass, and the template car
     'Price subject to credit approval for qualified buyers. Tax and title fees go to the state, not the dealer.',
     'Price after rebates. A $1,299.00 dealer fee applies. Tax and tags go to the state, not the dealerships.',
     'plus tax and tags, which go to the state, not the dealer.',
+    'Prices subject to change. Tax and title fees go to the Department of Motor Vehicles, not the dealer.',
   ]) {
     const c = withNote(note);
     const text = buildTemplateDescription(c);
@@ -116,6 +117,8 @@ test('a "not the dealer" note with any word that is not price and fee wording is
     ['Prices valid through 2026.', '"valid" and "2026"'], ['Tax is $5551234567.', '"$5551234567"'],
     // a look-alike letter makes a word that is not on the list ("Text" with a Cyrillic "e", "price" with a Cyrillic "e")
     ['Tеxt Sam.', '"Tеxt" and "Sam"'], ['Pricе is final.', '"Pricе" and "final"'],
+    // words common in price notes that are still not on the list
+    ['Price incl. the doc fee.', '"incl"'], ['See the dealer for fees.', '"See"'], ['Fees paid to the agent.', '"agent"'], ['Fees due at signing.', '"signing"'],
   ]) {
     const note = `${FEES} ${extra}`;
     const c = withNote(note);
@@ -153,6 +156,24 @@ test('the dealership\'s own name and city pass only for that dealership', () => 
   assert.equal(priceNoteWarning(own, EXAMPLE), '');
   // the sentence rule still decides where the fees may go: a place it does not know is refused as before
   assert.deepEqual(problems(withNote(note)), [{ code: 'banned-phrase', text: PLACE_REASON() }]);
+});
+
+test('a number written as a word of the dealership\'s own name or city as set passes, as its letters do; another number is refused', () => {
+  const route = { name: 'Route 19 Motors', city: 'Springfield' };
+  const note = `All Route 19 Motors prices plus tax and tags. ${FEES}`;
+  for (const [n, dealer] of [
+    [note, route], [`12th Street Motors prices plus tax. ${FEES}`, { name: '12th Street Motors', city: 'Springfield' }],
+    [`Route19 Motors prices plus tax. ${FEES}`, { name: 'Route19 Motors', city: 'Springfield' }], [`Price excludes 29 Palms city tax. ${FEES}`, { name: 'Example Motors', city: '29 Palms' }],
+  ]) {
+    assert.deepEqual(problems(withNote(n, dealer)), [], n);
+    assert.equal(priceNoteWarning(n, dealer), '', n);
+  }
+  // another dealership's number, or a number that is only part of this one's, is refused as before
+  assert.deepEqual(problems(withNote(note)), [{ code: 'banned-phrase', text: REASON('"Route" and "19"') }]);
+  assert.equal(priceNoteWarning(note, EXAMPLE), REASON('"Route" and "19"'));
+  for (const [extra, out] of [['Route 9 prices.', '"9"'], ['Route 191 prices.', '"191"'], ['Route 19-1 prices.', '"19-1"'], ['Text 19 now.', '"Text" and "now"']]) {
+    assert.deepEqual(problems(withNote(`${FEES} ${extra}`, route)), [{ code: 'banned-phrase', text: REASON(out) }], extra);
+  }
 });
 
 test('the dealership\'s state is not one of its own words: the rewrite service is not sent it, and a state code can be a pronoun or a name', () => {
@@ -233,6 +254,30 @@ test('dollar amounts and percentages pass; any other digits are refused', () => 
   }
 });
 
+test('a phone number written as several dollar amounts or percentages is refused, and quoted whole', () => {
+  // a run of amounts or percentages with only spaces or marks between them (no word) that holds seven or more digits in all, cents counted
+  for (const [note, out] of [
+    [`${FEES} $555-$123-$4567.`, '"$555-$123-$4567"'], [`${FEES} $555.$123.$4567`, '"$555.$123.$4567"'], [`${FEES} ($555) $123-$4567.`, '"$555) $123-$4567"'],
+    [`${FEES} $ 555 $ 123 $ 4567`, '"$ 555 $ 123 $ 4567"'], [`${FEES} $555 $123 $4567.`, '"$555 $123 $4567"'], [`${FEES} $555 - $123 - $4567`, '"$555 - $123 - $4567"'],
+    [`${FEES} $555/$123/$4567`, '"$555/$123/$4567"'], [`${FEES} $555+$123+$4567`, '"$555+$123+$4567"'], [`${FEES} $555–$123–$4567.`, '"$555–$123–$4567"'],
+    [`Price $555-$123-$45.67. ${FEES}`, '"$555-$123-$45.67"'], [`${FEES} 555% 123% 456% 7%`, '"555% 123% 456% 7%"'],
+    // seven digits are enough, a line break is a space (and quoted as one), and each run is quoted once, in the order the note says it
+    [`${FEES} $555-$4567.`, '"$555-$4567"'], [`${FEES} $555\n$123\n$4567`, '"$555 $123 $4567"'],
+    [`Price $555 $4567. ${FEES} Text $555 $4567.`, '"$555 $4567" and "Text"'],
+  ]) {
+    assert.deepEqual(problems(withNote(note)), [{ code: 'banned-phrase', text: REASON(out) }], JSON.stringify(note));
+    assert.equal(priceNoteWarning(note, EXAMPLE), REASON(out), JSON.stringify(note));
+  }
+  // a single amount, a run of fewer than seven digits, and amounts with words between them still pass
+  for (const extra of [
+    'A $499 doc fee and a $25 title fee apply.', 'Doc and title fees $499/$25.', 'Price plus $999,999.99 in fees.', 'Sales tax 6.25%/7.25%.',
+    'A $1,299.00 dealer fee and 6.25 % sales tax apply.', 'Doc fee $499. Title fee $25.',
+  ]) {
+    assert.deepEqual(problems(withNote(`${FEES} ${extra}`)), [], extra);
+    assert.equal(priceNoteWarning(`${FEES} ${extra}`, EXAMPLE), '', extra);
+  }
+});
+
 test('a word joined to the next by "." or ":" with no space between (a web link, even one made only of listed words) is refused, and quoted whole', () => {
   for (const [extra, out] of [
     ['Cash price at dealer.to/sale', '"dealer.to/sale"'], ['Prices: cash.sale', '"cash.sale"'], ['Our price is at price.is', '"price.is"'],
@@ -299,10 +344,10 @@ test('the list is closed: no pronoun, person, role, way to get in touch, payment
   assert.deepEqual([...TS_WORDS], [...PRICE_NOTE_WORDS], 'the hosted checker lists the same words');
   assert.equal(new Set(PRICE_NOTE_WORDS).size, PRICE_NOTE_WORDS.length, 'each word once');
   for (const w of PRICE_NOTE_WORDS) assert.match(w, /^\p{Ll}+$/u, w);
-  for (const w of ['i', 'me', 'my', 'we', 'us', 'you', 'your', 'requires', 'he', 'she', 'him', 'her', 'they', 'them', 'it', 'sam', 'salesperson', 'seller', 'owner', 'manager', 'advisor', 'text', 'call', 'email', 'message', 'contact', 'phone', 'dm', 'venmo', 'zelle', 'paypal', 'person', 'private', 'privately', 'face', 'negotiable', 'deal', 'best', 'direct', 'buy', 'save', 'offer', 'lot', 'store', 'home', 'via', 's', 't']) {
+  for (const w of ['i', 'me', 'my', 'we', 'us', 'you', 'your', 'requires', 'he', 'she', 'him', 'her', 'they', 'them', 'it', 'sam', 'salesperson', 'seller', 'owner', 'manager', 'advisor', 'text', 'call', 'email', 'message', 'contact', 'phone', 'dm', 'venmo', 'zelle', 'paypal', 'person', 'private', 'privately', 'face', 'negotiable', 'deal', 'best', 'direct', 'buy', 'save', 'offer', 'lot', 'store', 'home', 'via', 's', 't', 'incl', 'see', 'agent', 'signing']) {
     assert.ok(!PRICE_NOTE_WORDS.includes(w), `"${w}" is not on the list`);
   }
-  for (const w of ['price', 'tax', 'title', 'registration', 'fees', 'go', 'to', 'the', 'state', 'not', 'dealer', 'dealership', 'dealers', 'dealerships', 'dmv', 'secretary', 'before', 'exclude']) {
+  for (const w of ['price', 'tax', 'title', 'registration', 'fees', 'go', 'to', 'the', 'state', 'not', 'dealer', 'dealership', 'dealers', 'dealerships', 'dmv', 'secretary', 'before', 'exclude', 'subject', 'change']) {
     assert.ok(PRICE_NOTE_WORDS.includes(w), `"${w}" is on the list`);
   }
 });

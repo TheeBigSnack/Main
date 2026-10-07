@@ -196,6 +196,12 @@ const contexts = [
   { vehicle, dealer, priceNote: 'Tax, title and fees go to the state, not the dealer. Cash price at dealer.to/sale, cash.sale, price.is or Example-Motors.city; dealer:sale, dealer\u2024to, dealer.\u200Bto. Tags extra.Doc fee $499.', price: 28995 },
   { vehicle, dealer: { name: 'J.D. Example Motors', city: 'Springfield' }, priceNote: 'All J.D. Example Motors prices plus tax and tags. Tax, title and fees go to the state, not the dealer.', price: 28995 },
   { vehicle, dealer, priceNote: 'All J.D. Example Motors prices plus tax and tags. Tax, title and fees go to the state, not the dealer.', price: 28995 },
+  // a phone number written as amounts or percentages (a run of seven or more digits), amounts with words between, a number in the dealership's own name, "change"
+  { vehicle, dealer, priceNote: 'Tax, title and fees go to the state, not the dealer. $555-$123-$4567, $555.$123.$4567 or ($555) $123-$4567; $ 555 $ 123 $ 4567\n$555/$123/$4567 555% 123% 456% 7%.', price: 28995 },
+  { vehicle, dealer, priceNote: 'Price $555-$123-$45.67. Tax, title and fees go to the state, not the dealer. A $499 doc fee and a $25 title fee apply; $499/$25, 6.25%/7.25%.', price: 28995 },
+  { vehicle, dealer: { name: 'Route 19 Motors', city: '29 Palms' }, priceNote: 'All Route 19 Motors prices plus tax and tags. Tax, title and fees go to the state, not the dealer. 29 Palms tax; Route 9, 191 or 19-1.', price: 28995 },
+  { vehicle, dealer: { name: 'Route 19 Motors', city: '29 Palms' }, priceNote: 'All Route 19 Motors prices plus 29 Palms tax and tags. Tax, title and fees go to the state, not the dealer.', price: 28995 },
+  { vehicle, dealer, priceNote: 'Prices subject to change. Tax and title fees go to the Department of Motor Vehicles, not the dealer. See the agent, incl. fees due at signing.', price: 28995 },
   { vehicle: { ...vehicle, features: [...vehicle.features, 'New Tires/Brakes', 'New Brake Pads & Rotors', 'Brake Assist', 'Battery Saver', 'Wipers - Rain Sensing', 'Rear Wiper/Washer'], descriptionRaw: 'Recent service: new tires, brakes and rotors, plus new shocks.' }, dealer, priceNote: '', price: 28995 },
   {},
 ];

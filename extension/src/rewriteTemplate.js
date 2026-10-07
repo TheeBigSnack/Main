@@ -136,9 +136,13 @@ export const PRICE_NOTE_UNLESS = Object.freeze({
 // hyphen, a word joiner) is read as nothing, so a word it splits is read
 // whole ("A\u200Bbe" is "Abe"); one that changes the direction of the text
 // is refused. Its only digits are dollar amounts of up to six digits
-// ("$499", "$1,299.00") and percentages ("6%", "6.25 %"), and its only
-// other marks are the
-// punctuation between words (NOTE_MARKS). A word joined to the next by "."
+// ("$499", "$1,299.00"), percentages ("6%", "6.25 %") and a number written
+// as a word of the dealership's own name or city ("Route 19 Motors"), and
+// its only other marks are the punctuation between words (NOTE_MARKS). Two
+// or more amounts or percentages with nothing but spaces and marks between
+// them are read as one run, refused whole when it holds seven or more
+// digits, cents counted (a phone number written as amounts, "$555-$123-$4567",
+// NOTE_RUN_DIGITS). A word joined to the next by "."
 // or ":" with no space between is a web link even when its words are listed
 // ("dealer.to/sale", "cash.sale"), so it is refused whole, unless it is
 // written so in the dealership's own name or city ("J.D. Example Motors").
@@ -159,7 +163,7 @@ export const PRICE_NOTE_WORDS = Object.freeze([
   'and', 'or', 'nor', 'but', 'as', 'if', 'where', 'also',
   'of', 'to', 'for', 'from', 'in', 'on', 'at', 'by', 'with', 'without', 'per', 'before', 'after', 'through', 'upon',
   // verbs that say what the price includes and where the fees go
-  'is', 'are', 'be', 'does', 'do', 'not', 'may', 'vary', 'apply', 'applies', 'note',
+  'is', 'are', 'be', 'does', 'do', 'not', 'may', 'vary', 'change', 'apply', 'applies', 'note',
   'include', 'includes', 'included', 'including', 'exclude', 'excludes', 'excluded', 'excluding',
   'go', 'goes', 'paid', 'payable', 'collected', 'due', 'sent', 'remitted', 'directly', 'straight',
   // the price
@@ -681,6 +685,9 @@ const NOTE_STEER_SAID = new Map(Object.keys(PRICE_NOTE_UNLESS).map((p) => [p, ph
 const NOTE_WORD_SET = new Set(PRICE_NOTE_WORDS);
 // a dollar amount of up to six digits, with a thousands comma or without, or a percentage, standing on its own (not "$5551234567", "$5,551,234", "US$499" or "6.25.7")
 const NOTE_AMOUNT = /(?<![\p{L}\p{N}])(?:\$\s?(?:\d{1,3},\d{3}|\d{1,6})(?:\.\d{1,2})?|\d{1,3}(?:\.\d{1,3})?\s?%)(?![\p{L}\p{N}]|[.,]\p{N})/gu;
+// two or more of those with nothing but spaces and marks between them (no letter, no other digit) are one run, refused whole with this many digits in all, cents counted
+const NOTE_RUN_GAP = /^[^\p{L}\p{N}]*$/u;
+const NOTE_RUN_DIGITS = 7;
 // the marks a note may have between its words: spaces, punctuation, brackets, quotes, dashes, "/", "&", "*" and "+"
 const NOTE_MARKS = /^[\s.,;:!?'"\u2018\u2019\u201c\u201d()[\]\-\u2010-\u2015/&*+]$/u;
 const NOTE_EDGE_MARKS = /^[.,;:!?'"\u2018\u2019\u201c\u201d()[\]\-\u2010-\u2015/&*+]+|[.,;:!?'"\u2018\u2019\u201c\u201d()[\]\-\u2010-\u2015/&*+]+$/gu;
@@ -695,16 +702,27 @@ const NOTE_HIDDEN = /\p{Default_Ignorable_Code_Point}/gu;
 const NOTE_DIRECTION = /\p{Bidi_Control}/u;
 const lettersOf = (s) => String(s ?? '').normalize('NFKC').replace(NOTE_HIDDEN, '').toLowerCase().match(/\p{L}[\p{L}\p{M}]*/gu) || [];
 const blank = (s) => ' '.repeat(s.length);
+// Whether a run of characters with no space in it is written as a word of
+// the dealership's own name or city as set (ownSaid, in lower case), not
+// inside a longer word or number.
+function ownWritten(bare, ownSaid, seen) {
+  const key = bare.toLowerCase();
+  if (!seen.has(key)) seen.set(key, new RegExp(`(?<![\\p{L}\\p{N}])${escapeRe(key)}(?![\\p{L}\\p{N}])`, 'u').test(ownSaid));
+  return seen.get(key);
+}
 // What a price note says that is not price and fee wording, in the order it
 // says it, each once, quoted as it shows: a web link (NOTE_LINK) that is
-// not in the dealership's name or city, a number that is not an amount or
-// a percentage, a word (with its apostrophe or hyphen parts) one of whose
-// parts is neither on PRICE_NOTE_WORDS nor in the dealership's name or city,
-// any other mark, and, unquoted, "an invisible direction mark". [] when
-// there is none.
+// not in the dealership's name or city, a run of amounts or percentages
+// with seven or more digits (NOTE_RUN_DIGITS, with its spaces read as one),
+// a number that is not an amount, a percentage or written in the
+// dealership's name or city, a word (with its apostrophe or hyphen parts)
+// one of whose parts is neither on PRICE_NOTE_WORDS nor in the dealership's
+// name or city, any other mark, and, unquoted, "an invisible direction
+// mark". [] when there is none.
 function noteSteerWords(note, dealer) {
   const d = dealer || {};
   const own = new Set([d.name, d.city].flatMap(lettersOf));
+  const ownSeen = new Map();
   const found = [];
   let gone = 0;
   let rest = String(note ?? '').normalize('NFKC').replace(NOTE_HIDDEN, (c, at) => {
@@ -720,14 +738,37 @@ function noteSteerWords(note, dealer) {
     if (!NOTE_LINK.test(said)) return said;
     const bare = said.replace(NOTE_EDGE_MARKS, '');
     // the dealership's own name or city as set, dots and all ("J.D. Example Motors"), is read word by word
-    if (new RegExp(`(?<![\\p{L}\\p{N}])${escapeRe(bare.toLowerCase())}(?![\\p{L}\\p{N}])`, 'u').test(ownSaid)) return said;
+    if (ownWritten(bare, ownSaid, ownSeen)) return said;
     found.push({ at, text: `"${bare}"` });
     return blank(said);
   });
-  rest = rest.replace(NOTE_AMOUNT, blank);
+  // the amounts and percentages, each run of them read as one ("$555-$123-$4567")
+  const runs = [];
+  for (const m of rest.matchAll(NOTE_AMOUNT)) {
+    const amount = { from: m.index, to: m.index + m[0].length, digits: m[0].replace(/\D/g, '').length };
+    const run = runs[runs.length - 1];
+    if (run && NOTE_RUN_GAP.test(rest.slice(run.to, amount.from))) {
+      run.amounts.push(amount);
+      run.to = amount.to;
+    } else runs.push({ from: amount.from, to: amount.to, amounts: [amount] });
+  }
+  let read = '';
+  let upTo = 0;
+  for (const run of runs) {
+    const long = run.amounts.length > 1 && run.amounts.reduce((n, a) => n + a.digits, 0) >= NOTE_RUN_DIGITS;
+    if (long) found.push({ at: run.from, text: `"${rest.slice(run.from, run.to).replace(/\s+/g, ' ')}"` });
+    for (const a of long ? [{ from: run.from, to: run.to }] : run.amounts) {
+      read += rest.slice(upTo, a.from) + blank(rest.slice(a.from, a.to));
+      upTo = a.to;
+    }
+  }
+  rest = read + rest.slice(upTo);
   rest = rest.replace(NOTE_TOKEN, (said, at) => {
     if (!NOTE_DIGIT.test(said)) return said;
-    found.push({ at, text: `"${said.replace(NOTE_EDGE_MARKS, '')}"` });
+    const bare = said.replace(NOTE_EDGE_MARKS, '');
+    // a number the dealership's own name or city as set has as a word of its own ("Route 19 Motors"), read as its letters are
+    if (ownWritten(bare, ownSaid, ownSeen)) return blank(said);
+    found.push({ at, text: `"${bare}"` });
     return blank(said);
   });
   rest = rest.replace(NOTE_WORD, (said, at) => {

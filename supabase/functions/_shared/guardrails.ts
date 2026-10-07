@@ -178,18 +178,22 @@ export const PRICE_NOTE_UNLESS: Readonly<Record<string, Readonly<{ before?: stri
 // runs of letters after NFKC, in lower case, an apostrophe or a hyphen
 // splitting a word into its parts, an invisible character read as nothing
 // (one that changes the direction of the text is refused); its only digits
-// are dollar amounts and percentages, its only other marks the punctuation
-// between words, and a word joined to the next by "." or ":" with no space
-// (a web link) is refused unless the dealership's name or city is written
-// so. The reason quotes anything else. A note without those
-// phrases is read as before. The same words as the extension's list.
+// are dollar amounts, percentages and a number written as a word of the
+// dealership's name or city ("Route 19 Motors"), two or more amounts or
+// percentages with only spaces and marks between them are one run, refused
+// whole with seven or more digits, cents counted ("$555-$123-$4567"), its
+// only other marks are the punctuation between words, and a word joined to
+// the next by "." or ":" with no space (a web link) is refused unless the
+// dealership's name or city is written so. The reason quotes anything
+// else. A note without those phrases is read as before. The same words as
+// the extension's list.
 export const PRICE_NOTE_WORDS: readonly string[] = Object.freeze([
   // articles, determiners, conjunctions and prepositions
   'a', 'an', 'the', 'all', 'any', 'no', 'only', 'our', 'these', 'those', 'that', 'which',
   'and', 'or', 'nor', 'but', 'as', 'if', 'where', 'also',
   'of', 'to', 'for', 'from', 'in', 'on', 'at', 'by', 'with', 'without', 'per', 'before', 'after', 'through', 'upon',
   // verbs that say what the price includes and where the fees go
-  'is', 'are', 'be', 'does', 'do', 'not', 'may', 'vary', 'apply', 'applies', 'note',
+  'is', 'are', 'be', 'does', 'do', 'not', 'may', 'vary', 'change', 'apply', 'applies', 'note',
   'include', 'includes', 'included', 'including', 'exclude', 'excludes', 'excluded', 'excluding',
   'go', 'goes', 'paid', 'payable', 'collected', 'due', 'sent', 'remitted', 'directly', 'straight',
   // the price
@@ -439,6 +443,9 @@ const NOTE_STEER_SAID: Map<string, RegExp> = new Map(Object.keys(PRICE_NOTE_UNLE
 const NOTE_WORD_SET: ReadonlySet<string> = new Set(PRICE_NOTE_WORDS);
 // a dollar amount of up to six digits, with a thousands comma or without, or a percentage, standing on its own
 const NOTE_AMOUNT = /(?<![\p{L}\p{N}])(?:\$\s?(?:\d{1,3},\d{3}|\d{1,6})(?:\.\d{1,2})?|\d{1,3}(?:\.\d{1,3})?\s?%)(?![\p{L}\p{N}]|[.,]\p{N})/gu;
+// two or more of those with nothing but spaces and marks between them are one run, refused whole with this many digits in all, cents counted
+const NOTE_RUN_GAP = /^[^\p{L}\p{N}]*$/u;
+const NOTE_RUN_DIGITS = 7;
 // the marks a note may have between its words
 const NOTE_MARKS = /^[\s.,;:!?'"\u2018\u2019\u201c\u201d()[\]\-\u2010-\u2015/&*+]$/u;
 const NOTE_EDGE_MARKS = /^[.,;:!?'"\u2018\u2019\u201c\u201d()[\]\-\u2010-\u2015/&*+]+|[.,;:!?'"\u2018\u2019\u201c\u201d()[\]\-\u2010-\u2015/&*+]+$/gu;
@@ -453,10 +460,17 @@ const NOTE_HIDDEN = /\p{Default_Ignorable_Code_Point}/gu;
 const NOTE_DIRECTION = /\p{Bidi_Control}/u;
 const lettersOf = (s: unknown): string[] => String(s ?? '').normalize('NFKC').replace(NOTE_HIDDEN, '').toLowerCase().match(/\p{L}[\p{L}\p{M}]*/gu) || [];
 const blank = (s: string): string => ' '.repeat(s.length);
+// Whether a run of characters with no space in it is written as a word of the dealership's own name or city as set.
+function ownWritten(bare: string, ownSaid: string, seen: Map<string, boolean>): boolean {
+  const key = bare.toLowerCase();
+  if (!seen.has(key)) seen.set(key, new RegExp(`(?<![\\p{L}\\p{N}])${escapeRe(key)}(?![\\p{L}\\p{N}])`, 'u').test(ownSaid));
+  return seen.get(key) as boolean;
+}
 // What a price note says that is not price and fee wording, in order, each once, quoted as it shows.
 function noteSteerWords(note: unknown, dealer: GuardrailDealer | null | undefined): string[] {
   const d = dealer || {};
   const own = new Set([d.name, d.city].flatMap(lettersOf));
+  const ownSeen = new Map<string, boolean>();
   const found: { at: number; text: string }[] = [];
   let gone = 0;
   let rest = String(note ?? '').normalize('NFKC').replace(NOTE_HIDDEN, (c: string, at: number) => {
@@ -472,14 +486,39 @@ function noteSteerWords(note: unknown, dealer: GuardrailDealer | null | undefine
     if (!NOTE_LINK.test(said)) return said;
     const bare = said.replace(NOTE_EDGE_MARKS, '');
     // the dealership's own name or city as set, dots and all, is read word by word
-    if (new RegExp(`(?<![\\p{L}\\p{N}])${escapeRe(bare.toLowerCase())}(?![\\p{L}\\p{N}])`, 'u').test(ownSaid)) return said;
+    if (ownWritten(bare, ownSaid, ownSeen)) return said;
     found.push({ at, text: `"${bare}"` });
     return blank(said);
   });
-  rest = rest.replace(NOTE_AMOUNT, blank);
+  // the amounts and percentages, each run of them read as one
+  type Amount = { from: number; to: number; digits: number };
+  const runs: Array<{ from: number; to: number; amounts: Amount[] }> = [];
+  for (const m of rest.matchAll(NOTE_AMOUNT)) {
+    const from = m.index as number;
+    const amount: Amount = { from, to: from + m[0].length, digits: m[0].replace(/\D/g, '').length };
+    const run = runs[runs.length - 1];
+    if (run && NOTE_RUN_GAP.test(rest.slice(run.to, amount.from))) {
+      run.amounts.push(amount);
+      run.to = amount.to;
+    } else runs.push({ from: amount.from, to: amount.to, amounts: [amount] });
+  }
+  let read = '';
+  let upTo = 0;
+  for (const run of runs) {
+    const long = run.amounts.length > 1 && run.amounts.reduce((n, a) => n + a.digits, 0) >= NOTE_RUN_DIGITS;
+    if (long) found.push({ at: run.from, text: `"${rest.slice(run.from, run.to).replace(/\s+/g, ' ')}"` });
+    for (const a of long ? [{ from: run.from, to: run.to }] : run.amounts) {
+      read += rest.slice(upTo, a.from) + blank(rest.slice(a.from, a.to));
+      upTo = a.to;
+    }
+  }
+  rest = read + rest.slice(upTo);
   rest = rest.replace(NOTE_TOKEN, (said: string, at: number) => {
     if (!NOTE_DIGIT.test(said)) return said;
-    found.push({ at, text: `"${said.replace(NOTE_EDGE_MARKS, '')}"` });
+    const bare = said.replace(NOTE_EDGE_MARKS, '');
+    // a number the dealership's own name or city as set has as a word of its own, read as its letters are
+    if (ownWritten(bare, ownSaid, ownSeen)) return blank(said);
+    found.push({ at, text: `"${bare}"` });
     return blank(said);
   });
   rest = rest.replace(NOTE_WORD, (said: string, at: number) => {
