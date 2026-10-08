@@ -395,6 +395,7 @@ async function reviewWith(takenDown, { queue = true } = {}) {
     relistNotice, canAutoOpen,
     openForm: async () => calls.push('openForm'),
     postElsewhere: async () => '', elsewhereText: never('elsewhereText'),
+    checkBranding: async () => {}, // the photo check found nothing to crop (its own tests are in panelBranding.test.js)
   });
   await startFlow({ origin: state.origin, vin: 'aaa', dealerTabId: null, queue });
   return { state, calls };
@@ -548,6 +549,8 @@ function formOpener({ description, step = 'review', readAt = new Date().toISOStr
       return (read || never('readCarForPost'))(req);
     },
     panelWindowId: null, postElsewhere: async () => null, elsewhereText: never('elsewhereText'), dropSavedFlow: async () => {},
+    // the dealer-branding photo check (its own tests are in panelBranding.test.js): nothing running, nothing found
+    checkBranding: async () => calls.push('checkBranding'), stopBranding: () => false,
     ...extra,
   }, BLOCKER_CONSTS);
   return { state, calls, fns, v, forms, box };
@@ -947,6 +950,7 @@ test('a post dropped while its form loads, fills or gets its photos, or while it
       render: () => calls.push('render:' + state.step), saveFlow: async () => calls.push('saveFlow'), pilotNote: async () => {}, endPost: () => {}, noteFill: (p) => p, notePostStep: (p) => p,
       startWatcher: () => calls.push('startWatcher'), photoPatterns: () => [], refusedPhotoServers: new Set(), patternCovers: () => false, isFacebookServer: () => false,
       siteKeys: (o) => ({ flow: 'postFlow:' + o }),
+      forTheForm: async (files) => files.map(({ name, type, dataUrl }) => ({ name, type, dataUrl })), // nothing cropped (the crop's own tests are in panelBranding.test.js)
     }));
     return { state, calls, fns, pending, next: () => pending.shift().done() };
   };
@@ -1010,6 +1014,7 @@ function formTabPanel({ photos = 6 } = {}) {
     state, flowRun: 0, fillsUnderWay: 0, FORM_MAP, VERSION: '0.0.0', onCreatePage, FORM_GONE_TEXT: 'form gone',
     carStillCurrent: async () => true, fillBlocker: () => '', // a fresh read and a description that passes (their own tests are below)
     fillFormInPage: 'fill', attachPhotosInPage: 'photos',
+    forTheForm: async (files) => files.map(({ name, type, dataUrl }) => ({ name, type, dataUrl })), // nothing cropped (the crop's own tests are in panelBranding.test.js)
     chrome: {
       tabs: { get: async (id) => { calls.push('tabs.get ' + id); if (!(id in tabs)) throw new Error('No tab with id: ' + id); return { id, url: tabs[id] }; } },
       scripting: {
@@ -2453,6 +2458,7 @@ test('a dealership name added in Settings while the review is open brings the fo
       generate: async ({ useClaude }) => { calls.push(`generate ${useClaude}`); state.description = template(state.settings.dealer); state.descriptionSource = 'template'; state.guardrails = runGuardrails(state.description, ctx()); },
       render: () => calls.push('render'), saveFlow: () => calls.push('saveFlow'), setStatus: never('setStatus'), postUnderWay: () => true,
       defaultOrigin: never('defaultOrigin'), loadSaved: never('loadSaved'),
+      brandingAfterSettings: () => {}, // the photo crop setting as saved (its own test is in panelBranding.test.js)
     }, [...BLOCKER_CONSTS, 'INPUT_STEPS', 'OWN_VIEW_STEPS']);
     return { state, els, calls, fns };
   };
@@ -2990,6 +2996,7 @@ test('Open the Marketplace form and every fill read the car again first; a post 
   const openForm = compile('openForm', {
     state, flowRun: 0, readStoredCounts: async () => true, stopPosted: never('stopPosted'), dailyCap: () => ({ reached: false }), capCount, setStatus: never('setStatus'),
     descriptionStopped: () => false, carStillCurrent: async () => false, buildListingData: never('buildListingData'),
+    stopBranding: () => false, // no photo check under way
   });
   assert.equal(await openForm(), undefined);
   assert.equal(state.opening, false);
@@ -3276,6 +3283,7 @@ function twoPanels({ panelsOpen = [1, 2], fillSaves = false, pilot = false } = {
       readStoredCounts: async () => true, dailyCap: () => ({ reached: false }), capCount: () => '', descriptionStopped: () => false, carStillCurrent: async () => true,
       buildListingData: () => ({ fields: {} }), pickedPhotos: () => [], applyOverrides: (m) => m, waitForTabLoad: async () => {}, sleep: async () => {},
       runFill: async () => { state.step = 'publish'; if (fillSaves) await fns.saveFlow(); }, runProbe: never('runProbe'),
+      checkBranding: async () => {}, stopBranding: () => false, // the photo check found nothing to crop (its own tests are in panelBranding.test.js)
     }, /^const flowStorage = /m.test(src) ? ['flowStorage'] : []);
     // a click on one of the panel's buttons, as onClick runs it
     const click = (id) => fns.onClick({ target: { closest: () => ({ id, dataset: {} }) } });

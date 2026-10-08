@@ -20,7 +20,10 @@ const text = (s) => String(s ?? '');
 // The parts of a post a person changes in the side panel, in the order they
 // are named: how each is read from a post, and what it is called once lost.
 const description = (p) => text(p.description);
-const photoPick = (p) => p.photoPick ?? null;
+// the pick and the photos set back to the website's original (Use original)
+// are one choice of what goes on the listing: either one changed is "the
+// photos picked". A post saved before photoOriginals was kept reads as before.
+const photoPick = (p) => (p.photoPick == null && !(Array.isArray(p.photoOriginals) && p.photoOriginals.length) ? null : { pick: p.photoPick ?? null, originals: Array.isArray(p.photoOriginals) ? p.photoOriginals : [] });
 const highlights = (p) => p.highlights ?? null;
 // a guess that failed, or a check that got no answer, is nothing to do again
 const colorGuess = (p) => (p.colorGuess && !p.colorGuess.error ? p.colorGuess : null);

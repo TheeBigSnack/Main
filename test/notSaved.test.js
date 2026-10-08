@@ -37,6 +37,29 @@ test('a refused save of a copy brought back from another window says what happen
   assert.equal(atReview.text, '2020 Make Model A is being posted from the side panel in another Chrome window, and the post changed there after this side panel showed it, so what was done here was not saved. Finish or stop the post there.');
 });
 
+// Use original on a cropped photo is part of choosing what goes on the
+// listing: it is folded into "the photos picked", so the list of five stays.
+// The photo check itself (branding) is automatic and never named.
+test('a photo set back to the website\'s original here counts as the photos picked; the automatic photo check never does', () => {
+  const back = ['https://img.example.test/2.jpg'];
+  const r = notSavedReport({ copy: { ...broughtBack, photoOriginals: back }, broughtBack, saved: formOpenThere, other: FORM });
+  assert.deepEqual(r.notSaved, ['the photos picked']);
+  // a pick and a Use original together are still named once
+  assert.deepEqual(notSavedReport({ copy: { ...broughtBack, photoPick: back, photoOriginals: back }, broughtBack, saved: formOpenThere, other: FORM }).notSaved, ['the photos picked']);
+  // the same choice made in the other window is in the saved post: nothing lost
+  assert.deepEqual(notSavedReport({ copy: { ...broughtBack, photoOriginals: back }, broughtBack, saved: { ...formOpenThere, photoOriginals: back }, other: FORM }).notSaved, []);
+  // set back and then put back to cropped here: the copy is as it was brought back
+  assert.deepEqual(notSavedReport({ copy: { ...broughtBack, photoOriginals: null }, broughtBack: { ...broughtBack, photoOriginals: null }, saved: formOpenThere, other: FORM }).notSaved, []);
+  // a save from before photoOriginals was kept (no field at all) reads the same as none set back
+  assert.deepEqual(notSavedReport({ copy: { ...broughtBack, photoOriginals: [] }, broughtBack, saved: formOpenThere, other: FORM }).notSaved, []);
+  // the photo check that ran here (or a new one) is the panel's own work, done again by itself
+  const checked = { version: 1, vin: 'AAA', checkedAt: '2026-10-08T12:00:00.000Z', lot: 0, photos: { [back[0]]: { status: 'cropped', crop: { x: 0, y: 0, w: 640, h: 432 }, width: 640, height: 480 } } };
+  assert.deepEqual(notSavedReport({ copy: { ...broughtBack, branding: checked }, broughtBack, saved: formOpenThere, other: FORM }).notSaved, []);
+  // begun here, with a photo set back: it is this panel's choice
+  const mine = { ...broughtBack, windowId: 2, photoOriginals: back };
+  assert.deepEqual(notSavedReport({ copy: mine, broughtBack: null, saved: formOpenThere, other: FORM }).notSaved, ['the photos picked']);
+});
+
 test('only what was done in this panel, and is not in the post the other window saved, is kept or named', () => {
   // nothing done here (the car read again at Open the Marketplace form, say): the panel says where
   // the post is and what to do, claims nothing was lost, and keeps and names nothing
