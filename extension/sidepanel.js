@@ -593,7 +593,8 @@ async function readForBranding(urls, { mine, live, deadline }) {
 // Every wait is followed by live(): a post dropped meanwhile (clearFlow), a
 // check let go (stopBranding) or another car on screen takes nothing from it.
 async function checkBranding({ auto = false, onlyIfNone = false } = {}) {
-  if (!brandingOn() || !state.vehicle || state.brandingRun || state.step !== 'review') return undefined;
+  // never while the form is opening (Check again clicked as Open the Marketplace form runs): the photos that go are the ones the thumbnails showed
+  if (!brandingOn() || !state.vehicle || state.brandingRun || state.step !== 'review' || state.opening) return undefined;
   if ((auto && !postsWindow()) || (onlyIfNone && brandingNow())) return undefined;
   const urls = brandingUrls().filter((u) => !isFacebookServer(u)); // never downloaded from (src/photoHosts.js)
   if (!urls.length) return undefined;
@@ -602,7 +603,8 @@ async function checkBranding({ auto = false, onlyIfNone = false } = {}) {
   // set before the first wait, so a render in the same turn already draws the progress and the form buttons off
   const mine = { done: 0, total: urls.length, stopped: false };
   state.brandingRun = mine;
-  const live = () => run === flowRun && state.brandingRun === mine && state.vin === vin && !mine.stopped;
+  // also gone once the review is left (the form opening): a crop the person has not seen never applies
+  const live = () => run === flowRun && state.brandingRun === mine && state.vin === vin && !mine.stopped && state.step === 'review' && !state.opening;
   redrawPhotos(); // Check again: the progress and Skip the check in place of the button
   let result = null;
   let lot = [];
@@ -631,7 +633,7 @@ async function checkBranding({ auto = false, onlyIfNone = false } = {}) {
   } finally {
     if (state.brandingRun === mine) state.brandingRun = null;
   }
-  if (run !== flowRun || state.vin !== vin || mine.stopped) return undefined;
+  if (run !== flowRun || state.vin !== vin || mine.stopped || state.step !== 'review' || state.opening) return undefined;
   if (result) {
     const checkedAt = new Date().toISOString();
     const photos = {};

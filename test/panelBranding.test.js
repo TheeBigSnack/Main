@@ -215,6 +215,31 @@ test('a post dropped, a check skipped or another car on screen while the photo c
   assert.ok(!o.calls.some((c) => /^(findBranding|save)/.test(c)));
 });
 
+test('a check whose review was left (the form opening) takes nothing from it, and none starts while the form opens', async () => {
+  // the form starts opening while a batch downloads (a way round the buttons being off): the crop the person never saw is dropped
+  const p = panel({ hold: true, overlay: PHOTOS });
+  const running = p.fns.checkBranding();
+  await settle();
+  p.state.opening = true;
+  p.held.shift()();
+  await running;
+  await settle();
+  assert.equal(p.state.branding, null);
+  assert.ok(!p.calls.some((c) => /^(sample|findBranding|status|save)/.test(c)), p.calls.join(' | '));
+  // or the step moves on before the answers come: still nothing lands
+  const q = panel({ overlay: PHOTOS });
+  const moved = q.fns.checkBranding();
+  q.state.step = 'filling';
+  await moved;
+  assert.equal(q.state.branding, null);
+  // Check again while the form opens does nothing
+  const r = panel({ overlay: PHOTOS });
+  r.state.opening = true;
+  await r.fns.checkBranding();
+  assert.equal(r.state.brandingRun, null);
+  assert.deepEqual(r.calls, []);
+});
+
 test('the automatic photo check runs only in the post\'s own window, with the setting on, at review, once, and reads only servers Chrome already allows', async () => {
   for (const [what, opts] of [['a second window', { own: false }], ['the setting off', { settings: { cropBranding: false } }], ['no settings read yet', { settings: null }], ['not at review', { step: 'publish' }], ['no photos', { photos: [] }]]) {
     const p = panel(opts);
