@@ -183,13 +183,16 @@ test('cropPhoto cuts exactly the plan\'s rectangle from the bytes that were chec
   assert.deepEqual(s.log.filter((l) => ['canvas', 'drawImage', 'encode'].includes(l[0])), [['canvas', 640, 432], ['drawImage', 0, 0, 640, 432, 0, 0, 640, 432], ['encode', 'image/png', 0.92]]);
   assert.ok(!s.log.some((l) => l[0] === 'set'), 'nothing about the drawing is changed for the crop');
   assert.equal(s.open(), 0);
-  // a JPEG stays a JPEG; an AVIF becomes a JPEG (Chrome can't write AVIF)
+  // a JPEG stays a JPEG; an AVIF becomes a PNG (Chrome can't write AVIF, and a JPEG would fill see-through pixels in black)
   s.log.length = 0;
   await cropPhoto(dataUrl(bytes, 'image/jpeg'), plan);
   assert.deepEqual(s.log.find((l) => l[0] === 'encode'), ['encode', 'image/jpeg', 0.92]);
   s.log.length = 0;
   await cropPhoto(dataUrl(bytes, 'image/avif'), plan);
-  assert.deepEqual(s.log.find((l) => l[0] === 'encode'), ['encode', 'image/jpeg', 0.92]);
+  assert.deepEqual(s.log.find((l) => l[0] === 'encode'), ['encode', 'image/png', 0.92]);
+  s.log.length = 0;
+  await cropPhoto(dataUrl(bytes, 'image/webp'), plan);
+  assert.deepEqual(s.log.find((l) => l[0] === 'encode'), ['encode', 'image/webp', 0.92], 'a WebP stays a WebP');
 
   // the website changed the photo since the check: other bytes, or the same bytes said to be another size
   s.log.length = 0;

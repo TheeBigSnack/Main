@@ -17,8 +17,11 @@ import { checkSize, matchesCheck } from './photoBranding.js';
 // or a HEIC is not checked: it goes on as the website shows it.
 const DECODED = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/avif']);
 // A cropped photo is saved again in its own format where Chrome can write it,
-// else as a JPEG. Facebook compresses every upload again anyway.
+// else (an AVIF) as a PNG: lossless and with any see-through pixels kept as
+// they are, where a JPEG would fill them in black. Facebook compresses every
+// upload again anyway.
 const WRITTEN = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const FALLBACK = 'image/png';
 const QUALITY = 0.92;
 
 // "data:image/png;base64,...." -> { type, bytes }, decoded by hand (no fetch
@@ -107,7 +110,7 @@ export async function cropPhoto(dataUrl, plan) {
     if (!matchesCheck(plan, { width: bitmap.width, height: bitmap.height, sha })) return { ok: false, reason: 'changed' };
     const canvas = new OffscreenCanvas(plan.w, plan.h);
     canvas.getContext('2d').drawImage(bitmap, plan.x, plan.y, plan.w, plan.h, 0, 0, plan.w, plan.h);
-    const blob = await canvas.convertToBlob({ type: WRITTEN.has(parsed.type) ? parsed.type : 'image/jpeg', quality: QUALITY });
+    const blob = await canvas.convertToBlob({ type: WRITTEN.has(parsed.type) ? parsed.type : FALLBACK, quality: QUALITY });
     if (!blob || !blob.size || !/^image\//.test(blob.type)) return { ok: false, reason: 'decode' };
     return { ok: true, dataUrl: await dataUrlOf(blob), type: blob.type, width: plan.w, height: plan.h };
   } catch (e) {
