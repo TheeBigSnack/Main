@@ -262,6 +262,22 @@ try {
   assert.equal(await panel.textContent('#photoCrop-1'), 'Use cropped');
   assert.equal(await panel.$('#brandingProgress'), null, 'no second check of the same photos');
   await fb.close();
+  // Check again on a slow photo server: the form waits for the check, and Skip the check lets it go with the last check's crops standing
+  await dealer.request.get(`${origin}/photo-delay?ms=4000`);
+  await panel.click('#brandingCheck');
+  await panel.waitForSelector('#brandingProgress');
+  assert.match(await panel.textContent('#brandingProgress'), /^Checking the photos for dealer branding: \d of 6…$/);
+  assert.equal(await panel.isDisabled('#openForm'), true, 'the form waits for the check');
+  assert.equal(await panel.getAttribute('#openForm', 'aria-describedby'), 'formWaits');
+  assert.equal(await panel.textContent('#formWaits'), 'Open the Marketplace form is ready when the photo check ends, or click Skip the check.');
+  await panel.focus('#brandingStop');
+  await panel.keyboard.press('Enter');
+  await panel.waitForFunction(() => /Photo check skipped: the photos go on as the last check left them\./.test(document.getElementById('status').textContent));
+  assert.equal(await panel.evaluate(() => document.activeElement.id), 'brandingCheck', 'the keyboard moves to the button that took its place');
+  assert.equal(await panel.isDisabled('#openForm'), false);
+  assert.equal(await panel.$('#formWaits'), null);
+  assert.equal(await panel.textContent('#photoCrop-1'), 'Use cropped', 'the last check and the choice stand');
+  await dealer.request.get(`${origin}/photo-delay?ms=0`);
   await panel.click('#stopPost');
   await panel.waitForFunction(() => /Stopped the post/.test(document.getElementById('status').textContent));
   await panel.close();
