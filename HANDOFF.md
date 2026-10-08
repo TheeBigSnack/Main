@@ -887,7 +887,9 @@ A cloud session in the Lot Current project (the "Build the plan's Claude steps" 
 - The Supabase functions import `npm:@supabase/supabase-js@2` without an exact version, so each deploy and each CI stack run takes the newest 2.x. On 2026-10-07 CI's stack job failed once because npm published 2.117.3 while the job started (the re-run passed). Pinning a version or committing a Deno lockfile is the owner's call, since it changes what production imports.
 - Version 0.6.0 waits for the live-check walkthrough's results.
 
-## 24. The dealer-branding round (2026-10-08)
+## 24. The dealer-branding round (2026-10-08, pull request #13)
+
+The work is on `claude/photo-branding-removal-5fjk07`, branched from #12's head (`claude/plan-build-g3z6aj` at `6c727f9`), and opened as draft PR #13 with #12's branch as its base. Merge order: #10, #9, #12, then #13. The pilot zip the owner asked for afterwards (`npm run pack -- --pilot`, built from this branch, so it holds #10, #12 and #13 but not #9) is in the project folder at `launch/pilot/lot-current-extension-0.5.0-pilot.zip`, and `launch/pilot/set-up-day.md` now names it and the photo check.
 
 The owner asked: "The app should also remove dealer branding on the pictures taken": the overlays the website's photos carry (logo bands, top bars, frames, corner badges) should come off before the photos go onto the salesperson's Marketplace listing. A cloud session measured an approach on synthetic photos first, then built it in lanes, each in its own worktree (the pure module, the side panel, the texts, the measuring harness), merged afterwards. Decided with the owner's request and not to be reopened without him: local processing only (no new permission, no paid or outside service, no new dependency); crop only; the person sees every cropped photo and can use the original; a per-website dealership setting, on by default, not in the synced profile; a queue stops at review for a car whose photos were cropped; rule 5 still holds through the description; the pilot numbers record nothing about crops.
 
