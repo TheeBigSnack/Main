@@ -143,11 +143,22 @@ test('help.md and README give the "vanished at once" rule with the lot size it s
   assert.match(readme, new RegExp(`across at least ${WORD[MIN_PHOTOS]} of the car's photos of one size, or, for a banner on the cover photo only, across the cover photos of at least ${WORD[MIN_PHOTOS - 1]} other cars`), 'README: the floors of the dealer-branding check');
   assert.match(readme, new RegExp(`a crop always keeps at least ${keep}% of the photo`));
   assert.match(readme, new RegExp(`small copies \\(at most ${LOT_LONG_SIDE} pixels across\\) of the cover photos of the last ${COVER_SAMPLE_CARS} cars`));
-  // the floors stay floors: no text may promise a photo is free of branding
-  for (const [name, text] of [['docs/help.md', help], ['README.md', readme]]) {
-    for (const sentence of text.split(/(?<=[.!?])\s+/).filter((x) => /(?:free of|without|no) (?:dealer )?branding|carry no branding/i.test(x))) {
-      assert.match(sentence, /can't promise|cannot promise|not a promise|never claim|not claim/i, `${name} promises a photo is free of branding: "${sentence.slice(0, 120)}"`);
+  // the floors stay floors: no text may promise a photo is free of branding.
+  // Any sentence that speaks of branding gone (free of it, without it,
+  // removed, stripped, branding-free, logo-free, clean photos: the in-panel
+  // words test/photoBranding.test.js bans, and more) must say it is no promise.
+  const promise = /free of (?:any )?(?:dealer )?branding|(?:without|no) (?:more |any )?(?:dealer(?:ship)?(?:'s)? )?(?:branding|logos?)\b(?! band)|carr(?:y|ies) no branding|branding[- ]free|logos?[- ]free|(?:remov|strip|eras|delet)(?:e|es|ed|ing|s|ped|ping)? (?:off )?(?:the |all |every |any )?(?:(?:website's |dealer(?:ship)?(?:'s)? )?)(?:branding|logos?)\b(?! band)|(?:branding|logos?) (?:is |are )?(?:all )?(?:removed|gone|stripped|erased)|(?:removed|gone) (?:all|every)|all (?:the )?branding|\bclean (?:photos?|pictures?|images?)|photos? (?:come out |are |look )?clean\b/i;
+  const hedge = /can't promise|cannot promise|not a promise|no promise|never claim|not claim|doesn't promise|does not promise/i;
+  const texts = [['docs/help.md', help], ['README.md', readme], ['store/listing.md', read('../store/listing.md')]];
+  for (const f of readdirSync(new URL('../marketing/', import.meta.url)).filter((x) => x.endsWith('.md'))) texts.push([`marketing/${f}`, read(`../marketing/${f}`)]);
+  for (const [name, text] of texts) {
+    for (const sentence of text.split(/(?<=[.!?])\s+/).filter((x) => promise.test(x))) {
+      assert.match(sentence, hedge, `${name} promises a photo is free of branding: "${sentence.slice(0, 160)}"`);
     }
+  }
+  // the guard catches the plain ways of saying it
+  for (const said of ['Every photo then goes on with the dealer branding removed.', 'Lot Current removes the dealer branding from every photo.', 'Your photos come out clean.', 'Branding-free photos in seconds.', 'It strips the logos off.', 'No more dealer logos on your listings.', 'Photos go on without branding.']) {
+    assert.ok(promise.test(said) && !hedge.test(said), `the guard misses: ${said}`);
   }
 });
 
