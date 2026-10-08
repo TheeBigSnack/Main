@@ -327,6 +327,22 @@ test('a cover-only banner is found through other cars’ covers', () => {
   assert.equal(findBranding(g).photos.p1.status, 'none');
 });
 
+test('a band a few rows deeper on the covers than on the other photos is cut to its full depth on the cover', () => {
+  // every photo has the bottom band; the website's covers also carry a yellow strip just over it
+  for (const extra of [1, 2, 3, 4, 5]) {
+    const strip = (x, y) => (y >= 165 - extra && y < 165 ? [255, 200, 0] : null);
+    const coverOverlay = (x, y) => strip(x, y) || band(x, y);
+    const g = gallery(8, band, { seed: 11 });
+    paint(g[0].rgba, 256, coverOverlay);
+    const res = findBranding(g, { lot: lotOf(6, coverOverlay, { seed: 7100 }) });
+    const cover = res.photos.p1;
+    assert.equal(cover.status, 'cropped', `strip of ${extra} rows`);
+    assert.equal(cover.left, null);
+    assertHonestCrop(cover, coverOverlay, `strip of ${extra} rows:`);
+    for (const id of ['p2', 'p5', 'p8']) assertHonestCrop(res.photos[id], band, `${id}, strip of ${extra} rows:`);
+  }
+});
+
 test('lot samples of another size, or repeats of this cover, are not counted', () => {
   const g = gallery(8, null, { seed: 10 });
   paint(g[0].rgba, 256, banner);
@@ -407,6 +423,22 @@ test('a backdrop that never changes is not taken for an overlay', () => {
   for (const e of Object.values(res.photos)) {
     assert.notEqual(e.status, 'cropped');
     assert.notEqual(e.status, 'kept');
+  }
+});
+
+test('a crop reaches the far edges of a photo whose size the check grid does not divide', () => {
+  // 667x445 is checked at 256x171, and (445 / 171) * 171 is a hair under 445 in floating point
+  for (const [width, height] of [[667, 445], [445, 667], [1000, 667], [1023, 682]]) {
+    const { w, h } = checkSize(width, height);
+    const g = Array.from({ length: 10 }, (_, i) => sample(`p${i + 1}`, paint(photo(700 + i, w, h), w, topBar), width, height, w, h));
+    const res = findBranding(g);
+    for (const e of Object.values(res.photos)) {
+      assert.equal(e.status, 'cropped', `${width}x${height}`);
+      assert.deepEqual(e.sides, ['top'], `${width}x${height}: only the top had a band (${JSON.stringify(e.crop)})`);
+      assert.deepEqual([e.crop.x, e.crop.x + e.crop.w, e.crop.y + e.crop.h], [0, width, height], `${width}x${height}: ${JSON.stringify(e.crop)}`);
+      assert.equal(photoNote(e), 'Cropped: logo band off the top');
+    }
+    assert.match(brandingSummary(res.photos, Object.keys(res.photos)), /^Cropped the same logo band off the top of 10 of 10 photos\./);
   }
 });
 

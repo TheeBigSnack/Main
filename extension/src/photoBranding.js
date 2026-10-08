@@ -970,11 +970,13 @@ function cropFor(grid, carried, W, H, cfg) {
     rect = open;
   }
   // to natural pixels, rounding inward (the crop never reaches back into a
-  // cut), and the floor checked again on what is actually sent
-  const X0 = Math.min(W, Math.ceil(rect.x0 * sx));
-  const Y0 = Math.min(H, Math.ceil(rect.y0 * sy));
-  const X1 = Math.max(X0, Math.floor(rect.x1 * sx));
-  const Y1 = Math.max(Y0, Math.floor(rect.y1 * sy));
+  // cut), and the floor checked again on what is actually sent. Whole-number
+  // maths (grid line * natural size / grid size): (W / w) * w can come out a
+  // hair under W, which would cut a line off an edge that had no band.
+  const X0 = Math.min(W, Math.ceil((rect.x0 * W) / w));
+  const Y0 = Math.min(H, Math.ceil((rect.y0 * H) / h));
+  const X1 = Math.max(X0, Math.floor((rect.x1 * W) / w));
+  const Y1 = Math.max(Y0, Math.floor((rect.y1 * H) / h));
   const crop = { x: X0, y: Y0, w: X1 - X0, h: Y1 - Y0 };
   if (crop.w <= 0 || crop.h <= 0 || crop.w * crop.h < minArea) return { status: 'kept', left: 'too-much' };
   if (crop.x === 0 && crop.y === 0 && crop.w === W && crop.h === H) return { status: 'kept', left: left || 'inside' };
@@ -1196,7 +1198,10 @@ function toCheckGrid(part, lw, lh, w, h) {
   const fy = h / lh;
   if (part.kind === 'band') {
     const f = part.side === 'top' || part.side === 'bottom' ? fy : fx;
-    return { ...part, cut: Math.ceil(part.cut * f) + 1, depthOnGrid: Math.ceil(part.depth * f), lot: true };
+    // reach: how deep on the check grid the overlay the lot saw may go. The
+    // line past the band's last lot line (or its shadow) is not steady across
+    // the covers, but it may still be overlay in all but its last check line.
+    return { ...part, cut: Math.ceil(part.cut * f) + 1, reach: Math.ceil((part.depth + Math.max(part.ext, 1)) * f), lot: true };
   }
   const px = [];
   for (const p of part.pixels) {
@@ -1209,7 +1214,9 @@ function toCheckGrid(part, lw, lh, w, h) {
 
 // One band per side. The same band found in this car's photos and in the
 // lot's covers: the car's cut (the finer grid, more photos) wins unless the
-// lot's band reaches clearly deeper (more overlay on the cover).
+// overlay the lot's covers show may reach past it (more overlay on the cover,
+// such as a strip over the band on covers only); then the lot's cut, which
+// reaches past that, is taken.
 function dedupeBands(bands) {
   const by = new Map();
   for (const b of bands) {
@@ -1218,7 +1225,7 @@ function dedupeBands(bands) {
     else {
       const [own, lot] = prev.lot ? [b, prev] : [prev, b];
       if (own.lot || !lot.lot) by.set(b.side, prev.cut >= b.cut ? prev : b);
-      else by.set(b.side, lot.depthOnGrid > own.depth + 3 ? lot : own);
+      else by.set(b.side, lot.reach > own.cut ? lot : own);
     }
   }
   return [...by.values()];
