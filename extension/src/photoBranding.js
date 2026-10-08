@@ -626,52 +626,74 @@ function softBand(sigma, D, M, w, h, R, side, cfg, tmpl) {
   const minDepth = Math.max(2, Math.round(cfg.softMin * dim));
   if (maxDepth < minDepth) return null;
   const q = lineMedians(sigma, w, R, side, 0, maxDepth + refLen + 1);
-  let best = null;
-  for (let d = minDepth; d <= maxDepth && d + 1 + refLen <= q.length; d++) {
-    const ref = quantile(q, d + 1, d + 1 + refLen, 0.5);
-    if (ref < cfg.refMin) continue;
-    const inside = quantile(q, 0, d, 0.8);
-    const ratio = inside / ref;
-    if (ratio <= cfg.softRatio && (!best || ratio < best.ratio)) best = { depth: d, ratio, ref };
-  }
+  const past = Math.max(2, Math.round(cfg.extMax * dim));
+  // the depth in [lo, hi] whose lines vary least against the photo past them
+  const edgeIn = (lo, hi) => {
+    let best = null;
+    for (let d = lo; d <= hi && d + 1 + refLen <= q.length; d++) {
+      const ref = quantile(q, d + 1, d + 1 + refLen, 0.5);
+      if (ref < cfg.refMin) continue;
+      const inside = quantile(q, 0, d, 0.8);
+      const ratio = inside / ref;
+      if (ratio <= cfg.softRatio && (!best || ratio < best.ratio)) best = { depth: d, ratio, ref };
+    }
+    if (!best) return null;
+    // the depth with the lowest ratio can stop short of the band's inner edge
+    // (its last lines blend into the photo): go on while the lines still vary
+    // clearly less than the photo past them
+    const grow = Math.min(hi, best.depth + past);
+    while (best.depth < grow && q[best.depth] <= cfg.softGrow * best.ref) best.depth++;
+    return best;
+  };
+  // the designed marks in lines [0, depth): detail between steady pixels and
+  // lettering that stands out from the band, and the first and last line they reach
+  const held = (best) => {
+    let det = 0;
+    let first = -1;
+    let last = -1;
+    for (let k = 0; k < best.depth; k++) {
+      const c = lineCount(D, w, R, side, k);
+      det += c;
+      if (c && first < 0) first = k;
+      if (c) last = k;
+    }
+    const letters = letterEdges(M, sigma, tmpl.medY, w, h, R, side, best.depth, cfg.softGrow * best.ref, cfg);
+    for (let i = 0; i < letters.length; i += 2) {
+      const k = lineIn(letters[i], w, R, side);
+      if (first < 0 || k < first) first = k;
+      if (k > last) last = k;
+    }
+    // a band is laid out around what it holds: it reaches past its lettering
+    // or logo by about as much as it leaves between them and the edge
+    return { enough: det + letters.length / 2 >= cfg.detailMin, letters, last, reach: last + 1 + Math.max(first, cfg.margin) + past };
+  };
+  let best = edgeIn(minDepth, maxDepth);
   if (!best) return null;
-  // the depth with the lowest ratio can stop short of the band's inner edge
-  // (its last lines blend into the photo): go on while the lines still vary
-  // clearly less than the photo past them
-  const grow = Math.min(maxDepth, best.depth + Math.max(2, Math.round(cfg.extMax * dim)));
-  while (best.depth < grow && q[best.depth] <= cfg.softGrow * best.ref) best.depth++;
-  let det = 0;
-  let first = -1;
-  let last = -1;
-  for (let k = 0; k < best.depth; k++) {
-    const c = lineCount(D, w, R, side, k);
-    det += c;
-    if (c && first < 0) first = k;
-    if (c) last = k;
+  let marks = held(best);
+  if (!marks.enough) return null;
+  if (best.depth > marks.reach) {
+    // a stretch that goes on well past the marks in it: the photo beside a
+    // band that varies little (it would cut into the picture), or a part of
+    // the picture itself (a sky that varies less than the ground, with a
+    // corner logo over it). Its inner edge is looked for again within reach
+    // of the marks, and the checks below tell a band from a sky there.
+    best = edgeIn(Math.max(minDepth, marks.last + 1), Math.min(maxDepth, marks.reach));
+    if (!best) return null;
+    marks = held(best);
+    if (!marks.enough || best.depth > marks.reach) return null;
   }
-  const letters = letterEdges(M, sigma, tmpl.medY, w, h, R, side, best.depth, cfg.softGrow * best.ref, cfg);
-  if (det + letters.length / 2 < cfg.detailMin) return null;
-  for (let i = 0; i < letters.length; i += 2) {
-    const k = lineIn(letters[i], w, R, side);
-    if (first < 0 || k < first) first = k;
-    if (k > last) last = k;
-  }
-  // a band is laid out around what it holds: it reaches past its lettering
-  // or logo by about as much as it leaves between them and the edge. A
-  // stretch that goes on well past the only mark in it (a corner logo over
-  // a sky that varies less than the ground below) is the photo, not a band.
-  if (best.depth > last + 1 + Math.max(first, cfg.margin) + Math.max(2, Math.round(cfg.extMax * dim))) return null;
   // the photo goes on under a see-through band: just inside its edge each
   // photo shows, dimmed or lightened, what it shows just outside, so the two
   // rise and fall together from photo to photo. A part of the picture that
   // never changes (the backdrop of a spot where every car is photographed)
   // varies little too, but it doesn't follow the changing photo next to it.
   // And a band dims or lightens every photo by one share, so the change from
-  // photo to photo shows through it by clearly less than in full (markStrip).
+  // photo to photo shows through it by clearly less than in full (markStrip);
+  // a sky goes on across the line in full.
   if (tmpl.n < cfg.softMinPhotos) return null;
   const fit = edgeFit(tmpl, w, R, side, best.depth);
   if (fit.follow < cfg.softFollow || fit.slope > cfg.stripRatio) return null;
-  return { side, depth: best.depth, soft: true, detailed: true, ratio: best.ratio, follow: +fit.follow.toFixed(2), letters };
+  return { side, depth: best.depth, soft: true, detailed: true, ratio: best.ratio, follow: +fit.follow.toFixed(2), letters: marks.letters };
 }
 
 // A see-through strip along one side of R that a mark (a logo or text with
