@@ -30,7 +30,9 @@
 // the picture that never changes (a booth with a fixed camera) is too much of
 // the photo (too alike), or a mark whose brightness follows each photo's
 // exposure (scene), or, next to a band, a strip that doesn't follow the
-// changing photo beside it (not a see-through band).
+// changing photo beside it (not a see-through band), or that follows it in
+// full (a sky, which varies less than the rest but is not dimmed or
+// lightened by a band laid over it).
 
 export const CHECK_LONG_SIDE = 256; // each photo is drawn at this long side for the check (aspect kept, never upscaled)
 export const LOT_LONG_SIDE = 128; // stored cover samples: a 2x2 box downscale of a check sample (lotSample)
@@ -72,6 +74,7 @@ export const TUNING = Object.freeze({
   softGrow: 0.7, // ...and reaches on while its lines vary at most this share of the photo past it
   softFollow: 0.5, // ...and the photo goes on under it: brightness just inside its edge follows just outside (correlation)
   softMinPhotos: 4, // ...judged only from at least this many distinct photos
+  stripRatio: 0.8, // a mark at an edge sits in a see-through strip when the lines from the edge past it vary at most this share of the photo beyond
   tooAlike: 0.5, // overlay over this share of the photo: the photos are too alike to tell
   insideMax: 0.1, // overlay marks inside the photo (not edge bands) over this share: too alike
   coreSigma: 3, // a part's steady pixels: at least half the photos within this of the median
@@ -533,12 +536,21 @@ function linePixels(w, R, side, from, to) {
 // inside stays put (an opaque band, or a part of the picture that never
 // changes) while the photo next to it changes.
 function edgeFollow(tmpl, w, R, side, depth) {
+  return edgeFit(tmpl, w, R, side, depth).follow;
+}
+
+// edgeFollow's correlation, and how much of the change outside the edge
+// shows inside it from photo to photo (the median slope): near 1 when the
+// photo just goes on (a sky, a wall), about 1 - opacity under a see-through
+// band, which dims or lightens every photo by the same share.
+function edgeFit(tmpl, w, R, side, depth) {
   const { n, LY } = tmpl;
   const a = linePixels(w, R, side, Math.max(0, depth - 3), Math.max(1, depth - 2));
   const b = linePixels(w, R, side, depth + 2, depth + 3);
   const L = Math.min(a.length, b.length);
-  if (!L || n < 3) return 0;
+  if (!L || n < 3) return { follow: 0, slope: 1 };
   const cs = new Float64Array(L);
+  const ss = new Float64Array(L);
   for (let k = 0; k < L; k++) {
     const pa = a[k] * n;
     const pb = b[k] * n;
@@ -554,16 +566,56 @@ function edgeFollow(tmpl, w, R, side, depth) {
     }
     const va = saa / n - (sa / n) ** 2;
     const vb = sbb / n - (sb / n) ** 2;
-    cs[k] = va >= 1 && vb >= 1 ? (sab / n - (sa / n) * (sb / n)) / Math.sqrt(va * vb) : 0;
+    const cov = sab / n - (sa / n) * (sb / n);
+    cs[k] = va >= 1 && vb >= 1 ? cov / Math.sqrt(va * vb) : 0;
+    ss[k] = vb >= 1 ? cov / vb : 1;
   }
   cs.sort();
-  return cs[L >> 1];
+  ss.sort();
+  return { follow: cs[L >> 1], slope: ss[L >> 1] };
+}
+
+// The lettering of a see-through band, told by its contrast with the band:
+// a steady pixel (M) next to a pixel of the band itself (in lines [0, depth)
+// of the side, not steady, varying at most `calm` between photos) whose
+// median brightness is clearly different. Opaque lettering of one colour has
+// no steady neighbour of another colour (the band around it changes with
+// each photo), so the detail between steady pixels (D) misses it. Returns
+// [p, q, p, q, ...]: each such pixel with the band pixel it stands out from,
+// so a photo can be matched on that contrast being there (carries).
+function letterEdges(M, sigma, medY, w, h, R, side, depth, calm, cfg) {
+  const lineOf = (x, y) => (side === 'top' ? y - R.y0 : side === 'bottom' ? R.y1 - 1 - y : side === 'left' ? x - R.x0 : R.x1 - 1 - x);
+  const inZone = (x, y) => x >= R.x0 && x < R.x1 && y >= R.y0 && y < R.y1 && lineOf(x, y) < depth;
+  const out = [];
+  for (const p of zonePixels(M, w, R, side, depth)) {
+    const x = p % w;
+    const y = (p - x) / w;
+    let partner = -1;
+    for (let dy = -1; dy <= 1 && partner < 0; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const xx = x + dx;
+        const yy = y + dy;
+        if ((!dx && !dy) || xx < 0 || yy < 0 || xx >= w || yy >= h || !inZone(xx, yy)) continue;
+        const q = yy * w + xx;
+        if (M[q] || sigma[q] > calm) continue;
+        const d = medY[p] - medY[q];
+        if (d >= cfg.detailContrast || -d >= cfg.detailContrast) {
+          partner = q;
+          break;
+        }
+      }
+    }
+    if (partner >= 0) out.push(p, partner);
+  }
+  return out;
 }
 
 // A see-through band (a darkened or lightened strip the photo shows through)
 // along one side of R: lines whose spread between photos is a fraction of the
-// photo's just beyond, with designed marks (opaque text or logo) inside.
-function softBand(sigma, D, w, h, R, side, cfg, tmpl) {
+// photo's just beyond, with designed marks (opaque text or logo) inside: the
+// detail between steady pixels, or lettering that stands out from the band
+// (letterEdges).
+function softBand(sigma, D, M, w, h, R, side, cfg, tmpl) {
   const dim = sideDim(side, w, h);
   const space = room(R, side);
   const refLen = Math.max(3, Math.round(cfg.refLen * dim));
@@ -587,7 +639,8 @@ function softBand(sigma, D, w, h, R, side, cfg, tmpl) {
   while (best.depth < grow && q[best.depth] <= cfg.softGrow * best.ref) best.depth++;
   let det = 0;
   for (let k = 0; k < best.depth; k++) det += lineCount(D, w, R, side, k);
-  if (det < cfg.detailMin) return null;
+  const letters = letterEdges(M, sigma, tmpl.medY, w, h, R, side, best.depth, cfg.softGrow * best.ref, cfg);
+  if (det + letters.length / 2 < cfg.detailMin) return null;
   // the photo goes on under a see-through band: just inside its edge each
   // photo shows, dimmed or lightened, what it shows just outside, so the two
   // rise and fall together from photo to photo. A part of the picture that
@@ -596,7 +649,43 @@ function softBand(sigma, D, w, h, R, side, cfg, tmpl) {
   if (tmpl.n < cfg.softMinPhotos) return null;
   const follow = edgeFollow(tmpl, w, R, side, best.depth);
   if (follow < cfg.softFollow) return null;
-  return { side, depth: best.depth, soft: true, detailed: true, ratio: best.ratio, follow: +follow.toFixed(2) };
+  return { side, depth: best.depth, soft: true, detailed: true, ratio: best.ratio, follow: +follow.toFixed(2), letters };
+}
+
+// A see-through strip along one side of R that a mark (a logo or text with
+// edges of its own) sits in: a lighter tint than softBand finds, or one whose
+// lettering it can't tell, still varies less between photos than the photo
+// past it, and the photo goes on under it. Stepping around the mark alone
+// would leave the rest of the strip in the photo, so the strip goes with the
+// mark. Its depth (lines from the side) reaches past the mark; null when
+// there is no such strip.
+function markStrip(sigma, tmpl, w, h, R, box, side, cfg) {
+  const inner = side === 'top' ? box.y1 - R.y0 : side === 'bottom' ? R.y1 - box.y0 : side === 'left' ? box.x1 - R.x0 : R.x1 - box.x0;
+  if (inner < 1) return null;
+  const dim = sideDim(side, w, h);
+  const refLen = Math.max(3, Math.round(cfg.refLen * dim));
+  const maxDepth = Math.min(Math.floor(cfg.maxBand * dim), room(R, side) - refLen - 2);
+  if (maxDepth < inner || tmpl.n < cfg.softMinPhotos) return null;
+  const q = lineMedians(sigma, w, R, side, 0, maxDepth + refLen + 1);
+  // the strip's inner edge is just past the mark (a logo sits inside its band)
+  const past = Math.max(2, Math.round(cfg.extMax * dim));
+  let best = null;
+  for (let d = inner; d <= Math.min(maxDepth, inner + past) && d + 1 + refLen <= q.length; d++) {
+    const ref = quantile(q, d + 1, d + 1 + refLen, 0.5);
+    if (ref < cfg.refMin) continue;
+    const ratio = quantile(q, 0, d, 0.8) / ref;
+    if (ratio <= cfg.stripRatio && (!best || ratio < best.ratio)) best = { depth: d, ratio, ref };
+  }
+  if (!best) return null;
+  const grow = Math.min(maxDepth, best.depth + past);
+  while (best.depth < grow && q[best.depth] <= cfg.softGrow * best.ref) best.depth++;
+  // the photo goes on under it, dimmed or lightened: inside its edge each
+  // photo follows what it shows just outside, but by clearly less (a part of
+  // the photo that only varies less than the rest, such as a sky, follows
+  // the photo next to it in full)
+  const fit = edgeFit(tmpl, w, R, side, best.depth);
+  if (fit.follow < cfg.softFollow || fit.slope > cfg.stripRatio) return null;
+  return { side, depth: best.depth };
 }
 
 // ---------- the template: what the overlay of a set of samples is ----------
@@ -638,7 +727,7 @@ function analyse(views, w, h, cfg) {
     kept = kept.filter((r, k) => !scene.has(k));
     lay = layout(kept);
   }
-  const { D, rl } = lay;
+  const { D, rl, pairOf } = lay;
   const { bands, marks, R, insideCount } = lay.found;
   if (R.x1 - R.x0 < 2 || R.y1 - R.y0 < 2) return { ...base, status: 'too-alike' };
   base.stats.inside = insideCount / Math.max(1, (R.x1 - R.x0) * (R.y1 - R.y0));
@@ -670,8 +759,12 @@ function analyse(views, w, h, cfg) {
       if (pieces.has(rid)) continue;
       const r = kept[rid];
       const det = [];
-      for (const p of r.pixels) if (D[p]) det.push(p);
-      pieces.set(rid, { rid, pixels: r.pixels, detailPixels: Int32Array.from(det), corePixels: coreOf(r.pixels), coreDetail: coreOf(det) });
+      const pairs = [];
+      for (const p of r.pixels) {
+        if (D[p]) det.push(p);
+        if (pairOf[p] >= 0) pairs.push(p, pairOf[p]);
+      }
+      pieces.set(rid, { rid, pixels: r.pixels, detailPixels: Int32Array.from(det), corePixels: coreOf(r.pixels), coreDetail: coreOf(det), pairs: Int32Array.from(pairs) });
     }
   });
   return { ...base, status: parts.length ? 'found' : 'none', parts, pieces: [...pieces.values()], R };
@@ -720,13 +813,15 @@ function analyse(views, w, h, cfg) {
     const V = new Uint8Array(P);
     for (const r of list) if (r.detail >= cfg.detailMin) for (const p of r.pixels) V[p] = 1;
     // edge bands, peeled from the outside in; then what is left inside
-    let found = peel(list, M, D, V, true);
+    // a see-through band's lettering and the band pixel each stands out from (letterEdges); -1 for none
+    const pairOf = new Int32Array(P).fill(-1);
+    let found = peel(list, M, D, V, rl, pairOf, true);
     // a plain band (no text or logo) is cut only as part of an overlay that has some
-    if (found.bands.length && found.bands.every((b) => !b.detailed) && !found.marks.length) found = peel(list, M, D, V, false);
-    return { M, D, V, rl, found };
+    if (found.bands.length && found.bands.every((b) => !b.detailed) && !found.marks.length) found = peel(list, M, D, V, rl, pairOf, false);
+    return { M, D, V, rl, pairOf, found };
   }
 
-  function peel(kept, M, D, V, allowFlat) {
+  function peel(kept, M, D, V, rl, pairOf, allowFlat) {
     let R = { x0: 0, y0: 0, x1: w, y1: h };
     const bands = [];
     const done = new Set();
@@ -750,10 +845,20 @@ function analyse(views, w, h, cfg) {
     // see-through bands with opaque marks in them
     for (const side of SIDES) {
       if (done.has(side)) continue;
-      const b = softBand(sigma, D, w, h, R, side, cfg, base);
+      const b = softBand(sigma, D, M, w, h, R, side, cfg, base);
       if (!b) continue;
       b.ext = extension(sigma, w, h, R, side, b.depth, cfg, n);
       b.cut = b.depth + Math.max(b.ext, 1) + cfg.margin - 1;
+      // the regions of its lettering are overlay parts like designed ones
+      for (let i = 0; i < b.letters.length; i += 2) {
+        pairOf[b.letters[i]] = b.letters[i + 1];
+        const r = kept[rl[b.letters[i]] - 1];
+        if (r && !r.lettered) {
+          r.lettered = true;
+          for (const p of r.pixels) V[p] = 1;
+        }
+      }
+      delete b.letters;
       b.pixels = zonePixels(V, w, R, side, b.depth);
       b.detailPixels = zonePixels(D, w, R, side, b.depth);
       bands.push(b);
@@ -781,7 +886,17 @@ function analyse(views, w, h, cfg) {
         if (!near.length) continue;
         const det = [];
         for (const p of near) if (D[p]) det.push(p);
-        marks.push({ kind: 'mark', pixels: Int32Array.from(near), detailPixels: Int32Array.from(det), box: boxOf(near, w) });
+        const box = boxOf(near, w);
+        // the see-through strip it sits in, if any, along the nearest side
+        // with no band (in R's lines, which cropFor's R starts from too only
+        // when no band was cut: a strip is only looked for then)
+        let strip = null;
+        if (!bands.length) {
+          const dist = { top: box.y0 - R.y0, bottom: R.y1 - box.y1, left: box.x0 - R.x0, right: R.x1 - box.x1 };
+          const side = SIDES.reduce((a, b) => (dist[b] < dist[a] ? b : a));
+          strip = markStrip(sigma, base, w, h, R, box, side, cfg);
+        }
+        marks.push({ kind: 'mark', pixels: Int32Array.from(near), detailPixels: Int32Array.from(det), box, strip });
       }
     }
     return { bands, marks, R, insideCount };
@@ -839,9 +954,11 @@ function carriedParts(tmpl, v, devRow, cfg) {
 }
 
 // Does this sample carry the region? Its colours match the template's at
-// the region's steady pixels, and at its text and logo edges. 'detail' when
-// the edges were there to match, 'plain' when the region has too few of them
-// and only its colour was matched, false when it is not carried.
+// the region's steady pixels, and at its text and logo edges (or, for the
+// lettering of a see-through band, the lettering stands out from the band
+// beside it in this photo too). 'detail' when the edges were there to match,
+// 'plain' when the region has too few of them and only its colour was
+// matched, false when it is not carried.
 function carries(tmpl, part, v, devRow, cfg) {
   const near = (p) => (devRow ? devRow[p] : maxDiff3(v.data, p * v.stride, tmpl.med, p * 3)) <= cfg.tol;
   // the part's steady pixels (the overlay itself) when there are enough of
@@ -852,7 +969,14 @@ function carries(tmpl, part, v, devRow, cfg) {
   let ok = 0;
   for (const p of px) if (near(p)) ok++;
   if (!px.length || ok < cfg.match * px.length) return false;
-  if (det.length < Math.min(cfg.detailMin, px.length)) return 'plain';
+  if (det.length < Math.min(cfg.detailMin, px.length)) {
+    const pairs = part.pairs || [];
+    if (pairs.length / 2 < Math.min(cfg.detailMin, px.length)) return 'plain';
+    const lum = (p) => (77 * v.data[p * v.stride] + 150 * v.data[p * v.stride + 1] + 29 * v.data[p * v.stride + 2] + 128) >> 8;
+    let shown = 0;
+    for (let i = 0; i < pairs.length; i += 2) if (Math.abs(lum(pairs[i]) - lum(pairs[i + 1])) * 2 >= cfg.detailContrast) shown++;
+    return shown < (cfg.matchDetail * pairs.length) / 2 ? false : 'detail';
+  }
   let okd = 0;
   for (const p of det) if (near(p)) okd++;
   return okd < cfg.matchDetail * det.length ? false : 'detail';
@@ -934,10 +1058,20 @@ function cropFor(grid, carried, W, H, cfg) {
   if (R.x1 - R.x0 < 2 || R.y1 - R.y0 < 2) return { status: 'kept', left: 'too-much' };
   // obstacles: every mark pixel inside R (or within the margin of it), grown by the margin
   const m = cfg.margin;
-  const obstacles = (marks) => {
+  const obstacles = (marks, strips) => {
     let obs = null;
     let count = 0;
     for (const mk of marks) {
+      // the see-through strip the mark sits in, from the photo's edge
+      const st = strips && mk.strip;
+      if (st) {
+        if (!obs) obs = new Uint8Array(w * h);
+        const d = Math.min(sideDim(st.side, w, h), st.depth + m);
+        for (let k = 0; k < d; k++) {
+          if (st.side === 'top' || st.side === 'bottom') obs.fill(1, (st.side === 'top' ? k : h - 1 - k) * w, (st.side === 'top' ? k : h - 1 - k) * w + w);
+          else for (let y = 0; y < h; y++) obs[y * w + (st.side === 'left' ? k : w - 1 - k)] = 1;
+        }
+      }
       for (const p of mk.pixels) {
         const x = p % w;
         const y = (p - x) / w;
@@ -956,14 +1090,23 @@ function cropFor(grid, carried, W, H, cfg) {
     }
     return { obs, count };
   };
-  const opaque = obstacles(carried.marks);
+  const opaque = obstacles(carried.marks, false);
   // cutting edge bands removes overlay; stepping around a mark inside costs
   // photo, so that may take at most (1 - markKeep) of what the bands leave
   const open = largestClear(null, w, R, sx, sy, cfg, A0, minArea);
   const floor = open ? Math.max(minArea, cfg.markKeep * open.area) : Infinity;
   let rect = null;
   let left = null;
-  if (open && opaque.count) rect = largestClear(opaque.obs, w, R, sx, sy, cfg, A0, floor);
+  // a mark in a see-through strip: the strip goes with it, when that keeps
+  // as much as stepping around the mark may; else the mark is stepped
+  // around as any other (the strip may then be the photo's own, such as a
+  // sky that varies little)
+  let strips = [];
+  if (open && opaque.count && carried.marks.some((mk) => mk.strip)) {
+    rect = largestClear(obstacles(carried.marks, true).obs, w, R, sx, sy, cfg, A0, floor);
+    if (rect) strips = SIDES.filter((sd) => carried.marks.some((mk) => mk.strip && mk.strip.side === sd));
+  }
+  if (open && opaque.count && !rect) rect = largestClear(opaque.obs, w, R, sx, sy, cfg, A0, floor);
   if (!rect) {
     if (!open) return { status: 'kept', left: 'too-much' };
     if (opaque.count) {
@@ -993,8 +1136,10 @@ function cropFor(grid, carried, W, H, cfg) {
   // than only to keep the photo's shape), so the words name what came off it
   const stepped = rect !== open ? rect.clear : null;
   const inward = { top: (c) => c.y0 > R.y0, right: (c) => c.x1 < R.x1, bottom: (c) => c.y1 < R.y1, left: (c) => c.x0 > R.x0 };
-  const markSides = stepped ? sides.filter((sd) => !bandSides.includes(sd) && inward[sd](stepped)) : [];
-  return { status: 'cropped', crop, sides, markSides, left };
+  // a see-through strip cut with its mark is a band (lettered or not) on that side
+  const stripSides = strips.filter((sd) => sides.includes(sd) && !bandSides.includes(sd));
+  const markSides = stepped ? sides.filter((sd) => !bandSides.includes(sd) && !stripSides.includes(sd) && inward[sd](stepped)) : [];
+  return { status: 'cropped', crop, sides, markSides, stripSides, left };
 }
 
 
@@ -1193,6 +1338,7 @@ export function findBranding(photos, { lot = [], cover = undefined, tuning = nul
         entry.crop = { ...r.crop };
         entry.sides = r.sides.slice();
         entry.markSides = r.markSides.slice();
+        if (r.stripSides.length) entry.bands = SIDES.filter((sd) => entry.bands.includes(sd) || r.stripSides.includes(sd));
       }
     }
     result.photos[p.id] = entry;
@@ -1223,7 +1369,8 @@ function toCheckGrid(part, lw, lh, w, h) {
     const y = (p - x) / lw;
     for (let yy = Math.floor(y * fy); yy < Math.min(h, Math.ceil((y + 1) * fy)); yy++) for (let xx = Math.floor(x * fx); xx < Math.min(w, Math.ceil((x + 1) * fx)); xx++) px.push(yy * w + xx);
   }
-  return { ...part, pixels: Int32Array.from(px), lot: true };
+  const strip = part.strip ? { side: part.strip.side, depth: Math.ceil(part.strip.depth * (part.strip.side === 'top' || part.strip.side === 'bottom' ? fy : fx)) } : null;
+  return { ...part, pixels: Int32Array.from(px), strip, lot: true };
 }
 
 // One band per side. The same band found in this car's photos and in the
@@ -1510,7 +1657,7 @@ export function brandingSummary(entries, ids, { originals = [] } = {}) {
     }
     const n = total - unchecked.length;
     const across = unchecked.length ? `the ${plural(n, 'photo')} checked` : total === 1 ? 'this photo' : 'these photos';
-    out.push(`No logo band, frame or corner logo repeats across ${across}; ${n === 1 ? 'it goes' : 'they go'} on as the website shows ${them(n)}.`);
+    out.push(`Lot Current found no logo band, frame or corner logo repeating across ${across}; ${n === 1 ? 'it goes' : 'they go'} on as the website shows ${them(n)}.`);
   }
   if (unchecked.length) out.push(`${plural(unchecked.length, 'photo')} ${unchecked.length === 1 ? 'was' : 'were'} not checked (${whyOf(unchecked)}) and ${unchecked.length === 1 ? 'goes' : 'go'} on as the website shows ${them(unchecked.length)}.`);
   if (cropped.length) out.push('Check each one; Use original puts a photo back as the website shows it.');

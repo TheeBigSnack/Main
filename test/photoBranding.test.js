@@ -153,7 +153,7 @@ test('no overlay: every photo is checked and none is cropped', () => {
   const res = findBranding(gallery(12, null));
   for (const e of Object.values(res.photos)) assert.deepEqual([e.status, e.crop, e.left, e.reason], ['none', null, null, null]);
   assert.deepEqual(res.counts, { cropped: 0, kept: 0, none: 12, unchecked: 0, inside: 0 });
-  assert.equal(brandingSummary(res.photos, Object.keys(res.photos)), 'No logo band, frame or corner logo repeats across these photos; they go on as the website shows them.');
+  assert.equal(brandingSummary(res.photos, Object.keys(res.photos)), 'Lot Current found no logo band, frame or corner logo repeating across these photos; they go on as the website shows them.');
   // nothing found is not the same as no branding: no note at all
   assert.equal(photoNote(res.photos.p1), '');
 });
@@ -412,8 +412,128 @@ test('see-through marks are not looked for, and the wording claims nothing about
   const res = findBranding(g);
   for (const e of Object.values(res.photos)) assert.deepEqual([e.status, e.crop, e.left], ['none', null, null]);
   const line = brandingSummary(res.photos, Object.keys(res.photos));
-  assert.match(line, /^No logo band, frame or corner logo repeats across these photos/);
+  assert.match(line, /^Lot Current found no logo band, frame or corner logo repeating across these photos/);
   assert.doesNotMatch(line, /free of|no (dealer )?branding|no logos?\b(?! band)|clean/i);
+});
+
+// A see-through navy band over rows 165 and down (the photo shows through at
+// 1 - alpha), with opaque white lettering of one colour in it, and maybe a
+// two-colour logo at its right end.
+function tintedBand(px, w, alpha, { logo = false } = {}) {
+  const h = px.length / 4 / w;
+  for (let y = 165; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const o = (y * w + x) * 4;
+      const text = y >= 172 && y < 184 && (x >> 2) % 3 === 0 && x > 20 && x < 200;
+      if (logo && x > 212 && x < 250 && y > 167 && y < 189) {
+        const red = ((x >> 1) + (y >> 1)) % 2;
+        px[o] = red ? 200 : 250;
+        px[o + 1] = red ? 20 : 250;
+        px[o + 2] = red ? 30 : 250;
+      } else if (text) {
+        px[o] = px[o + 1] = px[o + 2] = 250;
+      } else {
+        px[o] = px[o] * (1 - alpha) + 18 * alpha;
+        px[o + 1] = px[o + 1] * (1 - alpha) + 30 * alpha;
+        px[o + 2] = px[o + 2] * (1 - alpha) + 52 * alpha;
+      }
+    }
+  }
+  return px;
+}
+const tintRows = (x, y) => y >= 165;
+
+test('a see-through band with lettering of one colour is cut off whole', () => {
+  // the lettering has no steady neighbour of another colour (the band around
+  // it changes with each photo): it is told by how it stands out from the band
+  for (const seed of [1, 2, 4, 5]) {
+    const g = gallery(12, null, { seed });
+    for (const p of g) tintedBand(p.rgba, 256, 0.6);
+    const res = findBranding(g);
+    assert.equal(res.counts.cropped, 12, `seed ${seed}: ${JSON.stringify(res.counts)}`);
+    for (const e of Object.values(res.photos)) {
+      assert.equal(e.left, null);
+      assertHonestCrop(e, tintRows, `seed ${seed}:`);
+      assert.equal(photoNote(e), 'Cropped: logo band off the bottom');
+    }
+  }
+});
+
+test('photos with a bright bottom and no band over it are not cropped', () => {
+  // the same white bars, painted into the photos' own changing bottom with no band
+  for (const seed of [1, 2, 4, 5]) {
+    const g = gallery(12, null, { seed });
+    for (const p of g) paint(p.rgba, 256, (x, y) => (y >= 172 && y < 184 && (x >> 2) % 3 === 0 && x > 20 && x < 200 ? null : y >= 186 ? [250, 250, 250] : null));
+    const res = findBranding(g);
+    for (const e of Object.values(res.photos)) assert.equal(e.status, 'none', `seed ${seed}`);
+  }
+});
+
+test('a logo in a light see-through band takes the band with it, not only the rows the logo covers', () => {
+  // too light for the band to be found on its own: the logo at its end is
+  // found, and stepping around it alone would leave the rest of the band in
+  for (const alpha of [0.4, 0.5, 0.6]) {
+    for (const seed of [1, 2, 3, 6, 9, 12]) {
+      const g = gallery(12, null, { seed });
+      for (const p of g) tintedBand(p.rgba, 256, alpha, { logo: true });
+      const res = findBranding(g);
+      const label = `tint ${alpha}, seed ${seed}:`;
+      assert.equal(res.counts.cropped, 12, `${label} ${JSON.stringify(res.counts)}`);
+      for (const e of Object.values(res.photos)) {
+        assert.equal(e.left, null, label);
+        assertHonestCrop(e, tintRows, label);
+        assert.equal(photoNote(e), 'Cropped: logo band off the bottom', label);
+      }
+    }
+  }
+});
+
+// A photo with a sky over its top (from a dark blue at the edge to a light
+// one at the horizon, a different sky in each photo) and the badge in the
+// top-left corner over it.
+function skyPhoto(seed) {
+  const r = rng(seed);
+  const c = () => [r() * 255, r() * 255, r() * 255];
+  const [a, b, d, e] = [c(), c(), c(), c()];
+  const shapes = Array.from({ length: 6 }, () => ({ x: r() * 256, y: 60 + r() * 132, rad: 10 + r() * 40, col: c() }));
+  const hz = 40 + r() * 30;
+  const top = [40 + r() * 30, 70 + r() * 40, 120 + r() * 50];
+  const low = [170 + r() * 40, 200 + r() * 30, 225 + r() * 30];
+  const px = new Uint8ClampedArray(256 * 192 * 4);
+  for (let y = 0; y < 192; y++) {
+    for (let x = 0; x < 256; x++) {
+      const o = (y * 256 + x) * 4;
+      const u = x / 256;
+      const v = y / 192;
+      const cb = badge(x, y);
+      for (let k = 0; k < 3; k++) {
+        let val;
+        if (y < hz) val = top[k] * (1 - y / hz) + low[k] * (y / hz);
+        else {
+          val = a[k] * (1 - u) * (1 - v) + b[k] * u * (1 - v) + d[k] * (1 - u) * v + e[k] * u * v;
+          for (const s of shapes) if ((x - s.x) ** 2 + (y - s.y) ** 2 < s.rad ** 2) val = s.col[k];
+        }
+        px[o + k] = cb ? cb[k] : val + (r() - 0.5) * 6;
+      }
+      px[o + 3] = 255;
+    }
+  }
+  return px;
+}
+
+test('a corner logo over a sky is stepped around: the sky is not taken for a see-through band', () => {
+  // a sky varies less between photos than the rest, but it goes on past any
+  // line in full, where a see-through band dims every photo by one share
+  for (const seed of [3, 10]) {
+    const g = Array.from({ length: 12 }, (_, i) => sample(`p${i + 1}`, skyPhoto(seed * 100 + i)));
+    const res = findBranding(g);
+    assert.equal(res.counts.cropped, 12, `seed ${seed}`);
+    for (const e of Object.values(res.photos)) {
+      assertHonestCrop(e, badge, `seed ${seed}:`);
+      assert.deepEqual(e.crop, { x: 0, y: 100, w: 1024, h: 668 }, `seed ${seed}`);
+      assert.equal(photoNote(e), 'Cropped: corner logo off the top', `seed ${seed}`);
+    }
+  }
 });
 
 test('with a band and a see-through mark, only the band is cropped: the mark stays and is not called gone', () => {
@@ -809,7 +929,7 @@ test('the summary says what the person set back, and what was not checked and wh
   assert.equal(brandingSummary(res.photos, ['p1', 'new']), 'Cropped the same logo band off the bottom of 1 of 2 photos. 1 photo was not checked (the check ran without it) and goes on as the website shows it. Check each one; Use original puts a photo back as the website shows it.');
   // nothing found among the photos checked, some not checked
   const clean = findBranding([...gallery(6, null, { seed: 43 }), { id: 'slow', reason: 'slow' }]);
-  assert.equal(brandingSummary(clean.photos, Object.keys(clean.photos)), 'No logo band, frame or corner logo repeats across the 6 photos checked; they go on as the website shows them. 1 photo was not checked (took too long to download) and goes on as the website shows it.');
+  assert.equal(brandingSummary(clean.photos, Object.keys(clean.photos)), 'Lot Current found no logo band, frame or corner logo repeating across the 6 photos checked; they go on as the website shows them. 1 photo was not checked (took too long to download) and goes on as the website shows it.');
 });
 
 test('no wording ever says a photo is free of branding, and unchecked photos are said to be not checked', () => {
@@ -844,5 +964,5 @@ test('no wording ever says a photo is free of branding, and unchecked photos are
   }
   for (const line of lines) assert.doesNotMatch(line, banned, line);
   // nothing found is said as what was looked for, never as a clean bill
-  assert.match(brandingSummary(cases[0].photos, Object.keys(cases[0].photos)), /^No logo band, frame or corner logo repeats across/);
+  assert.match(brandingSummary(cases[0].photos, Object.keys(cases[0].photos)), /^Lot Current found no logo band, frame or corner logo repeating across/);
 });
