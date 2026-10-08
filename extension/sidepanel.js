@@ -533,6 +533,21 @@ function brandingEntry(url) {
 const setBack = (url) => Array.isArray(state.photoOriginals) && state.photoOriginals.includes(url);
 // Whether the photo at url goes cropped: the setting on, a crop found for it, not set back.
 const goesCropped = (url) => brandingOn() && Boolean(cropPlan(brandingEntry(url), { url, originals: state.photoOriginals || [] }));
+// The photos this car's last finished check cropped, by address.
+function brandingCropped() {
+  const b = brandingNow();
+  return b ? Object.keys(b.photos).filter((u) => b.photos[u] && b.photos[u].status === 'cropped') : [];
+}
+// The form opening with the setting off: the review showed every photo as the
+// website shows it, so every photo the check cropped is set back (Use original)
+// and stays so if the setting is turned on again before the photos are attached
+// (Attach photos again, a panel brought back): no photo goes cropped that the
+// review did not show cropped.
+function keepShownWhole() {
+  if (brandingOn()) return;
+  const cropped = brandingCropped();
+  if (cropped.length) state.photoOriginals = cropped;
+}
 // How long one check may take: the photos not read by then are left unchecked
 // ('slow'), so a slow photo server never holds the review for minutes.
 const BRANDING_TIME_LIMIT_MS = 45 * 1000;
@@ -846,7 +861,7 @@ async function carStillCurrent(waiting = 'the form opens') {
   const said = changed.map((c) => (c.key === 'photos' ? 'photos' : `${labels[c.key] || c.key} ${shown(c.key, c.was)} → ${shown(c.key, c.now)}`));
   state.listing = null;
   state.step = 'review';
-  // the photos changed: they are checked again (until then a new photo goes as the website shows it, and a crop is only ever cut from the bytes it was found on)
+  // the photos changed: they are checked again (until then a new photo goes as the website shows it, and a crop is only ever cut from the bytes it was found on); from Open the Marketplace form, once the opening is let go (openForm)
   if (changed.some((c) => c.key === 'photos')) checkBranding({ auto: true });
   render();
   const what = said.length ? ` (${said.join('; ')})` : '';
@@ -1279,6 +1294,7 @@ async function openForm({ probeOnly = false } = {}) {
   stopBranding();
   const run = flowRun;
   const dropped = () => run !== flowRun; // the post was dropped meanwhile: no tab for it, nothing filled
+  const photosBefore = brandingUrls().join(' ');
   state.opening = true;
   try {
     if (!(await readStoredCounts()) || dropped()) return undefined;
@@ -1301,13 +1317,18 @@ async function openForm({ probeOnly = false } = {}) {
     // released before the step below moves on, with no wait in between; a
     // post dropped meanwhile leaves it to clearFlow, so the next car's own
     // open (a queue's, as soon as its car is read) is not turned away by this one
-    if (!dropped()) state.opening = false;
+    if (!dropped()) {
+      state.opening = false;
+      // the website changed this car's photos (carStillCurrent, back at review): no check starts while the form opens, so they are checked now
+      if (state.step === 'review' && brandingUrls().join(' ') !== photosBefore) checkBranding({ auto: true });
+    }
   }
   // The form opens in this panel's window, so the post is this panel's from
   // now on (postsWindow): a post brought back here from another window, or
   // from before Chrome restarted, is recorded by itself here, and saved as
   // this window's before the form opens.
-  const before = { windowId: state.windowId, listing: state.listing, listingTyped: state.listingTyped };
+  const before = { windowId: state.windowId, listing: state.listing, listingTyped: state.listingTyped, photoOriginals: state.photoOriginals };
+  keepShownWhole();
   state.windowId = panelWindowId || state.windowId;
   state.listing = buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: pickedPhotos(), stores: state.settings.myStores, lot: state.snapshotVehicles });
   state.listingTyped = null; // a new form: nothing typed for it yet
@@ -3026,8 +3047,7 @@ async function onClick(ev) {
     case 'photosCropAll':
     case 'photosOriginalAll': {
       if (state.step !== 'review') return undefined;
-      const b = brandingNow();
-      const cropped = b ? Object.keys(b.photos).filter((u) => b.photos[u] && b.photos[u].status === 'cropped') : [];
+      const cropped = brandingCropped();
       state.photoOriginals = btn.id === 'photosOriginalAll' && cropped.length ? cropped : null;
       return afterBrandingChoice(btn.id, btn.id === 'photosOriginalAll' ? 'Every photo goes on as the website shows it.' : 'Every photo the check cropped goes on cropped.');
     }

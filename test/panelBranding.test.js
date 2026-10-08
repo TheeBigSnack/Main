@@ -119,7 +119,7 @@ function panel({ photos = PHOTOS, overlay = [], hold = false, own = true, settin
     setStatus: (text) => calls.push(`status: ${text}`), saveFlow: async (opts) => { calls.push(`save${opts && opts.quiet ? ' quiet' : ''}`); },
     pilotNote: async () => {}, endPost: () => {}, dropSavedFlow: async () => {},
   };
-  const fns = compileMany(['checkBranding', 'readForBranding', 'stopBranding', 'forTheForm', 'brandingAfterSettings', 'brandingEntry', 'clearFlow'], scope,
+  const fns = compileMany(['checkBranding', 'readForBranding', 'stopBranding', 'forTheForm', 'brandingAfterSettings', 'brandingEntry', 'brandingCropped', 'keepShownWhole', 'clearFlow'], scope,
     ['brandingOn', 'brandingUrls', 'brandingNow', 'setBack', 'goesCropped', 'BRANDING_TIME_LIMIT_MS', 'brandingProgressText']);
   return { state, calls, sent, held, store, fns };
 }
@@ -336,6 +336,35 @@ test('a photo goes into the form cropped only with the setting on, not set back,
   const tally = {};
   await old.fns.forTheForm([file(PHOTOS[0]), file(PHOTOS[0], 3)], tally);
   assert.deepEqual(tally, { cropped: 1, uncropped: [{ url: PHOTOS[0], why: 'changed' }] });
+});
+
+test('the form opening with the setting off sets every cropped photo back, so turning it on before the photos are attached crops none the review showed whole', async () => {
+  // the review showed the website's photos (the setting off): they stay so when the setting is turned on again in the publish step
+  const p = panel({ settings: { cropBranding: false } });
+  p.state.branding = checked([PHOTOS[0], PHOTOS[2]]);
+  p.fns.keepShownWhole();
+  assert.deepEqual(p.state.photoOriginals, [PHOTOS[0], PHOTOS[2]]);
+  p.state.settings = { cropBranding: true };
+  const files = await p.fns.forTheForm([file(PHOTOS[0]), file(PHOTOS[2])], { cropped: 0, uncropped: [] });
+  assert.deepEqual(files.map((f) => bytesOf(f.dataUrl)), [`${PHOTOS[0]}#1`, `${PHOTOS[2]}#1`], 'as the review showed them');
+  assert.ok(!p.calls.some((c) => c.startsWith('crop')), p.calls.join(' | '));
+  // the setting on as the form opens: the crops the review showed stay, and so does the person's own Use original
+  const q = panel();
+  q.state.branding = checked([PHOTOS[0], PHOTOS[2]]);
+  q.state.photoOriginals = [PHOTOS[2]];
+  q.fns.keepShownWhole();
+  assert.deepEqual(q.state.photoOriginals, [PHOTOS[2]]);
+  // no finished check of this car: nothing to set back
+  const r = panel({ settings: { cropBranding: false } });
+  r.state.branding = checked([PHOTOS[0]], 'BBB');
+  r.fns.keepShownWhole();
+  assert.equal(r.state.photoOriginals, null);
+  // openForm does it as the review is left (and a form refused for another window's post puts the choice back), and checks photos the website changed once the opening is let go
+  const open = fnText('openForm');
+  assert.match(open, /const before = \{[^\n]*photoOriginals: state\.photoOriginals \};\n\s*keepShownWhole\(\);/);
+  assert.ok(open.indexOf('keepShownWhole();') < open.indexOf("state.step = 'filling';"));
+  assert.match(open, /const photosBefore = brandingUrls\(\)\.join\(' '\);\n\s*state\.opening = true;/);
+  assert.match(open, /state\.opening = false;\n\s*if \(state\.step === 'review' && brandingUrls\(\)\.join\(' '\) !== photosBefore\) checkBranding\(\{ auto: true \}\);/);
 });
 
 // photoPickHtml and brandingHtml, as written, for a car whose check cropped photo 1

@@ -550,7 +550,7 @@ function formOpener({ description, step = 'review', readAt = new Date().toISOStr
     },
     panelWindowId: null, postElsewhere: async () => null, elsewhereText: never('elsewhereText'), dropSavedFlow: async () => {},
     // the dealer-branding photo check (its own tests are in panelBranding.test.js): nothing running, nothing found
-    checkBranding: async () => calls.push('checkBranding'), stopBranding: () => false,
+    checkBranding: async () => calls.push('checkBranding'), stopBranding: () => false, brandingUrls: () => [], keepShownWhole: () => {},
     ...extra,
   }, BLOCKER_CONSTS);
   return { state, calls, fns, v, forms, box };
@@ -2996,7 +2996,7 @@ test('Open the Marketplace form and every fill read the car again first; a post 
   const openForm = compile('openForm', {
     state, flowRun: 0, readStoredCounts: async () => true, stopPosted: never('stopPosted'), dailyCap: () => ({ reached: false }), capCount, setStatus: never('setStatus'),
     descriptionStopped: () => false, carStillCurrent: async () => false, buildListingData: never('buildListingData'),
-    stopBranding: () => false, // no photo check under way
+    stopBranding: () => false, brandingUrls: () => [], keepShownWhole: () => {}, // no photo check under way
   });
   assert.equal(await openForm(), undefined);
   assert.equal(state.opening, false);
@@ -3283,7 +3283,7 @@ function twoPanels({ panelsOpen = [1, 2], fillSaves = false, pilot = false } = {
       readStoredCounts: async () => true, dailyCap: () => ({ reached: false }), capCount: () => '', descriptionStopped: () => false, carStillCurrent: async () => true,
       buildListingData: () => ({ fields: {} }), pickedPhotos: () => [], applyOverrides: (m) => m, waitForTabLoad: async () => {}, sleep: async () => {},
       runFill: async () => { state.step = 'publish'; if (fillSaves) await fns.saveFlow(); }, runProbe: never('runProbe'),
-      checkBranding: async () => {}, stopBranding: () => false, // the photo check found nothing to crop (its own tests are in panelBranding.test.js)
+      checkBranding: async () => {}, stopBranding: () => false, brandingUrls: () => [], keepShownWhole: () => {}, // the photo check found nothing to crop (its own tests are in panelBranding.test.js)
     }, /^const flowStorage = /m.test(src) ? ['flowStorage'] : []);
     // a click on one of the panel's buttons, as onClick runs it
     const click = (id) => fns.onClick({ target: { closest: () => ({ id, dataset: {} }) } });
