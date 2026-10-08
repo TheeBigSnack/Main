@@ -227,6 +227,12 @@ test('the side panel asks Chrome for photo servers only from the click handler, 
   for (const id of ['openForm', 'fillNow', 'attachAgain', 'downloadPhotos']) {
     assert.match(click, new RegExp(`case '${id}':\\s*await askForPhotos\\(\\);`), `${id} asks first`);
   }
+  // Check the photos for dealer branding / Check again asks first too, for the photos the check reads
+  assert.match(click, /case 'brandingCheck':\s*await askForPhotos\(brandingUrls\(\)\);/, 'brandingCheck asks first');
+  assert.match(src, /^const brandingUrls = \(\) => \(state\.vehicle \? usablePhotos\(state\.vehicle\.photos\)\.slice\(0, MAX_CHECK_PHOTOS\) : \[\]\);$/m, 'the photos the check reads are the car\'s own (usablePhotos), at most MAX_CHECK_PHOTOS');
+  // the automatic check never asks: Chrome prompts only from a click
+  assert.doesNotMatch(fnText(src, 'checkBranding'), /\baskForPhotos\b|\baskChrome\b/);
+  assert.doesNotMatch(fnText(src, 'readForBranding'), /\baskForPhotos\b|\baskChrome\b/);
   // Fill again fills the fields only: no photos, so nothing to ask Chrome for
   assert.match(click, /case 'fillAgain': return state\.step === 'publish' \? oneAtATime\(\(\) => runFill\(\{ photos: false \}\)\) : undefined;/);
   // the photo branches of the click handler come before anything the wizard or upkeep await
@@ -314,12 +320,52 @@ test('the queue does not open the form by itself for a car whose photo server ha
   assert.equal(run(['https://scontent-iad3-1.xx.fbcdn.net/v/1.jpg']), true, 'Facebook\'s servers are never asked for, so they never hold the car');
 });
 
+// canAutoOpen again, with the dealer-branding photo check: a queued car waits
+// at review while the check runs, and when the check cropped a photo that goes
+// on its listing, so the person sees each cropped photo before posting. A car
+// whose check cropped nothing (or whose crops won't be used) opens as before.
+test('the queue does not open the form by itself while the photo check runs, or for a car whose listing photos it cropped', () => {
+  const src = stripComments(read('../extension/sidepanel.js'));
+  const body = fnText(src, 'canAutoOpen');
+  const make = new Function('state', 'currentListing', 'dailyCap', 'photoPatterns', 'refusedPhotoServers', `${body}\nreturn canAutoOpen;`);
+  const photos = ['http://127.0.0.1:5173/photo/1.png', 'http://127.0.0.1:5173/photo/2.png'];
+  const entry = (status) => ({ status, crop: status === 'cropped' ? { x: 0, y: 0, w: 640, h: 432 } : null, width: 640, height: 480, sides: status === 'cropped' ? ['bottom'] : [], bands: [], left: null, marks: 0, reason: null });
+  const branding = (vin, statuses) => ({ version: 1, vin, checkedAt: '2026-10-08T12:00:00.000Z', lot: 0, photos: Object.fromEntries(photos.map((u, i) => [u, entry(statuses[i])])) });
+  const run = (extra) => make(
+    { guardrails: { ok: true }, vinCheck: { local: { ok: true } }, vin: 'AAA', settings: { cropBranding: true }, ...extra },
+    () => ({ missing: [], assumed: [], photos }),
+    () => ({ reached: false }),
+    () => [],
+    new Set(),
+  )();
+  assert.equal(run({}), true, 'no check: it opens as before');
+  assert.equal(run({ brandingRun: { done: 1, total: 2, stopped: false } }), false, 'the check is still running: the car waits for it');
+  assert.equal(run({ branding: branding('AAA', ['none', 'unchecked']) }), true, 'nothing cropped: it opens');
+  assert.equal(run({ branding: branding('AAA', ['kept', 'none']) }), true, 'a logo that could not be cropped off: nothing changes on the photo, so it opens');
+  assert.equal(run({ branding: branding('AAA', ['none', 'cropped']) }), false, 'a picked photo was cropped: the car waits so the person sees it');
+  assert.equal(run({ branding: branding('AAA', ['none', 'cropped']), photoOriginals: [photos[1]] }), true, 'the same photo set back to the original: nothing goes cropped, so it opens');
+  assert.equal(run({ branding: branding('AAA', ['cropped', 'cropped']), photoOriginals: [photos[1]] }), false, 'one still goes cropped: it waits');
+  assert.equal(run({ branding: branding('AAA', ['none', 'cropped']), settings: { cropBranding: false } }), true, 'the setting off: nothing is cropped, so it opens');
+  assert.equal(run({ branding: branding('BBB', ['cropped', 'cropped']) }), true, 'another car\'s check counts for nothing');
+  assert.equal(run({ branding: branding('AAA', ['none', 'none']), brandingRun: { done: 0, total: 2, stopped: false } }), false, 'a check again under way: it waits, whatever the last one found');
+  // a cropped photo that is not on this listing (unticked) does not hold it
+  const unpicked = make(
+    { guardrails: { ok: true }, vinCheck: { local: { ok: true } }, vin: 'AAA', settings: { cropBranding: true }, branding: branding('AAA', ['none', 'cropped']) },
+    () => ({ missing: [], assumed: [], photos: [photos[0]] }), () => ({ reached: false }), () => [], new Set(),
+  )();
+  assert.equal(unpicked, true, 'the cropped photo is not going on the listing: it opens');
+});
+
 // attachPhotos and downloadPhotos, run as written with the rest of the panel
 // replaced by stubs: the worker is never sent a photo on Facebook's servers,
 // and the salesperson is told those photos were left out.
 test('the side panel never sends a Facebook photo to the worker, and says it left them out', async () => {
   const src = stripComments(read('../extension/sidepanel.js'));
-  assert.equal((src.match(/type: 'downloadPhotos'/g) || []).length, 2, 'the worker is asked for photos from attachPhotos and downloadPhotos only');
+  // three since the dealer-branding check (its reads go through readForBranding, run by checkBranding)
+  assert.equal((src.match(/type: 'downloadPhotos'/g) || []).length, 3, 'the worker is asked for photos from attachPhotos, downloadPhotos and the dealer-branding check only');
+  for (const name of ['attachPhotos', 'downloadPhotos', 'readForBranding']) assert.equal((fnText(src, name).match(/type: 'downloadPhotos'/g) || []).length, 1, `${name} asks the worker once`);
+  assert.match(fnText(src, 'checkBranding'), /const urls = brandingUrls\(\)\.filter\(\(u\) => !isFacebookServer\(u\)\);/, 'the check leaves Facebook\'s servers out itself');
+  assert.match(fnText(src, 'checkBranding'), /await readForBranding\(urls, /, 'and reads only those');
   const photos = ['https://img.cdn.example/1.jpg', 'https://scontent-iad3-1.xx.fbcdn.net/v/2.jpg', 'https://img.cdn.example/3.jpg', 'https://www.facebook.com/marketplace/4.jpg'];
   const facebook = photos.filter((u) => /fbcdn|facebook/.test(u));
   const sent = [];
@@ -348,6 +394,7 @@ test('the side panel never sends a Facebook photo to the worker, and says it lef
     flowRun: 0, // the post under way (sidepanel.js clearFlow); nothing drops it here
     formTabShows: async () => true, // the form's tab still shows the form (tested in panelFlow.test.js)
     document: { createElement: () => ({ click() {}, remove() {} }), body: { appendChild() {} } },
+    forTheForm: async (files) => files.map(({ name, type, dataUrl }) => ({ name, type, dataUrl })), // nothing cropped (the crop's own tests are in panelBranding.test.js)
     status: '',
   };
   panel.setStatus = (text) => { panel.status = text; };
@@ -364,6 +411,34 @@ test('the side panel never sends a Facebook photo to the worker, and says it lef
   assert.deepEqual(sent, photos.filter((u) => !facebook.includes(u)), 'downloadPhotos sends only the dealer\'s photos');
   assert.match(panel.status, /^2 of 4 photos downloaded/);
   assert.match(panel.status, /2 are on Facebook's own servers, which Lot Current doesn't download from\./);
+
+  // the dealer-branding check reads the car's photos at review: never one on Facebook's servers,
+  // even if the list it is given held one (brandingUrls is usablePhotos, which leaves them out too)
+  sent.length = 0;
+  Object.assign(panel.state, { step: 'review', settings: { cropBranding: true }, origin: 'https://www.example-dealer.test', branding: null, brandingRun: null });
+  const check = { ...panel, chrome: { ...chrome, storage: { local: { get: async () => ({}) } } } };
+  const scope = {
+    ...check,
+    brandingOn: () => true, postsWindow: () => true, brandingNow: () => null, brandingUrls: () => photos, redrawPhotos: () => {}, $: () => null,
+    samplePhoto: async () => ({ ok: true, width: 640, height: 480, w: 256, h: 192, rgba: new Uint8ClampedArray(256 * 192 * 4), sha: 'f'.repeat(64), type: 'image/jpeg' }),
+    findBranding: (list) => ({ photos: Object.fromEntries(list.map((p) => [p.id, { status: p.reason ? 'unchecked' : 'none', crop: null, width: 640, height: 480, sides: [], bands: [], left: null, marks: 0, reason: p.reason || null }])), counts: { cropped: 0, kept: 0, none: list.length, unchecked: 0, inside: 0 } }),
+    otherCovers: () => [], lotSample: (s) => s, withCover: (s) => s, updateKey: async () => {}, coverStorage: {}, siteKeys: (o) => ({ coverSamples: 'coverSamples:' + o }),
+    brandingSummary: () => '', pickedPhotos: () => [], MAX_CHECK_PHOTOS: 40, BRANDING_TIME_LIMIT_MS: 45000, brandingProgressText: () => '',
+  };
+  const loadCheck = (extra = {}) => {
+    const all = { ...scope, ...extra };
+    const keys = Object.keys(all).filter((k) => k !== 'status');
+    return new Function(...keys, `${fnText(src, 'readForBranding')}\n${fnText(src, 'checkBranding')}\nreturn checkBranding;`)(...keys.map((k) => all[k]));
+  };
+  // a server Chrome has not allowed yet is not read at all: only a click asks (Check again)
+  await loadCheck()({ auto: true });
+  assert.deepEqual(sent, [], 'nothing is downloaded from a server Chrome would have to ask about');
+  assert.deepEqual(Object.values(panel.state.branding.photos).map((e) => e.status), ['unchecked', 'unchecked']);
+  // allowed: only the dealer's photos are downloaded
+  panel.state.branding = null;
+  await loadCheck({ photoPatterns: () => [] })();
+  assert.deepEqual(sent, photos.filter((u) => !facebook.includes(u)), 'the photo check reads only the dealer\'s photos');
+  assert.deepEqual(Object.keys(panel.state.branding.photos), photos.filter((u) => !facebook.includes(u)), 'and keeps a word on only those');
 });
 
 // Chrome is asked only inside askChrome (src/askChrome.js), which refuses

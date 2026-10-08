@@ -31,6 +31,7 @@ import { accountsConfigured } from '../extension/src/accountConfig.js';
 import { PRICE_NOTE_WORDS } from '../extension/src/rewriteTemplate.js';
 import { FORM_MAP } from '../extension/facebook/formMap.js';
 import { runGuardrails } from '../extension/src/rewriteTemplate.js';
+import { MAX_CHECK_PHOTOS, MIN_PHOTOS, MIN_SIDE, LOT_LONG_SIDE, COVER_SAMPLE_CARS, TUNING as BRANDING_TUNING } from '../extension/src/photoBranding.js';
 
 // A checkout with CRLF line ends (git's autocrlf on Windows) reads the same as
 // an LF one: every line-anchored pattern below is written for \n.
@@ -80,6 +81,11 @@ const LABELS = [
   'Allow reading',
   'Fix before the form can be filled',
   'Worth fixing (the form can still be filled)',
+  // the dealer-branding check at review (sidepanel.js, src/photoBranding.js)
+  'Use original',
+  'Skip the check',
+  'Use all originals',
+  'Check the photos for dealer branding',
 ];
 
 test('the four launch-kit files exist and are not stubs', () => {
@@ -117,10 +123,61 @@ test('help.md names every state My listings can show a posted car in, as the cod
   for (const s of states) assert.ok(help.includes(`"${s.text}"`), `docs/help.md does not name the My listings state "${s.text}"`);
 });
 
-test('help.md and README give the "vanished at once" rule with the lot size it starts at', () => {
+test('help.md and README give the "vanished at once" rule with the lot size it starts at, and the dealer-branding check\'s floors as photoBranding.js has them', () => {
   const floor = String(MASS_DISAPPEARANCE_MIN_LOT);
   assert.match(doc('help.md'), new RegExp(`on a lot of ${floor} cars or more, if more than half of it disappears between scans, nothing is marked gone`));
   assert.match(read('../README.md'), new RegExp(`If more than half the cars of a lot of ${floor} or more vanish between scans, nothing is marked gone`));
+  // the dealer-branding check: how many photos it downloads and needs, the smallest photo it checks, how much a crop keeps
+  const WORD = { 3: 'three', 4: 'four', 8: 'eight' };
+  const keep = Math.round(BRANDING_TUNING.keepArea * 100);
+  const help = doc('help.md');
+  assert.match(help, new RegExp(`Each check downloads each photo once \\(up to ${MAX_CHECK_PHOTOS}\\)`), 'help.md: the most photos one check downloads');
+  // and when a check runs, so the help never reads as one download per car
+  assert.match(help, /A check runs, and downloads the photos again, when the review screen opens for a car; again when the side panel is reopened on the car, or Settings are saved \(cropping turned on, say\), before a check of it has finished or been skipped; again when Lot Current reads the car on the website and finds its photos changed; and each time you click \*\*Check the photos for dealer branding\*\* or \*\*Check again\*\*\. A skip holds for that car until one of the last two\./, 'help.md: when the photo check downloads the photos');
+  assert.doesNotMatch(help, /once when the side panel's review screen checks|It downloads each photo once/, 'help.md says the check downloads the photos once per car');
+  assert.match(help, new RegExp(`at least ${WORD[MIN_PHOTOS]} different photos of the same size`), 'help.md: how many photos the check needs');
+  assert.match(help, new RegExp(`keeping at least ${keep}% of it`), 'help.md: how much of a photo a crop keeps');
+  assert.match(help, new RegExp(`A photo smaller than ${MIN_SIDE} pixels on its short side`), 'help.md: the smallest photo the check reads');
+  assert.match(help, new RegExp(`small copies \\(at most ${LOT_LONG_SIDE} pixels across\\) of the cover photo of the last ${COVER_SAMPLE_CARS} cars`), 'help.md: the cover copies kept per website');
+  const readme = read('../README.md');
+  assert.match(readme, new RegExp(`across at least ${WORD[MIN_PHOTOS]} of the car's photos of one size, or, for a banner on the cover photo only, across the cover photos of at least ${WORD[MIN_PHOTOS - 1]} other cars`), 'README: the floors of the dealer-branding check');
+  assert.match(readme, new RegExp(`a crop always keeps at least ${keep}% of the photo`));
+  assert.match(readme, new RegExp(`small copies \\(at most ${LOT_LONG_SIDE} pixels across\\) of the cover photos of the last ${COVER_SAMPLE_CARS} cars`));
+  // the floors stay floors: no text may promise a photo is free of branding.
+  // Any sentence that speaks of branding gone (free of it, without it,
+  // removed, stripped, branding-free, logo-free, clean photos: the in-panel
+  // words test/photoBranding.test.js bans, and more) must say it is no promise.
+  const promise = /free of (?:any )?(?:dealer )?branding|(?:without|no) (?:more |any )?(?:dealer(?:ship)?(?:'s)? )?(?:branding|logos?)\b(?! band)|carr(?:y|ies) no branding|branding[- ]free|logos?[- ]free|(?:remov|strip|eras|delet)(?:e|es|ed|ing|s|ped|ping)? (?:off )?(?:the |all |every |any )?(?:(?:website's |dealer(?:ship)?(?:'s)? )?)(?:branding|logos?)\b(?! band)|(?:branding|logos?) (?:is |are )?(?:all )?(?:removed|gone|stripped|erased)|(?:removed|gone) (?:all|every)|all (?:the )?branding|\bclean (?:photos?|pictures?|images?)|photos? (?:come out |are |look )?clean\b/i;
+  const hedge = /can't promise|cannot promise|not a promise|no promise|never claim|not claim|doesn't promise|does not promise/i;
+  const texts = [['docs/help.md', help], ['README.md', readme], ['store/listing.md', read('../store/listing.md')]];
+  for (const f of readdirSync(new URL('../marketing/', import.meta.url)).filter((x) => x.endsWith('.md'))) texts.push([`marketing/${f}`, read(`../marketing/${f}`)]);
+  for (const [name, text] of texts) {
+    for (const sentence of text.split(/(?<=[.!?])\s+/).filter((x) => promise.test(x))) {
+      assert.match(sentence, hedge, `${name} promises a photo is free of branding: "${sentence.slice(0, 160)}"`);
+    }
+  }
+  // the guard catches the plain ways of saying it
+  for (const said of ['Every photo then goes on with the dealer branding removed.', 'Lot Current removes the dealer branding from every photo.', 'Your photos come out clean.', 'Branding-free photos in seconds.', 'It strips the logos off.', 'No more dealer logos on your listings.', 'Photos go on without branding.']) {
+    assert.ok(promise.test(said) && !hedge.test(said), `the guard misses: ${said}`);
+  }
+});
+
+// A cropped photo is a new file (src/photoCanvas.js cropPhoto encodes the
+// part kept again, in standard colours, without the website file's EXIF,
+// IPTC or XMP details): no text may say its pixels are untouched, and the
+// attorney is told what the cropped copy leaves out.
+test('no text says a cropped photo keeps the website\'s pixels untouched, and attorney question 12.1 names the metadata a cropped copy leaves out', () => {
+  const untouched = /exact (?:part|sub-rectangle) of the website's photo|changes? anything in the picture|pixels kept are the website's own|recoloured|byte for byte the website's/i;
+  for (const rel of ['../README.md', '../docs/help.md', '../CHANGELOG.md', '../HANDOFF.md', '../legal/questions-for-attorney.md', '../scripts/branding-eval/README.md', '../extension/sidepanel.js', '../extension/src/photoBranding.js', '../extension/src/photoCanvas.js']) {
+    const m = read(rel).match(untouched);
+    assert.equal(m, null, `${rel} says a cropped photo is untouched: "${m && m[0]}"`);
+  }
+  const q = read('../legal/questions-for-attorney.md').split('\n').find((l) => l.startsWith('- **12.1**'));
+  assert.ok(q, 'attorney question 12.1 is there');
+  assert.match(q, /compressed again/, '12.1: the part kept is encoded again');
+  assert.match(q, /EXIF, IPTC or XMP/, '12.1: the embedded fields');
+  assert.match(q, /copyright notice, creator, credit line/, '12.1: the copyright details in those fields');
+  assert.match(q, /\(a\)[^(]*embedded in the website's file out of every cropped copy/, '12.1(a) asks about leaving them out');
 });
 
 // The dots that end no sentence before the price note (rewriteTemplate.js
@@ -1758,6 +1815,11 @@ test('the README, store listing and help name both labels of the photo button wh
   const help = doc('help.md');
   assert.match(help, /\*\*Fill it in now\*\*, \*\*Attach photos\*\*, which reads \*\*Attach photos again\*\* once photos are on the form, or \*\*Download photos\*\*\) for the first car with photos there/);
   assert.match(help, /Under \*\*Photos\*\*: \*\*Download photos\*\*, \*\*Fill again\*\*, \*\*Attach photos\*\* \(it reads \*\*Attach photos again\*\* once photos are on the form\)/);
+  // Check the photos for dealer branding asks Chrome from its click too; the check that runs by itself at review never asks
+  assert.match(panel, /case 'brandingCheck':\s*await askForPhotos\(/, 'Check the photos for dealer branding no longer asks Chrome first: update the texts and this test');
+  assert.match(read('../README.md'), /or Download photos\) and remembers a yes\. \*\*Check the photos for dealer branding\*\* asks the same way; the check that runs by itself at review never asks/);
+  assert.match(read('../store/listing.md').split('\n').find((l) => l.startsWith('| `https://*/*` (optional) |')), /The same is asked from the person's click on Check the photos for dealer branding on the review screen\./);
+  assert.match(help, /\*\*Check the photos for dealer branding\*\* on the review screen asks the same way; the check that runs by itself when the review screen opens never asks/);
   const demo = read('../marketing/demo-script.md');
   assert.doesNotMatch(demo, /fill it again or download photos/i);
   assert.match(demo, /When you open the form, attach photos again or download photos, it's permission to download this car's photos/);

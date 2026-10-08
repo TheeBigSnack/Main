@@ -85,6 +85,8 @@ export function withDefaults(settings, site = {}) {
     // the Ready to post list (src/readyList.js): its order and how many days a car counts as new; this website's, never the profile's
     readySort: sortOrder(s.readySort),
     newDays: newDaysOf(s.newDays),
+    // crop the website's dealer branding off the photos (src/photoBranding.js): the dealership's choice for its own website, never the profile's
+    cropBranding: s.cropBranding !== false,
   };
 }
 
