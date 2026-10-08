@@ -1809,14 +1809,21 @@ async function downloadPhotos() {
   setStatus(`Downloading ${urls.length} photos…`);
   let n = 0;
   const tally = { cropped: 0, uncropped: [] };
+  const run = flowRun;
+  const vin = state.vin;
+  const prefix = state.vehicle.stock || state.vin;
+  // the post dropped or another car on screen meanwhile: nothing more is saved for this one, and nothing is said
+  const dropped = () => run !== flowRun || state.vin !== vin;
   for (let i = 0; i < urls.length; i += 4) {
     const res = await chrome.runtime.sendMessage({ type: 'downloadPhotos', urls: urls.slice(i, i + 4), offset: i }).catch(() => null);
+    if (dropped()) return;
     // as they go into the form: cropped where the check found dealer branding and the person kept the crop
     const files = await forTheForm(((res && res.photos) || []).filter((p) => p.ok), tally);
+    if (dropped()) return;
     for (const p of files) {
       const a = document.createElement('a');
       a.href = p.dataUrl;
-      a.download = `${state.vehicle.stock || state.vin}-${p.name}`;
+      a.download = `${prefix}-${p.name}`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -1828,6 +1835,11 @@ async function downloadPhotos() {
   let note = left ? ` Photos from ${hostList(refused)} were not allowed, so ${left === 1 ? 'one was' : `${left} were`} not downloaded.` : '';
   if (onFacebook.length) note += ` ${onFacebook.length === 1 ? 'One is' : `${onFacebook.length} are`} on Facebook's own servers, which Lot Current doesn't download from.`;
   if (tally.cropped) note += ` ${tally.cropped} cropped to take off dealer branding.`;
+  // as the publish step says it of the form's photos (photosHtml)
+  const changed = tally.uncropped.filter((u) => u.why === 'changed').length;
+  const unmade = tally.uncropped.length - changed;
+  if (changed) note += ` ${changed === 1 ? 'One was' : `${changed} were`} saved as the website shows ${changed === 1 ? 'it' : 'them'}, not cropped: the photo changed on the website since the check.`;
+  if (unmade) note += ` ${unmade === 1 ? 'One was' : `${unmade} were`} saved as the website shows ${unmade === 1 ? 'it' : 'them'}: the cropped copy couldn't be made.`;
   setStatus(`${n} of ${all.length} photos downloaded to your Downloads folder.${note}`);
 }
 
