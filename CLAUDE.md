@@ -55,6 +55,7 @@ Meta's Terms prohibit accessing its products "using automated means" without per
 | `extension/src/panelList.js`, `readyList.js`, `queue.js` | The side panel's own Ready to post list; the list's order, search and New pills; the batch queue, never longer than the day's remaining cap |
 | `extension/src/drafts.js`, `takenDown.js` | Cars saved as Facebook drafts and the price each was filled with; posts taken off the posted list (re-post notice, the day's cap) |
 | `extension/src/photoHosts.js`, `photoPick.js`, `askChrome.js` | Which servers a car's photos sit on and which still need Chrome's OK; the salesperson's photo pick and order; the one place that asks Chrome for a host permission |
+| `extension/src/photoBranding.js`, `photoCanvas.js` | The dealer-branding check: finds the overlay that repeats in the same place across a car's photos (or the website's cover photos) and works out a crop, pure; the side panel's decode of a downloaded photo into the check's small copy, and the cut of the crop |
 | `extension/src/vehicle.js`, `vin.js` | The one flat vehicle shape every adapter returns; VIN checks (local, plus the optional NHTSA decode) |
 | `extension/src/account.js`, `accountConfig.js`, `accountFlow.js`, `sync.js` | Sign-in by emailed code; the account project's address and public key (`npm run set-project`); sign-in, sign-out and one round of sync; the pure half of sync |
 | `extension/src/storage.js`, `storageKeys.js` | Read-modify-writes on `chrome.storage.local` under a lock; every storage key in one place (HANDOFF.md 5.1 describes each) |
