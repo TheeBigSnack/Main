@@ -7,7 +7,7 @@
 // Crop only: the one picture this file makes to send is an exact
 // sub-rectangle of the website's photo, copied with a single drawImage of
 // that rectangle onto a canvas of the same size. Nothing is painted over,
-// filled, blurred, filtered, blended or written on (test/photoHosts.test.js
+// filled, blurred, filtered, blended or written on (test/photoCanvas.test.js
 // reads this file and fails on any other drawing call). The other canvas
 // here is the small copy the check reads, which is never encoded or sent.
 
