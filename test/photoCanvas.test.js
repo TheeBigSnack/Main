@@ -1,6 +1,6 @@
 // The browser half of the dealer-branding crop (extension/src/photoCanvas.js)
 // and how the side panel uses it:
-//   - crop only: the one picture made to send is an exact sub-rectangle of
+//   - crop only: the one picture made to send is a sub-rectangle of
 //     the website's photo, one drawImage of the plan's rectangle onto a
 //     canvas of that size; nothing is painted, filled, filtered, blended or
 //     written on (the guard reads the file and fails on any other drawing);

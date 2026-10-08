@@ -2211,7 +2211,7 @@ function brandingHtml() {
     ${skipped && !run ? '<p class="hint" id="brandingSkipped">The photo check was skipped: the photos go on as the website shows them.</p>' : ''}
     ${run ? `<p class="hint" id="brandingProgress">${esc(brandingProgressText(run))}</p>` : ''}
     <div class="actions">${actions}</div>
-    <p class="hint" id="brandingRule">Lot Current only cuts a strip off the edges of a photo; it never paints over or changes anything in the picture. A see-through logo, a logo in the middle of the photo, or branding on the car itself stays as it is: untick that photo if it shouldn't go on the listing.</p>
+    <p class="hint" id="brandingRule">Lot Current only cuts a strip off the edges of a photo; it never paints over or adds anything. The part kept is saved as a new picture file, compressed again like any edited photo. A see-through logo, a logo in the middle of the photo, or branding on the car itself stays as it is: untick that photo if it shouldn't go on the listing.</p>
   </div>`;
 }
 

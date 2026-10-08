@@ -5,9 +5,10 @@ as it ships, never a copy), on synthetic car galleries in headless Chromium.
 Run it again whenever the module, its `TUNING` or the way the side panel
 decodes photos changes.
 
-What the check does, and what it doesn't: it only crops. A cleaned photo is
-always an exact sub-rectangle of the website's photo; nothing is painted over,
-blurred, recoloured or invented. It cuts strips off the edges (a logo band, a
+What the check does, and what it doesn't: it only crops. A cropped photo is
+always a sub-rectangle of the website's photo; nothing is painted over,
+blurred or invented (the side panel saves the part kept as a new file,
+compressed again and in standard colours). It cuts strips off the edges (a logo band, a
 top bar, a frame, the strip a corner logo sits in). A see-through watermark, a
 logo in the middle of the photo, or branding on the car itself (a plate frame,
 a sticker) stays as it is. The salesperson sees every cropped photo before

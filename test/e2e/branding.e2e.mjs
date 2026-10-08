@@ -182,7 +182,7 @@ try {
   const summary = await panel.textContent('#brandingSummary');
   assert.match(summary, /^Cropped the same [^.]* off the bottom of 6 of 6 photos\./, summary);
   assert.match(summary, /Use original puts a photo back as the website shows it\./);
-  assert.match(await panel.textContent('#brandingRule'), /only cuts a strip off the edges of a photo; it never paints over or changes anything in the picture/);
+  assert.match(await panel.textContent('#brandingRule'), /only cuts a strip off the edges of a photo; it never paints over or adds anything\. The part kept is saved as a new picture file, compressed again like any edited photo\./);
   assert.equal(await panel.textContent('#brandingCheck'), 'Check again');
   assert.equal(await panel.getAttribute('#photosCropAll', 'aria-pressed'), 'true');
   assert.equal(await panel.getAttribute('#photosOriginalAll', 'aria-pressed'), 'false');

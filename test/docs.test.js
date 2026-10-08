@@ -151,6 +151,24 @@ test('help.md and README give the "vanished at once" rule with the lot size it s
   }
 });
 
+// A cropped photo is a new file (src/photoCanvas.js cropPhoto encodes the
+// part kept again, in standard colours, without the website file's EXIF,
+// IPTC or XMP details): no text may say its pixels are untouched, and the
+// attorney is told what the cropped copy leaves out.
+test('no text says a cropped photo keeps the website\'s pixels untouched, and attorney question 12.1 names the metadata a cropped copy leaves out', () => {
+  const untouched = /exact (?:part|sub-rectangle) of the website's photo|changes? anything in the picture|pixels kept are the website's own|recoloured|byte for byte the website's/i;
+  for (const rel of ['../README.md', '../docs/help.md', '../CHANGELOG.md', '../HANDOFF.md', '../legal/questions-for-attorney.md', '../scripts/branding-eval/README.md', '../extension/sidepanel.js', '../extension/src/photoBranding.js', '../extension/src/photoCanvas.js']) {
+    const m = read(rel).match(untouched);
+    assert.equal(m, null, `${rel} says a cropped photo is untouched: "${m && m[0]}"`);
+  }
+  const q = read('../legal/questions-for-attorney.md').split('\n').find((l) => l.startsWith('- **12.1**'));
+  assert.ok(q, 'attorney question 12.1 is there');
+  assert.match(q, /compressed again/, '12.1: the part kept is encoded again');
+  assert.match(q, /EXIF, IPTC or XMP/, '12.1: the embedded fields');
+  assert.match(q, /copyright notice, creator, credit line/, '12.1: the copyright details in those fields');
+  assert.match(q, /\(a\)[^(]*embedded in the website's file out of every cropped copy/, '12.1(a) asks about leaving them out');
+});
+
 // The dots that end no sentence before the price note (rewriteTemplate.js
 // NOT_A_STOP, and its port in guardrails.ts): help.md names each, so a
 // salesperson can tell why "Deal direct, incl. Tax, title ..." is refused.

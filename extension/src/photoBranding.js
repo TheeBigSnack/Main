@@ -13,8 +13,10 @@
 // photos of several cars from the same website (the "lot", kept as small
 // samples in coverSamples:<origin>, withCover/otherCovers below).
 //
-// Crop only: a cropped photo is always an exact sub-rectangle of the
-// website's photo. Nothing is painted over, blurred, recoloured or invented.
+// Crop only: a crop is always a sub-rectangle of the website's photo.
+// Nothing is painted over, blurred or invented. (The side panel saves the
+// part kept as a new file, src/photoCanvas.js: compressed again, in standard
+// colours, without the website file's embedded details.)
 // A logo that can't be cropped off is reported, never hidden, and a photo that
 // doesn't itself carry the overlay is never cropped. Only strips along the
 // edges are cut (a band, see-through or solid, with lettering in it; a frame;

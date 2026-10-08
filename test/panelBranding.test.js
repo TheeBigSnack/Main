@@ -457,7 +457,7 @@ test('the thumbnail of a cropped photo shows the part that goes, with Use origin
   assert.match(html, /id="brandingSummary">Cropped the same logo band off the bottom of 2 of 6 photos\./);
   assert.match(html, /id="photosCropAll" aria-pressed="true">Use all cropped<\/button><button type="button" class="plain" id="photosOriginalAll" aria-pressed="false">Use all originals<\/button>/);
   assert.match(html, /id="brandingCheck">Check again<\/button>/);
-  assert.match(html, /Lot Current only cuts a strip off the edges of a photo; it never paints over or changes anything in the picture\. A see-through logo, a logo in the middle of the photo, or branding on the car itself stays as it is: untick that photo if it shouldn't go on the listing\./);
+  assert.match(html, /Lot Current only cuts a strip off the edges of a photo; it never paints over or adds anything\. The part kept is saved as a new picture file, compressed again like any edited photo\. A see-through logo, a logo in the middle of the photo, or branding on the car itself stays as it is: untick that photo if it shouldn't go on the listing\./);
 
   // photo 1 set back: shown whole, Use cropped, the note says what stays
   state.photoOriginals = [PHOTOS[0]];

@@ -4,12 +4,18 @@
 // side panel (createImageBitmap, OffscreenCanvas, crypto.subtle); never
 // injected into a page, and it never draws anything of its own.
 //
-// Crop only: the one picture this file makes to send is an exact
-// sub-rectangle of the website's photo, copied with a single drawImage of
-// that rectangle onto a canvas of the same size. Nothing is painted over,
-// filled, blurred, filtered, blended or written on (test/photoCanvas.test.js
-// reads this file and fails on any other drawing call). The other canvas
-// here is the small copy the check reads, which is never encoded or sent.
+// Crop only: the one picture this file makes to send is a sub-rectangle of
+// the website's photo, copied with a single drawImage of that rectangle onto
+// a canvas of the same size. Nothing is painted over, filled, blurred,
+// filtered, blended or written on (test/photoCanvas.test.js reads this file
+// and fails on any other drawing call). It is a new file, though: encoded
+// again (lossy for a JPEG or WebP, QUALITY below), decoded in standard
+// colours (createImageBitmap's default conversion, so a wide-gamut photo is
+// turned into sRGB), and without the website file's EXIF, IPTC or XMP
+// details (camera data, any copyright notice written into the file). Its
+// pixels are close to the website's, not byte for byte the same. The other
+// canvas here is the small copy the check reads, which is never encoded or
+// sent.
 
 import { checkSize, matchesCheck } from './photoBranding.js';
 
