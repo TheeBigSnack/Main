@@ -73,6 +73,8 @@ export const TUNING = Object.freeze({
   softMin: 0.03, // ...and is at least this deep (share of the side)
   softGrow: 0.7, // ...and reaches on while its lines vary at most this share of the photo past it
   softFollow: 0.5, // ...and the photo goes on under it: brightness just inside its edge follows just outside (correlation)
+  stepMin: 12, // ...or, where the photo past it varies too little to compare, each photo steps in brightness at its edge by at least this...
+  stepPeak: 2, // ...and by this many times the median step at the lines around it
   softMinPhotos: 4, // ...judged only from at least this many distinct photos
   stripRatio: 0.8, // a mark at an edge sits in a see-through strip when the lines from the edge past it vary at most this share of the photo beyond
   tooAlike: 0.5, // overlay over this share of the photo: the photos are too alike to tell
@@ -535,6 +537,34 @@ function linePixels(w, R, side, from, to) {
   return Int32Array.from(out);
 }
 
+// How much each photo's brightness steps across the line between lines
+// [0, depth) and the rest of side `side` of R: the median, over the pixels
+// along the edge and the photos, of the difference between the second line
+// in from it and the second line past it (the line on either side of the
+// edge may be blended, so both are skipped).
+function lineStep(tmpl, w, R, side, depth) {
+  const { n, LY } = tmpl;
+  const a = linePixels(w, R, side, Math.max(0, depth - 2), Math.max(1, depth - 1));
+  const b = linePixels(w, R, side, depth + 1, depth + 2);
+  const L = Math.min(a.length, b.length);
+  if (!L || !n) return 0;
+  const hist = new Uint32Array(256);
+  for (let k = 0; k < L; k++) {
+    const pa = a[k] * n;
+    const pb = b[k] * n;
+    for (let i = 0; i < n; i++) {
+      const d = LY[pa + i] - LY[pb + i];
+      hist[d < 0 ? -d : d]++;
+    }
+  }
+  let acc = 0;
+  let v = 0;
+  for (; v < 255; v++) {
+    acc += hist[v];
+    if (acc * 2 >= L * n) break;
+  }
+  return v;
+}
 
 // How closely each photo's brightness just inside a band's edge follows its
 // brightness just outside it: the median, along the edge, of the correlation
@@ -645,6 +675,23 @@ function softBand(sigma, D, M, w, h, R, side, cfg, tmpl) {
     while (best.depth < grow && q[best.depth] <= cfg.softGrow * best.ref) best.depth++;
     return best;
   };
+  // the line in [lo, hi] where the photos step in brightness from one line to
+  // the next, at the same line in most of them and clearly more than at the
+  // lines around it: a see-through band's inner edge, which dims or lightens
+  // each photo by one share, found even where the photo past the band varies
+  // too little to compare against (a few photos alike there). A sky, or the
+  // photo beside a band, goes on smoothly.
+  const stepIn = (lo, hi) => {
+    if (hi - lo < 4) return null;
+    const steps = [];
+    for (let d = lo; d <= hi; d++) steps.push(lineStep(tmpl, w, R, side, d));
+    let at = 0;
+    for (let k = 1; k < steps.length; k++) if (steps[k] > steps[at]) at = k;
+    const around = quantile(steps, 0, steps.length, 0.5);
+    if (steps[at] < cfg.stepMin || steps[at] < cfg.stepPeak * around) return null;
+    const depth = lo + at;
+    return { depth, ratio: null, ref: quantile(q, depth + 1, depth + 1 + refLen, 0.5) };
+  };
   // the designed marks in lines [0, depth): detail between steady pixels and
   // lettering that stands out from the band, and the first and last line they reach
   const held = (best) => {
@@ -677,7 +724,9 @@ function softBand(sigma, D, M, w, h, R, side, cfg, tmpl) {
     // the picture itself (a sky that varies less than the ground, with a
     // corner logo over it). Its inner edge is looked for again within reach
     // of the marks, and the checks below tell a band from a sky there.
-    best = edgeIn(Math.max(minDepth, marks.last + 1), Math.min(maxDepth, marks.reach));
+    const lo = Math.max(minDepth, marks.last + 1);
+    const hi = Math.min(maxDepth, marks.reach);
+    best = edgeIn(lo, hi) || stepIn(lo, hi);
     if (!best) return null;
     marks = held(best);
     if (!marks.enough || best.depth > marks.reach) return null;

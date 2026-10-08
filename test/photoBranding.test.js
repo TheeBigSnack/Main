@@ -443,6 +443,42 @@ function tintedBand(px, w, alpha, { logo = false } = {}) {
 }
 const tintRows = (x, y) => y >= 165;
 
+test('a see-through band over a calm ground is cut at its own edge, not past it into the ground or short of it', () => {
+  // six photos: a ground of one brightness per photo runs from row 140 down
+  // under a 70% navy band (rows 165 and down) with white lettering. Past the
+  // band the ground varies about as little as the band itself, so the band's
+  // edge can't be told by how much its lines vary (the first look runs on
+  // into the ground, 30 rows past the band); each photo still steps in
+  // brightness at row 165 (stepIn).
+  const r = rng(26);
+  const lettering = (x, y) => y >= 172 && y < 184 && (x >> 2) % 3 === 0 && x > 20 && x < 200;
+  const g = Array.from({ length: 6 }, (_, i) => {
+    const px = photo(2000 + i);
+    const grey = 60 + r() * 120;
+    for (let y = 140; y < 192; y++) {
+      for (let x = 0; x < 256; x++) {
+        const o = (y * 256 + x) * 4;
+        const t = y >= 165 ? (r() - 0.5) * 60 : (r() - 0.5) * 4;
+        for (let k = 0; k < 3; k++) {
+          px[o + k] = grey + t;
+          if (y >= 165) px[o + k] = lettering(x, y) ? 250 : px[o + k] * 0.3 + [18, 30, 52][k] * 0.7;
+        }
+      }
+    }
+    return sample(`p${i + 1}`, px);
+  });
+  const res = findBranding(g);
+  // two of the six are not matched to the band and go as the website shows
+  // them (they were not before this edge search either)
+  assert.ok(res.counts.cropped >= 4, JSON.stringify(res.counts));
+  for (const e of Object.values(res.photos)) {
+    if (e.status === 'none') continue;
+    assert.deepEqual(e.crop, { x: 0, y: 0, w: 1024, h: 652 }, JSON.stringify(e.crop));
+    assertHonestCrop(e, (x, y) => (y >= 165 ? [0, 0, 0] : null));
+    assert.equal(photoNote(e), 'Cropped: logo band off the bottom');
+  }
+});
+
 test('a see-through band with lettering of one colour is cut off whole', () => {
   // the lettering has no steady neighbour of another colour (the band around
   // it changes with each photo): it is told by how it stands out from the band
