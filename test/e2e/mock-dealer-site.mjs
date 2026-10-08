@@ -170,6 +170,14 @@ function rng(seed) {
   };
 }
 const inBand = (x, y) => y >= PHOTO_H - BAND_ROWS;
+// Every photo also has a strip EDGE_COLS wide down its left and right edges
+// (above the band) in a colour of its own, so it is part of the picture, not
+// of the overlay: test/e2e/branding.e2e.mjs reads a cropped thumbnail's
+// outermost columns to see that the whole width that goes is shown.
+export const EDGE_COLS = 24;
+const EDGE_PALETTE = [[230, 30, 30], [30, 200, 60], [240, 220, 20], [220, 40, 220], [30, 210, 220], [250, 140, 20]];
+export const edgeColour = (seed) => EDGE_PALETTE[seed % EDGE_PALETTE.length];
+const atEdge = (x) => x < EDGE_COLS || x >= PHOTO_W - EDGE_COLS;
 const bandPixel = (x, y) => (y >= PHOTO_H - 36 && y < PHOTO_H - 12 && (x >> 3) % 3 === 0 && x >= 40 && x < 560 ? [250, 250, 250] : BAND_COLOUR);
 // Also used by scripts/a11y.mjs for the side panel's cropped-photos state.
 export function photoPng(seed, branded) {
@@ -181,7 +189,7 @@ export function photoPng(seed, branded) {
   for (let y = 0; y < PHOTO_H; y++) {
     for (let x = 0; x < PHOTO_W; x++) {
       const o = (y * PHOTO_W + x) * 3;
-      const band = branded && inBand(x, y) ? bandPixel(x, y) : null;
+      const band = branded && inBand(x, y) ? bandPixel(x, y) : !inBand(x, y) && atEdge(x) ? edgeColour(seed) : null;
       const u = x / PHOTO_W;
       const v = y / PHOTO_H;
       for (let k = 0; k < 3; k++) {
@@ -195,11 +203,13 @@ export function photoPng(seed, branded) {
   return encodePng(PHOTO_W, PHOTO_H, rgb);
 }
 const photoCache = new Map();
+// The seed of photo n of a car in the 'branded' scenario (its picture and its edge colour).
+export const photoSeed = (vin, n) => (vin === BRANDED_VIN ? 1000 : 2000) + Number(n);
 // The photo the 'branded' scenario serves at /photo/<vin>/<n>.png, or null (every other photo is the 1x1 PNG).
 function brandedPhoto(vin, n) {
   if (vin !== BRANDED_VIN && vin !== PLAIN_VIN) return null;
   const key = `${vin}/${n}`;
-  if (!photoCache.has(key)) photoCache.set(key, photoPng((vin === BRANDED_VIN ? 1000 : 2000) + Number(n), vin === BRANDED_VIN));
+  if (!photoCache.has(key)) photoCache.set(key, photoPng(photoSeed(vin, n), vin === BRANDED_VIN));
   return photoCache.get(key);
 }
 

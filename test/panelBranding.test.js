@@ -13,7 +13,7 @@
 //   - a photo goes into the form (and the Downloads folder) cropped only
 //     with the setting on, when the person did not set it back, and when its
 //     bytes are the ones checked; otherwise as the website shows it;
-//   - the thumbnail shows exactly the crop that goes, with Use original;
+//   - the thumbnail shows the crop that goes, all of it and never more, with Use original;
 //   - a queued car's form waits for the check, and a car whose photos were
 //     cropped waits at review.
 // The decode and the cut (src/photoCanvas.js) are stand-ins here
@@ -377,7 +377,7 @@ function pickView(state) {
   return fns.photoPickHtml();
 }
 
-test('the thumbnail of a cropped photo shows exactly the part that goes, with Use original, a note, and the choices for all', () => {
+test('the thumbnail of a cropped photo shows the part that goes, with Use original, a note, and the choices for all', () => {
   const state = { vin: 'AAA', vehicle: { vin: 'AAA', photos: PHOTOS }, settings: { cropBranding: true }, branding: checked([PHOTOS[0], PHOTOS[1]]), photoOriginals: null, brandingRun: null, photoPick: null, fill: null };
   const html = pickView(state);
   assert.match(html, /<img src="https:\/\/img\.example\.test\/a\/1\.jpg"[^>]* style="object-view-box: inset\(0% 0% 10% 0%\)" \/>/, 'the crop of 48 of 480 rows off the bottom');
@@ -420,6 +420,22 @@ test('the thumbnail of a cropped photo shows exactly the part that goes, with Us
   // another car's check is never shown on this car
   Object.assign(state, { settings: { cropBranding: true }, branding: checked([PHOTOS[0]], 'BBB') });
   assert.doesNotMatch(pickView(state), /object-view-box|photoCrop-/);
+});
+
+test('a thumbnail is never trimmed to fill its box: a cropped photo shows the whole part that goes', () => {
+  // object-view-box makes the crop the picture's own size; object-fit: cover
+  // would then trim a crop wider (or taller) than 4:3 again to fill the box,
+  // hiding the edges of the part that goes. contain shows all of it.
+  const css = readFileSync(new URL('../extension/sidepanel.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({ sel: m[1].trim(), body: m[2] }));
+  const thumbImg = rules.filter((r) => /\.thumb[^,]*\bimg\b/.test(r.sel));
+  assert.ok(thumbImg.length, 'the thumbnails have a rule');
+  const fits = thumbImg.flatMap((r) => [...r.body.matchAll(/object-fit\s*:\s*([a-z-]+)/g)].map((m) => m[1]));
+  assert.deepEqual(fits, ['contain'], `the thumbnails' object-fit: ${fits}`);
+  assert.doesNotMatch(css, /object-fit\s*:\s*(cover|fill|none)/, 'nothing in the panel trims or stretches a picture');
+  // and the inline style of a cropped thumbnail sets no fit of its own
+  const state = { vin: 'AAA', vehicle: { vin: 'AAA', photos: PHOTOS }, settings: { cropBranding: true }, branding: checked([PHOTOS[0]]), photoOriginals: null, brandingRun: null, photoPick: null, fill: null };
+  assert.doesNotMatch(pickView(state), /object-fit/);
 });
 
 test('the publish step says how many photos went cropped, and which went as the website shows them', () => {

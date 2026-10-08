@@ -2135,7 +2135,7 @@ function photoPickHtml() {
   const items = all.map((url, i) => {
     const at = pick.indexOf(url);
     const place = at === 0 ? ', cover' : at > 0 ? `, attached ${ordinal(at + 1)}` : '';
-    // the dealer-branding check's word on this photo: a cropped thumbnail shows exactly the part that goes (object-view-box), never more
+    // the dealer-branding check's word on this photo: a cropped thumbnail shows the part that goes (object-view-box), never more, and all of it (sidepanel.css draws every thumbnail with object-fit: contain, never trimmed to fill its box)
     const e = brandingOn() ? brandingEntry(url) : null;
     const back = setBack(url);
     const view = goesCropped(url) ? insetOf(e) : '';

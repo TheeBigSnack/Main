@@ -2,7 +2,8 @@
 // Ram's 6 photos as real 640x480 PNGs with the same band laid over their
 // bottom 48 rows (a photo vendor's overlay), and the Wagoneer's 6 as plain
 // photos. The side panel checks the photos at review and shows each cropped
-// one as it will go (the thumbnail's object-view-box); the test puts photo 2
+// one as it will go (the thumbnail's object-view-box, the whole width of the
+// part kept on screen); the test puts photo 2
 // back as the website shows it (Use original), opens the MOCK form, and reads
 // back every attached file: 5 are an exact cut of the top rows without the band, one
 // is the website's own 640x480. Download photos saves the same files. In a
@@ -19,7 +20,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
-import { startMockSite, PHOTO_W, PHOTO_H, BAND_ROWS, BAND_COLOUR, BRANDED_VIN, PLAIN_VIN } from './mock-dealer-site.mjs';
+import { startMockSite, PHOTO_W, PHOTO_H, BAND_ROWS, BAND_COLOUR, BRANDED_VIN, PLAIN_VIN, edgeColour, photoSeed } from './mock-dealer-site.mjs';
 import { startMockMarketplace, INITIAL_LISTINGS } from './mock-marketplace.mjs';
 import { blockFacebook } from './noFacebook.mjs';
 import { until } from './until.mjs';
@@ -90,6 +91,23 @@ const insets = (img) => img.evaluate((el) => {
   return [t, r, b, l];
 });
 const pngSize = (buf) => ({ w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) });
+// What a thumbnail really shows at its left and right edges, halfway down: a
+// screenshot of the img, decoded in the panel page. Each photo's outermost
+// columns are a strip of its own colour (mock-dealer-site.mjs edgeColour), so
+// a thumbnail trimmed to fill its box (object-fit: cover) shows the picture
+// beside them instead.
+async function thumbEdges(panel, img) {
+  const b64 = (await img.screenshot()).toString('base64');
+  return panel.evaluate(async (data) => {
+    const bytes = Uint8Array.from(atob(data), (ch) => ch.charCodeAt(0));
+    const bmp = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+    const g = new OffscreenCanvas(bmp.width, bmp.height).getContext('2d');
+    g.drawImage(bmp, 0, 0);
+    const y = bmp.height >> 1;
+    const at = (x) => [...g.getImageData(x, y, 1, 1).data.slice(0, 3)];
+    return { left: at(1), right: at(bmp.width - 2) };
+  }, b64);
+}
 const checkEnds = (panel, what = 'the photo check') => until(panel, () => Boolean(document.getElementById('photoPick')) && !document.getElementById('brandingProgress'), null, { timeout: 90000, what });
 
 try {
@@ -192,6 +210,10 @@ try {
     assert.deepEqual([t, r, l], [0, 0, 0], `photo ${i + 1} is cut only at the bottom (${box})`);
     // the view box hides exactly the rows the crop leaves out, rounded up to a tenth of a percent: never more of the photo than goes
     assert.ok(Math.abs(b - shownBottom) < 0.01 && b >= 10, `photo ${i + 1}'s view box hides the bottom ${b}%, the crop ${shownBottom}%`);
+    // and the whole width of the part that goes is on screen: the thumbnail is never trimmed again to fill its 4:3 box
+    const edges = await thumbEdges(panel, panel.locator(`#photoPick li:nth-child(${i + 1}) img`));
+    const colour = edgeColour(photoSeed(BRANDED_VIN, i + 1));
+    assert.ok(near(edges.left, colour, 24) && near(edges.right, colour, 24), `photo ${i + 1}'s thumbnail shows its left and right edges (${JSON.stringify(edges)}, the photo's edge ${colour})`);
     assert.match(await panel.textContent(`#photoNote-${i}`), /^Cropped: .*bottom/);
     assert.equal(await panel.textContent(`#photoCrop-${i}`), 'Use original');
     assert.equal(await panel.getAttribute(`#photoCrop-${i}`, 'aria-label'), `Use original: photo ${i + 1}`);

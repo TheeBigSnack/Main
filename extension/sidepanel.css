@@ -57,7 +57,8 @@ ul.thumbs { list-style: none; margin: 6px 0; padding: 0; display: grid; grid-tem
 .thumb { border: 2px solid var(--line); border-radius: var(--radius); padding: 4px; font-size: 11px; display: flex; flex-direction: column; gap: 4px; }
 .thumb.on { border-color: var(--good); }
 .thumb .pic { display: flex; flex-direction: column; gap: 4px; cursor: pointer; }
-.thumb img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 4px; background: var(--line); }
+/* contain, never cover: the whole of what goes shows, so a cropped photo (object-view-box, sidepanel.js photoPickHtml) or one of another shape is never trimmed again to fill the box */
+.thumb img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: contain; border-radius: 4px; background: var(--line); }
 .thumb:not(.on) img { opacity: .55; }
 .thumb .row { display: flex; align-items: center; gap: 4px; }
 .thumb .row input { margin: 0; }
