@@ -528,14 +528,18 @@ test('the photos go to whatever https server the website names, and the inventor
   assert.match(others, /photo servers the dealership's website names[^;]*another company[^;]*Download photos[^;]*Chrome's own prompt/, 'the privacy policy does not say the photos come from any server the website names, from the User\'s click');
   assert.doesNotMatch(others, /image host/, 'the privacy policy still names one image host');
 
-  // the dealer-branding check at review: the photos are downloaded once more, from the same servers, and a small copy of each
+  // the dealer-branding check at review: the photos are downloaded again for each check (the review opening, the panel
+  // reopened or a Settings save before a check finished or was skipped, the website's photos changing, a click), from the
+  // same servers, never said to be downloaded "once"; and a small copy of each
   // checked car's cover is kept in the browser (src/photoBranding.js lotSample, withCover; coverSamples:<origin>)
   const WORD = { 8: 'eight' };
   const cars = WORD[COVER_SAMPLE_CARS] || String(COVER_SAMPLE_CARS);
-  assert.match(photos[column(t, 'When')], /the side panel's review screen for a car, once, for the dealer-branding check[^|]*\*\*Check the photos for dealer branding\*\*/, 'the Photos row does not say the photos are downloaded at review for the dealer-branding check, and from its click');
+  assert.match(photos[column(t, 'When')], /the side panel's review screen for a car, for the dealer-branding check[^|]*when a car reaches it[^|]*reopened[^|]*Settings are saved[^|]*before a check of that car has finished or been skipped[^|]*photos changed[^|]*\*\*Check the photos for dealer branding\*\*/, 'the Photos row does not say each time the photos are downloaded at review for the dealer-branding check, and from its click');
+  assert.doesNotMatch(photos[column(t, 'When')], /\bonce\b/, 'the Photos row says the check downloads the photos once');
   assert.match(photos[column(t, 'What is sent')], new RegExp(`reads at most ${MAX_CHECK_PHOTOS} photos of the car in the side panel and sends nothing of them anywhere`), 'the Photos row does not say what the check reads and that it sends nothing');
   assert.match(photos[column(t, 'Kept afterwards')], /the cover copy in `coverSamples:<origin>`/, 'the Photos row says nothing of the photos is kept, while the cover copy is');
-  assert.match(cells('Photo servers'), /once when the side panel checks the photos for dealer branding at review/, 'the Photo servers row leaves out the check at review');
+  assert.match(cells('Photo servers'), /each time the side panel checks the photos for dealer branding at review \(when a car reaches review, again when the side panel is reopened on it or Settings are saved before a check of it has finished or been skipped, when the website changes its photos, and at each click/, 'the Photo servers row leaves out when the check at review downloads the photos');
+  assert.doesNotMatch(cells('Photo servers'), /\bonce\b[^|]*dealer branding/, 'the Photo servers row says the check downloads the photos once');
   const perSite = onlyTable(section(inventory, '### `chrome.storage.local`, per dealer website'), 'the per-website section');
   const covers = perSite.rows.find((r) => firstCode(r[0]) === 'coverSamples:<origin>');
   assert.ok(covers, 'docs/data-inventory.md has no coverSamples:<origin> row');
@@ -548,7 +552,12 @@ test('the photos go to whatever https server the website names, and the inventor
   assert.match(policy.split('\n').find((l) => l.startsWith('Browser data stays until')), /the cover-photo copies kept for the dealer-branding check/, 'the privacy policy\'s Clear everything list leaves out the cover copies');
   const content = storeTexts.split('\n').find((l) => l.startsWith('- Website content:'));
   assert.match(content, new RegExp(`a small copy \\(at most ${LOT_LONG_SIDE} pixels across\\) of the cover photo of the last ${cars} cars whose photos were checked, kept in the browser and sent nowhere`), 'the Web Store\'s Website content answer leaves out the cover copies');
-  assert.match(photoRows[0][whatCol], /once, to check them in the browser for a logo band, frame or corner logo[^|]*nothing of them is sent anywhere/, 'the Web Store photos row does not say the photos are checked in the browser and sent nowhere');
+  assert.match(photoRows[0][whatCol], /to check them in the browser for a logo band, frame or corner logo[^|]*when the review screen first shows the car, again when the side panel is reopened on it or settings are saved before a check of that car has finished or been skipped, when the website changes the car's photos, and at each click[^|]*nothing of them is sent anywhere/, 'the Web Store photos row does not say when the photos are checked in the browser, and that they are sent nowhere');
+  assert.doesNotMatch(photoRows[0][whatCol], /\bonce\b/, 'the Web Store photos row says the check downloads the photos once');
+  // the privacy policy: when the photos are downloaded for the check, never "once"
+  const kept = policy.split('\n').find((l) => l.startsWith('| Dealership website inventory'));
+  assert.match(kept, /to check them for dealer branding in the User's browser: when the side panel shows the car for review, again when the side panel is reopened on it or Settings are saved before a check of that car has finished or been skipped, again when the dealership's website changes the car's photos, and each time the User clicks/, 'the privacy policy does not say each time the photos are downloaded for the dealer-branding check');
+  assert.doesNotMatch(policy, /\bonce\b[^.|]*(?:dealer branding|for review)|(?:dealer branding|for review)[^.|]*\bonce\b/i, 'the privacy policy says the check downloads the photos once');
 });
 
 // ---------- who receives it, and the privacy texts ----------

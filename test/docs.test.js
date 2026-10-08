@@ -131,7 +131,10 @@ test('help.md and README give the "vanished at once" rule with the lot size it s
   const WORD = { 3: 'three', 4: 'four', 8: 'eight' };
   const keep = Math.round(BRANDING_TUNING.keepArea * 100);
   const help = doc('help.md');
-  assert.match(help, new RegExp(`It downloads each photo once \\(up to ${MAX_CHECK_PHOTOS}\\)`), 'help.md: the most photos one check downloads');
+  assert.match(help, new RegExp(`Each check downloads each photo once \\(up to ${MAX_CHECK_PHOTOS}\\)`), 'help.md: the most photos one check downloads');
+  // and when a check runs, so the help never reads as one download per car
+  assert.match(help, /A check runs, and downloads the photos again, when the review screen opens for a car; again when the side panel is reopened on the car, or Settings are saved \(cropping turned on, say\), before a check of it has finished or been skipped; again when Lot Current reads the car on the website and finds its photos changed; and each time you click \*\*Check the photos for dealer branding\*\* or \*\*Check again\*\*\. A skip holds for that car until one of the last two\./, 'help.md: when the photo check downloads the photos');
+  assert.doesNotMatch(help, /once when the side panel's review screen checks|It downloads each photo once/, 'help.md says the check downloads the photos once per car');
   assert.match(help, new RegExp(`at least ${WORD[MIN_PHOTOS]} different photos of the same size`), 'help.md: how many photos the check needs');
   assert.match(help, new RegExp(`keeping at least ${keep}% of it`), 'help.md: how much of a photo a crop keeps');
   assert.match(help, new RegExp(`A photo smaller than ${MIN_SIDE} pixels on its short side`), 'help.md: the smallest photo the check reads');
