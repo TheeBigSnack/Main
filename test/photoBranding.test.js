@@ -534,6 +534,19 @@ test('a corner logo over a sky is stepped around: the sky is not taken for a see
       assert.equal(photoNote(e), 'Cropped: corner logo off the top', `seed ${seed}`);
     }
   }
+  // over many skies: never more of the sky than the badge's own strip and a
+  // line past it (a see-through "band" reaching well past the badge would
+  // cut up to 30% of the photo and call the sky a logo band)
+  for (let seed = 1; seed <= 12; seed++) {
+    const g = Array.from({ length: 12 }, (_, i) => sample(`p${i + 1}`, skyPhoto(seed * 100 + i)));
+    const res = findBranding(g);
+    assert.equal(res.counts.cropped, 12, `seed ${seed}`);
+    for (const e of Object.values(res.photos)) {
+      assertHonestCrop(e, badge, `seed ${seed}:`);
+      assert.deepEqual(e.sides, ['top'], `seed ${seed}`);
+      assert.ok(e.crop.y >= 100 && e.crop.y <= 104, `seed ${seed}: crop ${JSON.stringify(e.crop)}`);
+    }
+  }
 });
 
 test('with a band and a see-through mark, only the band is cropped: the mark stays and is not called gone', () => {

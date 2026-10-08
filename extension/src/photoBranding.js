@@ -425,6 +425,13 @@ function shrink(R, side, by) {
   return r;
 }
 
+// The line of side `side` of R that pixel p is on (0 at the edge).
+function lineIn(p, w, R, side) {
+  const x = p % w;
+  const y = (p - x) / w;
+  return side === 'top' ? y - R.y0 : side === 'bottom' ? R.y1 - 1 - y : side === 'left' ? x - R.x0 : R.x1 - 1 - x;
+}
+
 const sideDim = (side, w, h) => (side === 'top' || side === 'bottom' ? h : w);
 
 // The pixels of `mask` in the zone of lines [0, depth) of side `side` of R.
@@ -534,15 +541,11 @@ function linePixels(w, R, side, from, to) {
 // across photos between the line 3 in from the edge and the line 2 past it.
 // Near 1 when the photo goes on under a see-through band; near 0 when the
 // inside stays put (an opaque band, or a part of the picture that never
-// changes) while the photo next to it changes.
-function edgeFollow(tmpl, w, R, side, depth) {
-  return edgeFit(tmpl, w, R, side, depth).follow;
-}
-
-// edgeFollow's correlation, and how much of the change outside the edge
-// shows inside it from photo to photo (the median slope): near 1 when the
-// photo just goes on (a sky, a wall), about 1 - opacity under a see-through
-// band, which dims or lightens every photo by the same share.
+// changes) while the photo next to it changes (follow). And how much of the
+// change outside the edge shows inside it from photo to photo (the median
+// slope): near 1 when the photo just goes on (a sky, a wall), about
+// 1 - opacity under a see-through band, which dims or lightens every photo
+// by the same share.
 function edgeFit(tmpl, w, R, side, depth) {
   const { n, LY } = tmpl;
   const a = linePixels(w, R, side, Math.max(0, depth - 3), Math.max(1, depth - 2));
@@ -638,18 +641,37 @@ function softBand(sigma, D, M, w, h, R, side, cfg, tmpl) {
   const grow = Math.min(maxDepth, best.depth + Math.max(2, Math.round(cfg.extMax * dim)));
   while (best.depth < grow && q[best.depth] <= cfg.softGrow * best.ref) best.depth++;
   let det = 0;
-  for (let k = 0; k < best.depth; k++) det += lineCount(D, w, R, side, k);
+  let first = -1;
+  let last = -1;
+  for (let k = 0; k < best.depth; k++) {
+    const c = lineCount(D, w, R, side, k);
+    det += c;
+    if (c && first < 0) first = k;
+    if (c) last = k;
+  }
   const letters = letterEdges(M, sigma, tmpl.medY, w, h, R, side, best.depth, cfg.softGrow * best.ref, cfg);
   if (det + letters.length / 2 < cfg.detailMin) return null;
+  for (let i = 0; i < letters.length; i += 2) {
+    const k = lineIn(letters[i], w, R, side);
+    if (first < 0 || k < first) first = k;
+    if (k > last) last = k;
+  }
+  // a band is laid out around what it holds: it reaches past its lettering
+  // or logo by about as much as it leaves between them and the edge. A
+  // stretch that goes on well past the only mark in it (a corner logo over
+  // a sky that varies less than the ground below) is the photo, not a band.
+  if (best.depth > last + 1 + Math.max(first, cfg.margin) + Math.max(2, Math.round(cfg.extMax * dim))) return null;
   // the photo goes on under a see-through band: just inside its edge each
   // photo shows, dimmed or lightened, what it shows just outside, so the two
   // rise and fall together from photo to photo. A part of the picture that
   // never changes (the backdrop of a spot where every car is photographed)
   // varies little too, but it doesn't follow the changing photo next to it.
+  // And a band dims or lightens every photo by one share, so the change from
+  // photo to photo shows through it by clearly less than in full (markStrip).
   if (tmpl.n < cfg.softMinPhotos) return null;
-  const follow = edgeFollow(tmpl, w, R, side, best.depth);
-  if (follow < cfg.softFollow) return null;
-  return { side, depth: best.depth, soft: true, detailed: true, ratio: best.ratio, follow: +follow.toFixed(2), letters };
+  const fit = edgeFit(tmpl, w, R, side, best.depth);
+  if (fit.follow < cfg.softFollow || fit.slope > cfg.stripRatio) return null;
+  return { side, depth: best.depth, soft: true, detailed: true, ratio: best.ratio, follow: +fit.follow.toFixed(2), letters };
 }
 
 // A see-through strip along one side of R that a mark (a logo or text with
