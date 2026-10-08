@@ -233,11 +233,40 @@ test('a corner badge is stepped around, and the crop holds none of it', () => {
   assert.equal(photoNote(res.photos.p1), 'Cropped: corner logo off the top');
 });
 
+test('a band and a corner logo on another side are each named for the side they came off', () => {
+  const both = (x, y) => band(x, y) || badge(x, y);
+  const res = findBranding(gallery(10, both, { seed: 4 }));
+  for (const e of Object.values(res.photos)) {
+    assert.equal(e.status, 'cropped');
+    assert.deepEqual([e.sides, e.bands, e.markSides, e.marks, e.left], [['top', 'bottom'], ['bottom'], ['top'], 1, null], JSON.stringify(e));
+    assertHonestCrop(e, both);
+  }
+  assert.equal(photoNote(res.photos.p1), 'Cropped: logo band off the bottom and a corner logo off the top');
+  assert.equal(photoNote(res.photos.p1, { original: true }), 'Original: logo band and corner logo left on');
+  assert.match(brandingSummary(res.photos, Object.keys(res.photos)), /^Cropped the same logo band off the bottom and a corner logo off the top of 10 of 10 photos\./);
+  assert.match(brandingSummary(res.photos, Object.keys(res.photos), { originals: ['p2'] }), /You set 1 photo back to the website's original, with the logo band and corner logo left on\./);
+  // an entry saved before markSides existed: its other side was a corner logo's when it had one
+  const { markSides, ...old } = res.photos.p1;
+  assert.equal(photoNote(old), 'Cropped: logo band off the bottom and a corner logo off the top');
+});
+
+test('a side cut only to keep the photo\'s shape is not called a logo band side', () => {
+  // a lettered top bar and bottom band that leave a strip too wide: the crop narrows it to keep the shape
+  const lettered = (x, y, r0, col) => (y >= r0 + 6 && y < r0 + 14 && (x >> 2) % 3 === 0 && x > 30 && x < 220 ? [250, 250, 250] : col);
+  const bars = (x, y) => (y < 30 ? lettered(x, y, 0, [120, 0, 20]) : y >= 160 ? lettered(x, y, 160, [18, 30, 52]) : null);
+  const res = findBranding(gallery(10, bars, { seed: 9 }));
+  const e = res.photos.p1;
+  assert.equal(e.status, 'cropped');
+  assert.deepEqual([e.sides, e.bands, e.markSides], [['top', 'right', 'bottom', 'left'], ['top', 'bottom'], []], JSON.stringify(e));
+  assert.equal(photoNote(e), "Cropped: logo bands off the top and the bottom and a strip off the right side and the left side to keep the photo's shape");
+  assertHonestCrop(e, bars);
+});
+
 test('an opaque logo in the middle is kept: cropping it off would cost too much, and nothing says it is gone', () => {
   const res = findBranding(gallery(10, centre, { seed: 4 }));
   for (const e of Object.values(res.photos)) {
     assert.equal(e.status, 'kept');
-    assert.ok(['inside', 'too-much'].includes(e.left), e.left);
+    assert.equal(e.left, 'inside', 'the logo stays inside the photo');
     assert.equal(e.crop, null);
     assert.equal(cropPlan({ ...e, sha: 'ab' }, { url: 'u' }), null, 'a kept photo goes as the website shows it');
   }
@@ -465,7 +494,7 @@ test('TUNING is frozen, keeps at least 60% of a photo, takes bands of at most 30
 
 test('every entry has the contract\'s shape', () => {
   const res = findBranding([...gallery(6, band), { id: 'gone', reason: 'download' }]);
-  const keys = ['status', 'crop', 'width', 'height', 'sides', 'bands', 'left', 'marks', 'reason'].sort();
+  const keys = ['status', 'crop', 'width', 'height', 'sides', 'bands', 'markSides', 'left', 'marks', 'reason'].sort();
   for (const e of Object.values(res.photos)) assert.deepEqual(Object.keys(e).sort(), keys);
   assert.deepEqual(Object.keys(res).sort(), ['counts', 'photos']);
   assert.deepEqual(res.counts, { cropped: 6, kept: 0, none: 0, unchecked: 1, inside: 0 });
@@ -535,6 +564,8 @@ test('a crop never keeps less than 60% of the photo', () => {
   const res = findBranding(gallery(10, box, { seed: 34 }));
   for (const e of Object.values(res.photos)) {
     assert.deepEqual([e.status, e.left, e.crop], ['kept', 'too-much', null], JSON.stringify(e));
+    // the frame along the edges is what stays, not a logo in the middle
+    assert.equal(photoNote(e), 'Frame left on: cropping it off would cut too much of the photo');
   }
   assert.match(brandingSummary(res.photos, Object.keys(res.photos)), /can't be cropped off without losing too much of the photo/);
   // keepArea is what decides: the same gallery with the floor lowered is cropped

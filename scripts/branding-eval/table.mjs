@@ -13,7 +13,7 @@ const grouped = args.includes('--groups');
 const path = isAbsolute(file) || existsSync(file) ? file : join(OUT_DIR, file);
 const { results, seeds, quality, timing } = JSON.parse(await readFile(path, 'utf8'));
 const pct = (v) => (v * 100).toFixed(1);
-const short = { cropped: 'crop', none: 'none', 'kept/too-much': 'kept', 'unchecked/too-few': 'too-few', 'unchecked/too-alike': 'too-alike', 'unchecked/too-small': 'too-small', 'cropped/inside': 'crop+inside' };
+const short = { cropped: 'crop', none: 'none', 'kept/too-much': 'kept', 'kept/inside': 'kept', 'unchecked/too-few': 'too-few', 'unchecked/too-alike': 'too-alike', 'unchecked/too-small': 'too-small', 'cropped/inside': 'crop+inside' };
 const sum = (k, list = results) => list.reduce((s, r) => s + r[k], 0);
 console.log(`${file}: ${seeds || 1} seed(s), decode quality ${quality}`);
 

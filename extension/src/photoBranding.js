@@ -861,7 +861,8 @@ function carries(tmpl, part, v, devRow, cfg) {
 
 // The largest rectangle inside R that holds no obstacle pixel, keeps the
 // photo's shape within the aspect factor and at least keepArea of the photo.
-// Natural-pixel units for area and shape; grid units for the search.
+// Natural-pixel units for area and shape; grid units for the search. `clear`
+// is the obstacle-free rectangle before it was narrowed to keep the shape.
 function largestClear(obs, w, R, sx, sy, cfg, A0, minArea) {
   const cw = R.x1 - R.x0;
   if (cw <= 0 || R.y1 <= R.y0) return null;
@@ -890,7 +891,7 @@ function largestClear(obs, w, R, sx, sy, cfg, A0, minArea) {
     const area = gw * sx * gh * sy;
     if (area < minArea) return;
     const off = Math.abs((nx0 + gw / 2) * sx - cx);
-    if (!best || area > best.area + 1e-6 || (Math.abs(area - best.area) <= 1e-6 && off < best.off)) best = { x0: nx0, y0: ny0, x1: nx0 + gw, y1: ny0 + gh, area, off };
+    if (!best || area > best.area + 1e-6 || (Math.abs(area - best.area) <= 1e-6 && off < best.off)) best = { x0: nx0, y0: ny0, x1: nx0 + gw, y1: ny0 + gh, area, off, clear: { x0: ax0, y0: ay0, x1: ax1, y1: ay1 } };
   };
   for (let y = R.y0; y < R.y1; y++) {
     const row = y * w;
@@ -964,7 +965,8 @@ function cropFor(grid, carried, W, H, cfg) {
   if (!rect) {
     if (!open) return { status: 'kept', left: 'too-much' };
     if (opaque.count) {
-      if (!bandSides.length) return { status: 'kept', left: 'too-much' };
+      // the logo inside stays in the photo, which goes as the website shows it
+      if (!bandSides.length) return { status: 'kept', left: 'inside' };
       left = 'inside';
     }
     rect = open;
@@ -985,7 +987,12 @@ function cropFor(grid, carried, W, H, cfg) {
   if (crop.x + crop.w < W) sides.push('right');
   if (crop.y + crop.h < H) sides.push('bottom');
   if (crop.x > 0) sides.push('left');
-  return { status: 'cropped', crop, sides, left };
+  // a side with no band that was cut to step around a logo inside (rather
+  // than only to keep the photo's shape), so the words name what came off it
+  const stepped = rect !== open ? rect.clear : null;
+  const inward = { top: (c) => c.y0 > R.y0, right: (c) => c.x1 < R.x1, bottom: (c) => c.y1 < R.y1, left: (c) => c.x0 > R.x0 };
+  const markSides = stepped ? sides.filter((sd) => !bandSides.includes(sd) && inward[sd](stepped)) : [];
+  return { status: 'cropped', crop, sides, markSides, left };
 }
 
 
@@ -993,7 +1000,7 @@ function cropFor(grid, carried, W, H, cfg) {
 
 function blankEntry(p, status, reason) {
   const size = (v) => (Number.isFinite(v) ? v : null);
-  return { status, crop: null, width: size(p.width), height: size(p.height), sides: [], bands: [], left: null, marks: 0, reason };
+  return { status, crop: null, width: size(p.width), height: size(p.height), sides: [], bands: [], markSides: [], left: null, marks: 0, reason };
 }
 
 /**
@@ -1009,13 +1016,17 @@ function blankEntry(p, status, reason) {
  *
  * Returns { photos: { [id]: entry }, counts: { cropped, kept, none,
  * unchecked, inside } }, one entry per id:
- * { status, crop, width, height, sides, bands, left, marks, reason }
+ * { status, crop, width, height, sides, bands, markSides, left, marks, reason }
  * - 'cropped': crop is { x, y, w, h } in natural px, integers, inside the
  *   photo, keeping at least TUNING.keepArea of it; sides are the sides cut,
- *   bands the sides a band was found on; left 'inside' when a logo found
- *   inside the photo is still in the crop (counted in counts.inside).
+ *   bands the sides a band was found on, markSides the other sides cut to
+ *   step around a logo inside (a corner logo); a side in neither was cut only
+ *   to keep the photo's shape. left 'inside' when a logo found inside the
+ *   photo is still in the crop (counted in counts.inside).
  * - 'kept': this photo carries the overlay but no crop takes it off within
- *   the limits (left 'inside' or 'too-much'); crop is null.
+ *   the limits: left 'inside' when a logo inside the photo can't be stepped
+ *   around, 'too-much' when cutting the edge bands (a frame) would keep too
+ *   little of the photo; crop is null.
  * - 'none': checked, and this photo carries none of the overlay found. That
  *   says nothing about see-through marks or logos on the car.
  * - 'unchecked': reason 'too-small', 'too-few', 'too-alike' or the caller's.
@@ -1179,6 +1190,7 @@ export function findBranding(photos, { lot = [], cover = undefined, tuning = nul
       if (r.crop) {
         entry.crop = { ...r.crop };
         entry.sides = r.sides.slice();
+        entry.markSides = r.markSides.slice();
       }
     }
     result.photos[p.id] = entry;
@@ -1405,6 +1417,35 @@ function overlayWord(bands) {
   return n >= 3 ? 'frame' : n === 2 ? 'logo bands' : n === 1 ? 'logo band' : 'corner logo';
 }
 
+// What came off which sides of a cropped photo: the band sides as a logo
+// band (or bands, or a frame), the sides cut to step around a logo inside as
+// a corner logo, and any other side as a strip cut to keep the photo's shape.
+// "logo band off the bottom and a corner logo off the top". An entry saved
+// before markSides existed counts its other sides as a corner logo's when it
+// had one.
+function cutSides(e) {
+  const sides = SIDES.filter((x) => (e.sides || []).includes(x));
+  const bands = sides.filter((x) => (e.bands || []).includes(x));
+  const marks = sides.filter((x) => !bands.includes(x) && (Array.isArray(e.markSides) ? e.markSides.includes(x) : e.marks > 0));
+  const shape = sides.filter((x) => !bands.includes(x) && !marks.includes(x));
+  return { bands, marks, shape };
+}
+function cutPhrase(e) {
+  const { bands, marks, shape } = cutSides(e);
+  const parts = [];
+  if (bands.length) parts.push(`${overlayWord(e.bands)} off ${sideList(bands)}`);
+  if (marks.length) parts.push(`${parts.length ? 'a ' : ''}corner logo off ${sideList(marks)}`);
+  if (shape.length) parts.push(`a strip off ${sideList(shape)} to keep the photo's shape`);
+  if (!parts.length) return `${overlayWord(e.bands)} off the edges`;
+  return parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+}
+// What a set-back photo keeps: the band word, and a corner logo too when one was stepped around.
+function keptWord(e) {
+  const { marks } = cutSides(e);
+  const n = (e.bands || []).length;
+  return n && marks.length ? `${overlayWord(e.bands)} and corner logo` : overlayWord(e.bands);
+}
+
 const plural = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`;
 
 const WHY = {
@@ -1440,14 +1481,20 @@ export function brandingSummary(entries, ids, { originals = [] } = {}) {
   const them = (n) => (n === 1 ? 'it' : 'them');
   const out = [];
   if (cropped.length) {
-    const bands = [...new Set(cropped.flatMap((e) => e.bands || []))];
-    const sides = [...new Set(cropped.flatMap((e) => e.sides || []))];
-    const same = new Set(cropped.map((e) => SIDES.filter((s) => (e.sides || []).includes(s)).join(','))).size === 1;
-    out.push(`Cropped the same ${overlayWord(bands)} off ${same ? sideList(sides) : 'the edges'} of ${cropped.length} of ${plural(total, 'photo')}.`);
+    const phrases = new Set(cropped.map(cutPhrase));
+    let what = [...phrases][0];
+    if (phrases.size > 1) {
+      // not cut the same way: say what came off, not from which sides
+      const bands = [...new Set(cropped.flatMap((e) => e.bands || []))];
+      const marked = cropped.some((e) => cutSides(e).marks.length);
+      what = `${bands.length && marked ? `${overlayWord(bands)} and corner logo` : bands.length ? overlayWord(bands) : 'corner logo'} off the edges`;
+    }
+    out.push(`Cropped the same ${what} of ${cropped.length} of ${plural(total, 'photo')}.`);
     if (inside) out.push(`A logo is still inside ${inside === cropped.length ? (inside === 1 ? 'it' : 'all of them') : `${inside} of them`}.`);
   }
   if (back.length) {
-    out.push(`You set ${plural(back.length, 'photo')} back to the website's original, with the ${overlayWord([...new Set(back.flatMap((e) => e.bands || []))])} left on.`);
+    const words = [...new Set(back.map(keptWord))];
+    out.push(`You set ${plural(back.length, 'photo')} back to the website's original, with the ${words.length === 1 ? words[0] : 'branding found'} left on.`);
   }
   if (kept.length) {
     const n = kept.length;
@@ -1483,19 +1530,26 @@ const NOTE_WHY = {
  * A short note for one photo in the side panel ('' for none): what was
  * cropped off ("Cropped: logo band off the bottom"), what the original keeps
  * when the person chose it ("Original: logo band left on"), a logo that
- * stays ("Logo still inside") or why it was not checked ("Not checked: too
- * small"). A photo checked with nothing found gets '': nothing found is not
- * the same as no branding.
+ * stays inside ("Logo still inside"), branding along the edges too deep to
+ * crop off ("Frame left on: cropping it off would cut too much of the
+ * photo") or why it was not checked ("Not checked: too small"). A photo
+ * checked with nothing found gets '': nothing found is not the same as no
+ * branding.
  */
 export function photoNote(entry, { original = false } = {}) {
   if (!entry) return '';
   if (entry.status === 'cropped') {
-    const what = overlayWord(entry.bands);
-    if (original) return `Original: ${what} left on`;
-    const base = `Cropped: ${what} off ${sideList(entry.sides)}`;
+    if (original) return `Original: ${keptWord(entry)} left on`;
+    const base = `Cropped: ${cutPhrase(entry)}`;
     return entry.left === 'inside' ? `${base}; logo still inside` : base;
   }
-  if (entry.status === 'kept') return 'Logo still inside';
+  if (entry.status === 'kept') {
+    if (entry.left === 'too-much') {
+      const what = overlayWord(entry.bands);
+      return `${what[0].toUpperCase()}${what.slice(1)} left on: cropping ${(entry.bands || []).length === 2 ? 'them' : 'it'} off would cut too much of the photo`;
+    }
+    return 'Logo still inside';
+  }
   if (entry.status === 'unchecked') return `Not checked: ${NOTE_WHY[entry.reason] || 'not in the check'}`;
   return '';
 }
