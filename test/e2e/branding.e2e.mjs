@@ -221,6 +221,8 @@ try {
   }
   await panel.screenshot({ path: join(shots, 'branding-1-review.png'), fullPage: true });
   // the cover's small copy, kept on this computer for the next cars' checks
+  // (written after the result is drawn and said, so it is waited for)
+  await until(panel, async (o) => Boolean((await chrome.storage.local.get(`coverSamples:${o}`))[`coverSamples:${o}`]), origin, { what: 'the cover sample' });
   const covers = await panel.evaluate(async (o) => (await chrome.storage.local.get(`coverSamples:${o}`))[`coverSamples:${o}`], origin);
   assert.equal(covers.version, 1);
   assert.deepEqual(covers.cars.map((c) => c.vin), [BRANDED_VIN]);
@@ -237,6 +239,8 @@ try {
   assert.match(await panel.textContent('#brandingSummary'), /5 of 6 photos[\s\S]*You set 1 photo back to the website's original/);
   assert.equal(await panel.getAttribute('#photosCropAll', 'aria-pressed'), 'false');
   assert.equal(await panel.getAttribute('#photosOriginalAll', 'aria-pressed'), 'false');
+  // the choice is saved with the post just after it is drawn and said
+  await until(panel, async (o) => Boolean(((await chrome.storage.local.get(`postFlow:${o}`))[`postFlow:${o}`] || {}).photoOriginals), origin, { what: 'photo 2 saved as set back' });
   const savedBack = await panel.evaluate(async (o) => (await chrome.storage.local.get(`postFlow:${o}`))[`postFlow:${o}`].photoOriginals, origin);
   assert.deepEqual(savedBack.map((u) => u.split('/').pop()), ['2.png']);
 
@@ -339,9 +343,11 @@ try {
   const plain = await filesOnForm(fb2, 6);
   assert.deepEqual(plain.map((f) => [f.w, f.h]), Array(6).fill([PHOTO_W, PHOTO_H]), 'plain photos go as the website shows them');
   assert.equal(await panel.$('#photosCropped'), null);
+  await until(panel, async ([o, vin]) => (((await chrome.storage.local.get(`postFlow:${o}`))[`postFlow:${o}`] || {}).branding || {}).vin === vin, [origin, PLAIN_VIN], { what: "the Wagoneer's check saved with the post" });
   const plainFlow = await panel.evaluate(async (o) => (await chrome.storage.local.get(`postFlow:${o}`))[`postFlow:${o}`], origin);
   assert.ok(Object.values(plainFlow.branding.photos).every((e) => e.status === 'none'), 'nothing found on the plain photos');
   // two cars' covers now, newest first
+  await until(panel, async (o) => (((await chrome.storage.local.get(`coverSamples:${o}`))[`coverSamples:${o}`] || {}).cars || []).length === 2, origin, { what: "the Wagoneer's cover sample" });
   const covers2 = await panel.evaluate(async (o) => (await chrome.storage.local.get(`coverSamples:${o}`))[`coverSamples:${o}`], origin);
   assert.deepEqual(covers2.cars.map((c) => c.vin), [PLAIN_VIN, BRANDED_VIN]);
   await panel.click('#skipCar'); // as the person would, without publishing: the queue is done
