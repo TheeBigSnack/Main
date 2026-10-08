@@ -198,6 +198,25 @@ test('a photo without the overlay is never cropped, inside a gallery that has it
   assert.equal(res.counts.cropped, 11);
 });
 
+test('a photo without the overlay is never cropped where its own edge matches a plain bar of the overlay', () => {
+  // the overlay: a plain white bar along the top (no text in it) and the lettered bottom band
+  const bar = (x, y) => (y < 8 ? [255, 255, 255] : null);
+  const overlay = (x, y) => bar(x, y) || band(x, y);
+  for (const sky of [[254, 254, 254], [2, 2, 2]]) {
+    const g = gallery(10, sky[0] > 128 ? overlay : (x, y) => (y < 8 ? [0, 0, 0] : band(x, y)), { seed: 9, skip: [6] });
+    // p7 carries none of it, but its top is an overcast white sky (or a dark ceiling) where the bar sits
+    paint(g[6].rgba, 256, (x, y) => (y < 40 ? sky.map((v) => v + ((x + y) % 3) - 1) : null));
+    const res = findBranding(g);
+    assert.deepEqual([res.photos.p7.status, res.photos.p7.crop, res.photos.p7.sides], ['none', null, []], `sky ${sky}`);
+    assert.equal(photoNote(res.photos.p7), '');
+    for (const id of ['p1', 'p6', 'p8']) {
+      assert.equal(res.photos[id].status, 'cropped', `${id} carries the overlay`);
+      assert.deepEqual(res.photos[id].bands, ['top', 'bottom']);
+    }
+    assert.equal(res.counts.cropped, 9);
+  }
+});
+
 test('a corner badge is stepped around, and the crop holds none of it', () => {
   const res = findBranding(gallery(10, badge, { seed: 3 }));
   for (const e of Object.values(res.photos)) {

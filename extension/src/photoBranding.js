@@ -808,10 +808,21 @@ function boxOf(pixels, w) {
 
 // Which overlay parts does this sample carry? Each overlay region is
 // matched on its own pixels; a part is carried when the regions holding
-// most of its pixels are.
+// most of its pixels are. A plain region (no text or logo edges, such as a
+// plain top bar) is matched on its colour alone, which a white sky or a dark
+// ceiling in the same place matches too: it counts only for a photo that
+// also carries a region with designed detail (the lettering that made the
+// plain bar part of the overlay in the first place).
 function carriedParts(tmpl, v, devRow, cfg) {
   const ok = new Set();
-  for (const piece of tmpl.pieces) if (carries(tmpl, piece, v, devRow, cfg)) ok.add(piece.rid);
+  let designed = false;
+  for (const piece of tmpl.pieces) {
+    const how = carries(tmpl, piece, v, devRow, cfg);
+    if (!how) continue;
+    ok.add(piece.rid);
+    if (how === 'detail') designed = true;
+  }
+  if (!designed) return [];
   const out = [];
   for (const part of tmpl.parts) {
     let tot = 0;
@@ -826,7 +837,9 @@ function carriedParts(tmpl, v, devRow, cfg) {
 }
 
 // Does this sample carry the region? Its colours match the template's at
-// the region's steady pixels, and at its text and logo edges.
+// the region's steady pixels, and at its text and logo edges. 'detail' when
+// the edges were there to match, 'plain' when the region has too few of them
+// and only its colour was matched, false when it is not carried.
 function carries(tmpl, part, v, devRow, cfg) {
   const near = (p) => (devRow ? devRow[p] : maxDiff3(v.data, p * v.stride, tmpl.med, p * 3)) <= cfg.tol;
   // the part's steady pixels (the overlay itself) when there are enough of
@@ -837,12 +850,10 @@ function carries(tmpl, part, v, devRow, cfg) {
   let ok = 0;
   for (const p of px) if (near(p)) ok++;
   if (!px.length || ok < cfg.match * px.length) return false;
-  if (det.length >= Math.min(cfg.detailMin, px.length)) {
-    let okd = 0;
-    for (const p of det) if (near(p)) okd++;
-    if (okd < cfg.matchDetail * det.length) return false;
-  }
-  return true;
+  if (det.length < Math.min(cfg.detailMin, px.length)) return 'plain';
+  let okd = 0;
+  for (const p of det) if (near(p)) okd++;
+  return okd < cfg.matchDetail * det.length ? false : 'detail';
 }
 
 
