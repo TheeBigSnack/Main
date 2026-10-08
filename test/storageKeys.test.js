@@ -31,8 +31,9 @@ test('siteKeys names every per-website key as existing installs hold it; the glo
     sync: `sync:${ORIGIN}`,
     postLog: `postLog:${ORIGIN}`,
     takenDown: `takenDown:${ORIGIN}`,
+    coverSamples: `coverSamples:${ORIGIN}`,
   });
-  assert.deepEqual(Object.keys(SITE_KEY_NAMES), ['settings', 'snapshot', 'diff', 'posted', 'boilerplate', 'queue', 'drafts', 'wizard', 'wizardDone', 'flow', 'pilot', 'sync', 'postLog', 'takenDown']);
+  assert.deepEqual(Object.keys(SITE_KEY_NAMES), ['settings', 'snapshot', 'diff', 'posted', 'boilerplate', 'queue', 'drafts', 'wizard', 'wizardDone', 'flow', 'pilot', 'sync', 'postLog', 'takenDown', 'coverSamples']);
   assert.ok(Object.isFrozen(SITE_KEY_NAMES) && Object.isFrozen(GLOBAL_KEYS) && Object.isFrozen(REQUEST_KEYS));
   assert.deepEqual(GLOBAL_KEYS, { sites: 'sites', devOverrides: 'devOverrides', postRequest: 'postRequest', setupRequest: 'setupRequest', upkeepRequest: 'upkeepRequest', lastPostOrigin: 'lastPostOrigin', account: 'account' });
   assert.equal(SITES_KEY, 'sites');
