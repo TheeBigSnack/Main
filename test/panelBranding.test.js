@@ -63,15 +63,17 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise((r) 
 // a finished check of car AAA as the panel keeps it: the photos given carry a crop
 const checked = (cropped, vin = 'AAA') => ({ version: 1, vin, checkedAt: '2026-10-08T12:00:00.000Z', lot: 0, photos: Object.fromEntries(PHOTOS.map((u) => [u, { ...entry(cropped.includes(u) ? 'cropped' : 'none'), sha: `sha-${u}-1`, type: 'image/jpeg' }])) });
 
-// hold: each download waits for the test (held); timeUp: the check's time limit has already run out
-function panel({ photos = PHOTOS, overlay = [], hold = false, own = true, settings = { cropBranding: true }, step = 'review', stored = {}, allowed = () => true, timeUp = false } = {}) {
+// hold: each download waits for the test (held); holdCover: so does the write of the cover sample (coverHeld); timeUp: the check's time limit has already run out
+function panel({ photos = PHOTOS, overlay = [], hold = false, holdCover = false, own = true, settings = { cropBranding: true }, step = 'review', stored = {}, allowed = () => true, timeUp = false } = {}) {
   const calls = [];
   const sent = [];
   const held = [];
+  const coverHeld = [];
   const store = JSON.parse(JSON.stringify(stored));
   const state = { origin: ORIGIN, vin: 'AAA', step, vehicle: { vin: 'AAA', name: '2020 Make Model A', photos }, settings, branding: null, photoOriginals: null, brandingRun: null, photoPick: null, fill: null, map: { photoLimitDefault: 20 } };
   const answer = (msg) => ({ ok: true, photos: msg.urls.map((u) => file(u)) });
   const local = { get: async (k) => ({ [k]: store[k] }), set: async (o) => { Object.assign(store, JSON.parse(JSON.stringify(o))); } };
+  const covers = holdCover ? { get: local.get, set: (o) => new Promise((resolve) => coverHeld.push(() => resolve(local.set(o)))) } : local;
   const scope = {
     state, flowRun: 0, watcher: null, FORM_MAP,
     chrome: {
@@ -104,7 +106,7 @@ function panel({ photos = PHOTOS, overlay = [], hold = false, own = true, settin
       }
       return out;
     },
-    otherCovers, withCover, lotSample, updateKey, coverStorage: local,
+    otherCovers, withCover, lotSample, updateKey, coverStorage: covers,
     siteKeys: (o) => ({ coverSamples: 'coverSamples:' + o, flow: 'postFlow:' + o }),
     cropPlan, fileNameFor, brandingSummary,
     // the cut: refused unless the bytes are the ones checked, as photoCanvas.js refuses
@@ -119,9 +121,9 @@ function panel({ photos = PHOTOS, overlay = [], hold = false, own = true, settin
     setStatus: (text) => calls.push(`status: ${text}`), saveFlow: async (opts) => { calls.push(`save${opts && opts.quiet ? ' quiet' : ''}`); },
     pilotNote: async () => {}, endPost: () => {}, dropSavedFlow: async () => {},
   };
-  const fns = compileMany(['checkBranding', 'readForBranding', 'stopBranding', 'forTheForm', 'brandingAfterSettings', 'brandingEntry', 'brandingCropped', 'keepShownWhole', 'clearFlow'], scope,
+  const fns = compileMany(['checkBranding', 'readForBranding', 'stopBranding', 'skipBranding', 'forTheForm', 'brandingAfterSettings', 'brandingEntry', 'brandingCropped', 'keepShownWhole', 'clearFlow'], scope,
     ['brandingOn', 'brandingUrls', 'brandingNow', 'setBack', 'goesCropped', 'BRANDING_TIME_LIMIT_MS', 'brandingProgressText']);
-  return { state, calls, sent, held, store, fns };
+  return { state, calls, sent, held, coverHeld, store, fns };
 }
 
 test('the photo check reads the car\'s photos in batches of four, keeps what it found with the post, and keeps a sample of the cover for the next cars', async () => {
@@ -291,6 +293,51 @@ test('the automatic photo check runs only in the post\'s own window, with the se
   assert.match(constText('BRANDING_TIME_LIMIT_MS'), /= 45 \* 1000;$/);
 });
 
+test('Skip the check holds for the car: a Settings save or the panel brought back does not start it again, a click does', async () => {
+  const p = panel({ hold: true, overlay: PHOTOS.slice(0, 2) });
+  p.fns.checkBranding({ auto: true });
+  await settle();
+  assert.equal(p.sent.length, 4, 'the first batch is being downloaded');
+  assert.equal(p.fns.skipBranding(), true, 'Skip the check');
+  assert.equal(p.state.brandingRun, null);
+  assert.deepEqual([p.state.branding.vin, p.state.branding.skipped, p.state.branding.photos], ['AAA', true, {}], 'the skip is kept with the post');
+  p.held.shift()();
+  await settle();
+  assert.equal(p.state.branding.skipped, true, 'nothing from the check let go');
+  // a Settings save at review (brandingAfterSettings), or the panel brought back (resumeFlow's onlyIfNone check): nothing is downloaded again
+  p.fns.brandingAfterSettings();
+  p.fns.checkBranding({ auto: true, onlyIfNone: true });
+  await settle();
+  assert.equal(p.sent.length, 4, 'no photo downloaded again without a click');
+  assert.equal(p.state.brandingRun, null);
+  assert.equal(p.fns.brandingCropped().length, 0, 'every photo goes as the website shows it');
+  // Check the photos for dealer branding, clicked: it runs, and its result takes the skip's place
+  const p2 = panel({ overlay: PHOTOS.slice(0, 2) });
+  p2.state.branding = { version: 1, vin: 'AAA', checkedAt: '2026-10-08T12:00:00.000Z', lot: 0, skipped: true, photos: {} };
+  await p2.fns.checkBranding();
+  assert.equal(p2.sent.length, 6);
+  assert.equal(p2.state.branding.skipped, undefined);
+  assert.equal(p2.state.branding.photos[PHOTOS[0]].status, 'cropped');
+  // a skip with a finished check already there keeps that check, as it was
+  const p3 = panel({ hold: true });
+  p3.state.branding = checked([PHOTOS[0]]);
+  p3.fns.checkBranding();
+  await settle();
+  p3.fns.skipBranding();
+  assert.deepEqual(p3.state.branding, checked([PHOTOS[0]]));
+  // nothing to skip: nothing kept
+  const p4 = panel();
+  assert.equal(p4.fns.skipBranding(), false);
+  assert.equal(p4.state.branding, null);
+  // the photos section says the check was skipped, and offers it again
+  const view = pickView({ vin: 'AAA', vehicle: { vin: 'AAA', photos: PHOTOS }, settings: { cropBranding: true }, branding: p.state.branding, photoOriginals: null, brandingRun: null, photoPick: null, fill: null });
+  assert.match(view, /id="brandingSkipped">The photo check was skipped: the photos go on as the website shows them\.<\/p>/);
+  assert.match(view, /id="brandingCheck">Check the photos for dealer branding<\/button>/);
+  assert.doesNotMatch(view, /brandingSummary|object-view-box|photoNote-/);
+  // the click goes through skipBranding and keeps the skip with the post
+  assert.match(fnText('onClick'), /case 'brandingStop': \{\n\s*if \(state\.step !== 'review'\) return undefined;\n\s*const last = brandingNow\(\);\n\s*if \(!skipBranding\(\)\) return undefined;[^\n]*\n[^\n]*\n\s*return saveFlow\(\{ quiet: true \}\);/);
+});
+
 test('turning the setting off while the review is open lets the check go; turning it on checks a car that has none', async () => {
   const p = panel({ hold: true });
   p.fns.checkBranding({ auto: true });
@@ -306,6 +353,26 @@ test('turning the setting off while the review is open lets the check go; turnin
   on.fns.brandingAfterSettings();
   await settle();
   assert.equal(on.sent.length, 6, 'on, with no check of this car yet: it checks');
+});
+
+test('a finished check draws and says what it cropped before any wait, so the setting turned off meanwhile is never contradicted', async () => {
+  const p = panel({ overlay: PHOTOS.slice(0, 2), holdCover: true });
+  const running = p.fns.checkBranding(); // Check again
+  await settle();
+  assert.equal(p.coverHeld.length, 1, 'the cover sample is still being written');
+  assert.ok(p.state.branding, 'the result is kept');
+  const said = p.calls.filter((c) => c.startsWith('status: '));
+  assert.equal(said.length, 1, 'and already said');
+  assert.match(said[0], /^status: Cropped the same logo band off the bottom of 2 of 6 photos\./);
+  assert.ok(p.calls.lastIndexOf('redraw') < p.calls.indexOf(said[0]), 'the cropped thumbnails are drawn before it is said');
+  // the popup's Settings turns cropping off while the sample is written: nothing about crops is said after that
+  p.state.settings = { cropBranding: false };
+  p.fns.brandingAfterSettings();
+  const after = p.calls.length;
+  p.coverHeld.shift()();
+  await running;
+  assert.deepEqual(p.calls.slice(after).filter((c) => c.startsWith('status: ')), [], 'nothing said once the setting is off');
+  assert.ok(p.calls.includes('save quiet'), 'the result is still kept with the post');
 });
 
 test('a photo goes into the form cropped only with the setting on, not set back, and from the very bytes that were checked', async () => {
@@ -449,6 +516,45 @@ test('the publish step says how many photos went cropped, and which went as the 
   assert.doesNotMatch(plain, /photosCropped|photosChanged|photosUncropped/, 'a run saved by an older version, or nothing cropped: no line');
 });
 
+test('the hint that the form is ready when the photo check ends shows only when the check is all that holds the form', () => {
+  const blank = () => '';
+  const el = () => {
+    const node = { disabled: false, attrs: {}, after: '', setAttribute: (k, v) => { node.attrs[k] = v; }, removeAttribute: (k) => { delete node.attrs[k]; }, insertAdjacentHTML: (where, html) => { node.after += html; } };
+    return node;
+  };
+  let nodes = {};
+  let guardrails = { problems: [] };
+  const state = { brandingRun: { done: 1, total: 6, stopped: false }, settings: { dealer: { name: 'Example Motors' }, rewrite: { enabled: false } }, description: '', guardrails, note: '', descriptionSource: 'template' };
+  let cap = { reached: false, used: 0, cap: 10 };
+  const fns = compileMany(['viewReview', 'setFormButtons'], {
+    state, dailyCap: () => cap, ruleProblems: (g) => g.problems, $: (id) => nodes[id] || null, esc: (v) => String(v ?? ''),
+    relistHtml: blank, carCard: blank, readAgainHtml: blank, sourcePill: blank, checksHtml: blank, highlightsHtml: blank, photoPickHtml: blank,
+    fieldsTable: blank, vinCheckHtml: blank, assumptionsHtml: blank, capHtml: blank, photoServersHtml: blank,
+  }, ['dealerNamed', 'NO_DEALER_TEXT', 'FORM_WAITS_HTML']);
+  const hinted = () => /id="formWaits"/.test(fns.viewReview()) || /aria-describedby="formWaits"/.test(fns.viewReview());
+  const buttons = () => {
+    nodes = { openForm: el(), checkForm: el() };
+    fns.setFormButtons(cap);
+    return { off: [nodes.openForm.disabled, nodes.checkForm.disabled], hint: /id="formWaits"/.test(nodes.openForm.after) || 'aria-describedby' in nodes.openForm.attrs };
+  };
+  assert.equal(hinted(), true, 'only the check holds the form: the hint says when it is ready');
+  assert.deepEqual(buttons(), { off: [true, true], hint: true });
+  // the form would stay off when the check ends: no hint that it is ready then
+  for (const [why, set, unset] of [
+    ['no dealership name', () => { state.settings.dealer = { name: ' ' }; }, () => { state.settings.dealer = { name: 'Example Motors' }; }],
+    ["the day's cap reached", () => { cap = { reached: true, used: 10, cap: 10 }; }, () => { cap = { reached: false, used: 0, cap: 10 }; }],
+    ['a posting rule broken', () => { state.guardrails = { problems: [{ code: 'no-dealer' }] }; }, () => { state.guardrails = guardrails; }],
+  ]) {
+    set();
+    assert.equal(hinted(), false, why);
+    assert.deepEqual(buttons(), { off: [true, true], hint: false }, why);
+    unset();
+  }
+  state.brandingRun = null;
+  assert.equal(hinted(), false, 'no check under way');
+  assert.deepEqual(buttons(), { off: [false, false], hint: false });
+});
+
 test('a queued car\'s form waits for the photo check, and a car whose photos it cropped waits at review', async () => {
   const run = async (cropped) => {
     const calls = [];
@@ -504,8 +610,8 @@ test('the review, a re-read that changed the photos, a panel brought back and a 
   assert.ok(!FLOW_FIELDS.includes('brandingRun'), 'a check under way is not');
   assert.match(fnText('clearFlow'), /branding: null, photoOriginals: null, brandingRun: null/);
   // the form buttons are off while it runs, with the hint that says when they come on
-  assert.match(fnText('setFormButtons'), /const waits = Boolean\(state\.brandingRun\);/);
-  assert.match(fnText('setFormButtons'), /if \(b\) b\.disabled = off \|\| waits;/);
+  assert.match(fnText('setFormButtons'), /if \(b\) b\.disabled = off \|\| Boolean\(state\.brandingRun\);/);
+  assert.match(fnText('setFormButtons'), /const waits = Boolean\(state\.brandingRun\) && !off;/);
   assert.match(src, /^const FORM_WAITS_HTML = '<p class="hint" id="formWaits">Open the Marketplace form is ready when the photo check ends, or click Skip the check\.<\/p>';$/m);
   // the pilot numbers record nothing about the photo check (legal/pilot-agreement.md section 2)
   for (const name of ['checkBranding', 'readForBranding', 'stopBranding', 'forTheForm', 'afterBrandingChoice', 'brandingAfterSettings']) assert.doesNotMatch(fnText(name), /pilotNote|notePostStep|noteFill|endPost|beginPost/, `${name} records nothing in the pilot numbers`);

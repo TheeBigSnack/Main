@@ -399,14 +399,17 @@ function descriptionStopped() {
 // Open the Marketplace form and Check fields: off at the day's cap, while no
 // dealership name is set, and while the description breaks a posting rule.
 // Also off while the photo check runs (checkBranding): the photos it may crop
-// are not settled until it ends, and the hint under the button says so.
+// are not settled until it ends, and the hint under the button says so, but
+// only when the check is all that holds the button (it would not be ready
+// when the check ends at the cap, without a dealership name or with a rule
+// broken).
 function setFormButtons(cap = dailyCap()) {
   const off = cap.reached || !dealerNamed() || ruleProblems(state.guardrails).length > 0;
-  const waits = Boolean(state.brandingRun);
   for (const id of ['openForm', 'checkForm']) {
     const b = $(id);
-    if (b) b.disabled = off || waits;
+    if (b) b.disabled = off || Boolean(state.brandingRun);
   }
+  const waits = Boolean(state.brandingRun) && !off;
   const open = $('openForm');
   const hint = $('formWaits');
   if (waits && open && !hint) {
@@ -603,7 +606,8 @@ async function readForBranding(urls, { mine, live, deadline }) {
 // only in the post's own window (postsWindow; a second window's panel shows
 // that window's check), only on servers Chrome already allows, and says
 // nothing unless it found something. onlyIfNone: not when this car has a
-// finished check (a panel brought back, a setting turned on). It never stops
+// finished check, or a skipped one (skipBranding), as when a panel is brought
+// back or a Settings save comes in. It never stops
 // a post: whatever goes wrong leaves the photos as the website shows them.
 // Every wait is followed by live(): a post dropped meanwhile (clearFlow), a
 // check let go (stopBranding) or another car on screen takes nothing from it.
@@ -648,31 +652,36 @@ async function checkBranding({ auto = false, onlyIfNone = false } = {}) {
   } finally {
     if (state.brandingRun === mine) state.brandingRun = null;
   }
-  if (run !== flowRun || state.vin !== vin || mine.stopped || state.step !== 'review' || state.opening) return undefined;
-  if (result) {
-    const checkedAt = new Date().toISOString();
-    const photos = {};
-    for (const id of urls) {
-      const r = read.get(id) || {};
-      photos[id] = { ...result.photos[id], sha: r.sha || null, type: r.type || null };
-    }
-    state.branding = { version: 1, vin, checkedAt, lot: lot.length, photos };
-    // the person's Use original stays for a photo the check still crops
-    const back = (state.photoOriginals || []).filter((u) => photos[u] && photos[u].status === 'cropped');
-    state.photoOriginals = back.length ? back : null;
-    // the website's cover, read with the setting on: kept as a small sample for the next cars' checks
-    const cover = read.get(urls[0]);
-    if (cover && cover.rgba && cover.w >= 2 && cover.h >= 2) {
-      await updateKey(siteKeys(origin).coverSamples, (s) => withCover(s, { vin, at: checkedAt, sample: lotSample(cover) }), coverStorage).catch(() => null);
-    }
+  if (run !== flowRun || state.vin !== vin || mine.stopped || state.step !== 'review' || state.opening || !brandingOn()) return undefined;
+  if (!result) {
+    redrawPhotos();
+    return undefined;
   }
-  if (run !== flowRun || state.vin !== vin) return undefined;
+  const checkedAt = new Date().toISOString();
+  const photos = {};
+  for (const id of urls) {
+    const r = read.get(id) || {};
+    photos[id] = { ...result.photos[id], sha: r.sha || null, type: r.type || null };
+  }
+  state.branding = { version: 1, vin, checkedAt, lot: lot.length, photos };
+  // the person's Use original stays for a photo the check still crops
+  const back = (state.photoOriginals || []).filter((u) => photos[u] && photos[u].status === 'cropped');
+  state.photoOriginals = back.length ? back : null;
+  // drawn and said in the same turn the result is kept, with no wait between:
+  // the thumbnails show every crop that can go before the form buttons come
+  // back on, and nothing (the setting turned off, the form opening) can come
+  // between the result and what the status line says about it
   redrawPhotos();
-  if (!result) return undefined;
   const counts = result.counts;
   const found = counts.cropped + counts.kept > 0;
   // the status line is the panel's live region: a check someone asked for always says its result; an automatic one only what it found, and never over another message
-  if (state.step === 'review' && (!auto || (found && !($('status') && $('status').textContent)))) setStatus(brandingSummary(state.branding.photos, pickedPhotos(), { originals: state.photoOriginals || [] }) || 'The photos were checked for dealer branding.');
+  if (!auto || (found && !($('status') && $('status').textContent))) setStatus(brandingSummary(state.branding.photos, pickedPhotos(), { originals: state.photoOriginals || [] }) || 'The photos were checked for dealer branding.');
+  // the website's cover, read with the setting on: kept as a small sample for the next cars' checks
+  const cover = read.get(urls[0]);
+  if (cover && cover.rgba && cover.w >= 2 && cover.h >= 2) {
+    await updateKey(siteKeys(origin).coverSamples, (s) => withCover(s, { vin, at: checkedAt, sample: lotSample(cover) }), coverStorage).catch(() => null);
+  }
+  if (run !== flowRun || state.vin !== vin) return undefined;
   await saveFlow({ quiet: true }); // bookkeeping: a refused save shows nothing for a check the person did not start
   return undefined;
 }
@@ -685,6 +694,20 @@ function stopBranding() {
   if (!mine) return false;
   mine.stopped = true;
   state.brandingRun = null;
+  redrawPhotos();
+  return true;
+}
+
+// Skip the check, clicked: the check under way is let go (stopBranding), and
+// when this car has no finished check a skip is kept in its place (a check
+// entry with no photos, skipped) and saved with the post, so a Settings save
+// or the panel brought back does not start the check again by itself
+// (onlyIfNone): the photos go as the website shows them until the person
+// clicks Check the photos for dealer branding, or the website changes them
+// (carStillCurrent checks photos that changed). False when none ran.
+function skipBranding() {
+  if (!stopBranding()) return false;
+  if (!brandingNow()) state.branding = { version: 1, vin: state.vin, checkedAt: new Date().toISOString(), lot: 0, skipped: true, photos: {} };
   redrawPhotos();
   return true;
 }
@@ -1163,7 +1186,7 @@ async function resumeFlow(origin, flow) {
   const d = state.detected;
   if (d && d.status === 'listing' && !d.verified && !d.unverified) state.detected = null;
   state.brandingRun = null; // a check never outlives the panel that ran it
-  // a review brought back with no finished check of this car's photos (the panel closed while it ran): it runs again, in the post's own window only
+  // a review brought back with no finished (or skipped) check of this car's photos (the panel closed while it ran): it runs again, in the post's own window only
   if (state.step === 'review') checkBranding({ auto: true, onlyIfNone: true });
   render();
   // A side panel opened in a second window shows the same post with its
@@ -2173,10 +2196,11 @@ function brandingHtml() {
   const run = state.brandingRun;
   const all = usablePhotos(state.vehicle.photos);
   const cropped = b ? all.filter((u) => b.photos[u] && b.photos[u].status === 'cropped') : [];
-  const summary = b ? brandingSummary(b.photos, pickedPhotos(), { originals: state.photoOriginals || [] }) : '';
+  const skipped = Boolean(b && b.skipped);
+  const summary = b && !skipped ? brandingSummary(b.photos, pickedPhotos(), { originals: state.photoOriginals || [] }) : '';
   let actions = '';
   if (run) actions += '<button type="button" class="plain" id="brandingStop">Skip the check</button>';
-  else actions += `<button type="button" class="plain" id="brandingCheck">${b ? 'Check again' : 'Check the photos for dealer branding'}</button>`;
+  else actions += `<button type="button" class="plain" id="brandingCheck">${b && !skipped ? 'Check again' : 'Check the photos for dealer branding'}</button>`;
   if (cropped.length) {
     const noneBack = !cropped.some(setBack);
     const allBack = cropped.every(setBack);
@@ -2184,6 +2208,7 @@ function brandingHtml() {
   }
   return `<div class="branding" id="branding" role="group" aria-labelledby="brandingLabel">${head}
     ${summary ? `<p class="hint" id="brandingSummary">${esc(summary)}</p>` : ''}
+    ${skipped && !run ? '<p class="hint" id="brandingSkipped">The photo check was skipped: the photos go on as the website shows them.</p>' : ''}
     ${run ? `<p class="hint" id="brandingProgress">${esc(brandingProgressText(run))}</p>` : ''}
     <div class="actions">${actions}</div>
     <p class="hint" id="brandingRule">Lot Current only cuts a strip off the edges of a photo; it never paints over or changes anything in the picture. A see-through logo, a logo in the middle of the photo, or branding on the car itself stays as it is: untick that photo if it shouldn't go on the listing.</p>
@@ -2274,8 +2299,9 @@ const capHtml = (cap) => `<div class="cap ${cap.reached ? 'reached' : ''}" id="c
 function viewReview() {
   const cap = dailyCap();
   const formOff = cap.reached || !dealerNamed() || ruleProblems(state.guardrails).length > 0;
-  // off too while the photo check runs, with the hint below saying when it is ready (setFormButtons keeps both in step)
-  const waitsOff = state.brandingRun && !formOff ? ' disabled' : '';
+  // off too while the photo check runs, with the hint below saying when it is ready, when nothing else holds it (setFormButtons keeps both in step)
+  const waits = Boolean(state.brandingRun) && !formOff;
+  const waitsOff = waits ? ' disabled' : '';
   const rw = state.settings.rewrite;
   return `${relistHtml()}${carCard()}${readAgainHtml()}
   <section>
@@ -2298,7 +2324,7 @@ function viewReview() {
   <section>
     ${capHtml(cap)}
     ${dealerNamed() ? '' : `<div class="banner bad" id="noDealer">${esc(NO_DEALER_TEXT)}</div>`}
-    <button type="button" class="primary wide" id="openForm" ${formOff ? 'disabled' : ''}${waitsOff}${state.brandingRun ? ' aria-describedby="formWaits"' : ''}>Open the Marketplace form</button>${state.brandingRun ? FORM_WAITS_HTML : ''}
+    <button type="button" class="primary wide" id="openForm" ${formOff ? 'disabled' : ''}${waitsOff}${waits ? ' aria-describedby="formWaits"' : ''}>Open the Marketplace form</button>${waits ? FORM_WAITS_HTML : ''}
     <p class="hint">Opens the create-listing page in a new tab and fills in the fields above. Then you check everything, including condition and title, and click Publish yourself.</p>
     <div id="photoServers">${photoServersHtml()}</div>
     <button type="button" class="plain wide" id="checkForm" ${formOff ? 'disabled' : ''}${waitsOff}>Open the form and check fields only (nothing filled)</button>
@@ -3040,10 +3066,13 @@ async function onClick(ev) {
     case 'brandingCheck':
       await askForPhotos(brandingUrls()); // a click: Chrome may be asked about the servers an automatic check leaves out
       return state.step === 'review' ? checkBranding() : undefined;
-    case 'brandingStop':
-      if (state.step !== 'review' || !stopBranding()) return undefined;
-      setStatus(brandingNow() ? 'Photo check skipped: the photos go on as the last check left them.' : 'Photo check skipped: the photos go on as the website shows them.');
-      return undefined;
+    case 'brandingStop': {
+      if (state.step !== 'review') return undefined;
+      const last = brandingNow();
+      if (!skipBranding()) return undefined;
+      setStatus(last && !last.skipped ? 'Photo check skipped: the photos go on as the last check left them.' : 'Photo check skipped: the photos go on as the website shows them.');
+      return saveFlow({ quiet: true }); // bookkeeping: the skip holds through a Settings save or the panel brought back
+    }
     case 'photosCropAll':
     case 'photosOriginalAll': {
       if (state.step !== 'review') return undefined;
