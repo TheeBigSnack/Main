@@ -24,6 +24,7 @@ import { generateDescription, guessColorsWithBackend } from '../extension/src/re
 import { syncPayload } from '../extension/src/sync.js';
 import { noteFlags } from '../extension/src/pilot.js';
 import { neededPatterns } from '../extension/src/photoHosts.js';
+import { LOT_LONG_SIDE, COVER_SAMPLE_CARS, MAX_CHECK_PHOTOS } from '../extension/src/photoBranding.js';
 import schemaOrg from '../extension/adapters/schemaOrg.js';
 import { SITE } from '../site/config.js';
 import { stripComments as stripAllComments } from './helpers.js';
@@ -369,7 +370,7 @@ test('a colour guess sends the photo addresses, the colour words and the origin,
 
 // A guessed colour reaches the published listing's colour field (never its
 // description), so the attorney is asked about it, as the guess works today.
-test('the attorney is asked about the colour guessed from the photos, as the side panel uses it', () => {
+test('the attorney is asked about the colour guessed from the photos, as the side panel uses it, and about cropping dealer branding off them', () => {
   const ai = questions.slice(questions.indexOf('## 5. AI-written descriptions'), questions.indexOf('## 6.'));
   const asked = ai.split('\n').find((l) => /^- Colours guessed from photos\./.test(l));
   assert.ok(asked, 'questions-for-attorney.md section 5 does not ask about the colour guessed from the photos');
@@ -379,6 +380,14 @@ test('the attorney is asked about the colour guessed from the photos, as the sid
   assert.match(asked, /\?/);
   const readme = read('README.md');
   assert.match(readme, /used on the form's color field only, never in the description/, 'README no longer says where the colour guess goes');
+  // the dealer-branding crop (src/photoBranding.js): an overlay may name a photographer or vendor, and the photos are the dealer's or its vendor's
+  const crop = section(questions, '## 12. Cropping dealer branding off the dealership\'s photos').split('\n').find((l) => l.startsWith('- **12.1**'));
+  assert.ok(crop, 'questions-for-attorney.md does not ask about cropping dealer branding off the photos');
+  assert.match(crop, /17 U\.S\.C\. 1202/, 'the attorney is not asked about copyright management information');
+  assert.match(crop, /photo-vendor or image-host terms/);
+  assert.match(crop, /Marketplace's own rules/);
+  assert.match(crop, /It crops only[^.]*nothing is painted over/, 'the question does not say the feature crops only');
+  assert.match(crop, /a setting the dealership can turn off/);
 });
 
 test('the sync row names every part of the sync payload', () => {
@@ -518,6 +527,28 @@ test('the photos go to whatever https server the website names, and the inventor
   assert.ok(others, 'the privacy policy no longer names the services that are not processors');
   assert.match(others, /photo servers the dealership's website names[^;]*another company[^;]*Download photos[^;]*Chrome's own prompt/, 'the privacy policy does not say the photos come from any server the website names, from the User\'s click');
   assert.doesNotMatch(others, /image host/, 'the privacy policy still names one image host');
+
+  // the dealer-branding check at review: the photos are downloaded once more, from the same servers, and a small copy of each
+  // checked car's cover is kept in the browser (src/photoBranding.js lotSample, withCover; coverSamples:<origin>)
+  const WORD = { 8: 'eight' };
+  const cars = WORD[COVER_SAMPLE_CARS] || String(COVER_SAMPLE_CARS);
+  assert.match(photos[column(t, 'When')], /the side panel's review screen for a car, once, for the dealer-branding check[^|]*\*\*Check the photos for dealer branding\*\*/, 'the Photos row does not say the photos are downloaded at review for the dealer-branding check, and from its click');
+  assert.match(photos[column(t, 'What is sent')], new RegExp(`reads at most ${MAX_CHECK_PHOTOS} photos of the car in the side panel and sends nothing of them anywhere`), 'the Photos row does not say what the check reads and that it sends nothing');
+  assert.match(photos[column(t, 'Kept afterwards')], /the cover copy in `coverSamples:<origin>`/, 'the Photos row says nothing of the photos is kept, while the cover copy is');
+  assert.match(cells('Photo servers'), /once when the side panel checks the photos for dealer branding at review/, 'the Photo servers row leaves out the check at review');
+  const perSite = onlyTable(section(inventory, '### `chrome.storage.local`, per dealer website'), 'the per-website section');
+  const covers = perSite.rows.find((r) => firstCode(r[0]) === 'coverSamples:<origin>');
+  assert.ok(covers, 'docs/data-inventory.md has no coverSamples:<origin> row');
+  assert.match(covers[1], new RegExp(`last ${cars} cars[^|]*at most ${LOT_LONG_SIDE} pixels across`), 'the coverSamples row does not give photoBranding.js\'s numbers');
+  assert.match(covers[3], /only while cropping is on and only when the cover photo was read[^|]*clear everything/);
+  const never = inventory.split('\n').find((l) => l.startsWith('- **Never kept or sent anywhere:**'));
+  assert.match(never, new RegExp(`the small copies, at most ${LOT_LONG_SIDE} pixels across, of the cover photo of the last ${cars} cars whose photos were checked for dealer branding`), 'the short version says no photo is kept, while the cover copies are');
+  const inventoryRow = policy.split('\n').find((l) => l.startsWith('| Dealership website inventory'));
+  assert.match(inventoryRow, new RegExp(`a small copy, no more than ${LOT_LONG_SIDE} pixels across, of the cover photo of the last ${cars} cars checked on that website[^|]*never synced or sent, and "Clear everything for this website" removes it`), 'the privacy policy does not disclose the cover copies, or says they leave the browser');
+  assert.match(policy.split('\n').find((l) => l.startsWith('Browser data stays until')), /the cover-photo copies kept for the dealer-branding check/, 'the privacy policy\'s Clear everything list leaves out the cover copies');
+  const content = storeTexts.split('\n').find((l) => l.startsWith('- Website content:'));
+  assert.match(content, new RegExp(`a small copy \\(at most ${LOT_LONG_SIDE} pixels across\\) of the cover photo of the last ${cars} cars whose photos were checked, kept in the browser and sent nowhere`), 'the Web Store\'s Website content answer leaves out the cover copies');
+  assert.match(photoRows[0][whatCol], /once, to check them in the browser for a logo band, frame or corner logo[^|]*nothing of them is sent anywhere/, 'the Web Store photos row does not say the photos are checked in the browser and sent nowhere');
 });
 
 // ---------- who receives it, and the privacy texts ----------
