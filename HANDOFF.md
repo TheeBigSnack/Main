@@ -8,62 +8,71 @@ The owner's first message will be something like "read HANDOFF.md and continue" 
 
 ## START HERE (2026-10-10): the cold-start handoff for a smaller model
 
-Written 2026-10-10 by a thread asked to close the open work for review and prepare a handoff to a smaller model (Haiku 5.5). Every PR state below was read from GitHub that day. Re-check with `mcp__github__pull_request_read` before you act, because merges change it. Read this section, then `CLAUDE.md`, then `CHANGELOG.md` "Unreleased". Sections 0 to 20 below are history and reference.
+Written 2026-10-10 after Brandon's merge round. Every PR state below was read from GitHub that day. Re-check with `mcp__github__pull_request_read` before you act, because merges change it. Read this section, then `CLAUDE.md`, then `CHANGELOG.md` "Unreleased". Sections 0 to 24 below are history and reference.
 
 ### A. The rules that never change
 - A person publishes every post. The extension never clicks Publish, Update, Delete or Mark as sold.
-- Do not merge pull requests. Brandon merges. Do not close a PR unless Brandon asks.
-- Ask Brandon before: spending money, adding a paid service, widening extension permissions, anything outward-facing (email, posting, contacting a dealer), touching a real Facebook account.
+- Merge a pull request only when Brandon asks for that merge in a thread. Use a merge commit, pass `expectedHeadSha`, and check every CI job on the head first. Never rebase or force-push the default branch. Do not close a PR unless Brandon asks.
+- Ask Brandon before: spending money, adding a paid service, widening extension permissions, anything outward-facing (email, posting, contacting a dealer), touching a real Facebook account, and any change to the production Supabase project (schema, functions, deploy settings).
 - No dealer outreach. Claude never contacts a dealership. Brandon asks his own manager.
 - No dealer-specific values in shipped code (Waynesburg, Ron Lewis, town names, doc fees). Those live only in `test/fixtures/` and the pilot record.
-- Every PR body starts with the project attribution block the harness gives you. Every commit ends with the Co-Authored-By trailer the current instructions name.
+- Every PR body starts with the project attribution block the harness gives you. Commit trailers are `Co-Authored-By: Claude <noreply@anthropic.com>`. Commits, PR text and code never name the model (the model-identity rule).
 - Report test failures plainly, with the output. Never skip, disable or weaken a test to get green.
 
-### B. Open pull requests on 2026-10-10 (all four ready for review, all CI green on their heads)
+### B. Where things stand after the 2026-10-10 merges
+The default branch `claude/fervent-fermi-exkhz9` is at `930151f`, the merge of #13.
 
-| PR | Head (branch, commit) | Base | What it is | State |
-|---|---|---|---|---|
-| #10 | `claude/project-thread-ijg7ld`, `a06d852` | default `claude/fervent-fermi-exkhz9` (`2275b97`) | Full review fixes. Includes PR #8. | Ready, clean, every check green. Merge first. |
-| #9 | `claude/project-thread-9c3h7h`, `3dd9c8f` | default | DealerOn and Dealer.com readers, safety fixes. Already has #10 merged in. | Ready, clean today, green. Merge second. |
-| #12 | `claude/plan-build-g3z6aj`, `6c727f9` | `claude/project-thread-ijg7ld` (PR #10's head) | Pilot build: zip without sign-in, open review items. | Ready, green. Needs a base change after #10 (step C.4). |
-| #13 | `claude/photo-branding-removal-5fjk07`, `f113af6` | `claude/plan-build-g3z6aj` (PR #12's head) | Crop dealer branding off photos, crop only. | Ready, green (CI run 37727498891). Merge last of the four. |
+| PR | Merge commit | What it was |
+|---|---|---|
+| #14 | `52b56d4` | The first version of this handoff |
+| #10 | `14e0f4a` | Full review fixes. Contained #8. |
+| #9 | `f11a910` | DealerOn and Dealer.com readers and safety fixes |
+| #12 | `5342f45` | Pilot build (zip without sign-in, open review items). The default branch was merged in first as `6bb3d95`. |
+| #13 | `930151f` | Dealer-branding crop. The default branch was merged in first as `7870f42`. |
+| #8 | closed | Contained in #10 |
+| #11 | closed | Superseded by #12, whose old-name check it had (ported) |
 
-Also open, to be closed by Brandon later:
-- **#8** is fully contained in #10. Close it after #10 merges.
-- **#11** is conflicting (`dirty`) and superseded: #12 ported its stricter old-name check. Close it after #12 merges.
+Manager view (`manager.yml`): deployed on #10 (run `38094003004`) and on #12 (run `38094979799`), both green. No manager run appeared for #9 or #13.
 
-**Known conflict, found 2026-10-10.** A trial merge of #9 into the #13 stack conflicts in six files: `CHANGELOG.md`, `HANDOFF.md`, `README.md`, `docs/data-inventory.md`, `test/docs.test.js`, `test/e2e/wizard.e2e.mjs`. The trial was aborted and nothing was pushed. It is resolved in step C.5 below, after #9 merges, on #12's branch. Do not resolve it earlier, because #9 can still change.
+Pilot zip: `/mnt/project-files/launch/pilot/lot-current-extension-0.5.0-pilot.zip` was rebuilt on 2026-10-10 from `930151f` with `npm run pack -- --pilot`. It has 64 files, its `src/accountConfig.js` is empty (no sign-in), and it carries the #13 branding modules. sha256 `76984fb4d34205258a5b29f00644e4e12b1a27c1ccdc7eb934c22cc40154005e`. It replaces the 2026-10-08 build.
 
-### C. Step by step, in order
+### C. Supabase production: blocked on Brandon's decision
+What happened: the Supabase workflow's `verify` run `38094184886` (on `14e0f4a`, after #10 merged) failed. What the job showed:
+- The four edge functions (`rewrite sync billing lead`) download from production and match the repository. The `functions` step does not fix this drift.
+- `supabase db diff` of production's `public` schema against the migrations (0001 to 0016 applied to a scratch database) is not empty. The job stopped with "production's public schema differs from what supabase/migrations builds".
+- The diff drops three triggers and one function that `0002_rls.sql` defines: `listings_keep_salesperson`, `memberships_forget_invites_on_demote`, `post_attempts_keep_salesperson`, and `keep_stored_salesperson()`.
+- It also has five function definitions that differ from the repository: `keep_a_manager` (defined in `0002` and `0006`), `delete_dealership`, `export_dealership` and `forget_person` (all in `0006`), and `rls_auto_enable`, which no migration defines. It looks like a Supabase platform function, not checked.
 
-1. **Brandon (before the first merge):** in Supabase's dashboard (Integrations, GitHub), check whether merging a PR deploys to production. If it does, turn that off. Add `SUPABASE_PROJECT_REF` on the GitHub `manager-view` environment. Make Brandon the required reviewer on `production` (R-101).
-2. **Brandon merges #10** (merge commit). Then closes #8 if GitHub left it open.
-3. **Brandon runs the Supabase workflow from the default branch:** `verify`, then `database` (migrations 0009 to 0016), then `functions` (all four), then `verify` again. The first verify is red by design. Each run's link goes in the thread, and a Claude reads each run before the next one starts. Leave `MANAGER_URL` off `production` until Stripe step 5.
-4. **Brandon merges #9** (merge commit). Then change #12's base from `claude/project-thread-ijg7ld` to `claude/fervent-fermi-exkhz9`, with `mcp__github__update_pull_request` (`base`). Check that GitHub's diff for #12 no longer shows #10's files.
-5. **A Claude session resolves #12 onto the default branch.** Merge the default branch into `claude/plan-build-g3z6aj`, keep both sides in the six conflicting files, then run `npm test`, `npm run test:e2e` and `npm run store-check`. Push as a merge commit. Never rebase or force-push. Tell Brandon when CI is green.
-6. **Brandon merges #12** (merge commit). Then closes #11.
-7. **A Claude session retargets #13** to the default branch the same way as step 4, merges the default into it, runs the same checks, and pushes. **Brandon merges #13.**
-8. **After all four merges:** from the default branch run `npm run pack -- --pilot`. Copy the zip into `/mnt/project-files/launch/pilot/` under the same name as the old one. The current zip there was built from #13's branch, so it holds #10, #12 and #13 but not #9.
-9. **Owner's live checks:** see `launch/checks/live-check-walkthrough.md` and the to-do list (`/mnt/project-files/plans/2026-10-07-needs-from-brandon.md`). Version 0.6.0 is cut only after Brandon's results come back.
+Not yet known: which side holds the hand edit. A likely cause, to check first, is that `0002` and `0006` changed after production applied them, because Supabase does not re-run an applied migration. Read production's current definitions in the SQL editor with `select pg_get_functiondef('public.keep_a_manager'::regproc);` (and the same for each name above), and the applied list with `select version, name from supabase_migrations.schema_migrations order by version;`.
 
-### D. What Brandon owes (full list in the owner's to-do file)
-- Merge #10, #9, #12, #13 in that order, and the steps in C.1 to C.3 above.
-- Answer the owner-decisions questions in `reviews/2026-10-06-owner-decisions.md` (the recommended answers are in the to-do file). Then the attorney engagement and packet (target Fri 9 Oct, employment answer needed by 16 Oct).
-- The live checks on his own PC, first sitting by Mon 12 Oct.
-- Settings only he can change: the cloud environment's network access from Trusted to Custom with the dealer domains in `survey/run-survey-brief.md`; the Stripe test account (`launch/stripe-checklist.md`).
+What is blocked: the `database` step (0009 to 0016), the `functions` step and the second `verify`. Claude has not run anything against production. Brandon chooses, per object, either (1) to keep production's definition and record it in the repository with a migration, or (2) to deploy the repository's definition over production. Option 2 changes behaviour on the live database, so compare the two bodies first.
 
-### E. Test commands (run from the repo root, after `npm install` once)
-- `npm test`: unit tests, node:test, no dependencies (1790 at the #13 head).
+### D. Steps, in order
+1. **Brandon: check Supabase's GitHub integration.** In the Supabase dashboard (Integrations, GitHub), check whether a merged PR deploys to the production project `dblbfgfkmzlfdwzbcvpj`, and turn that off if it does. Make Brandon the required reviewer on the `production` environment (R-101) if he is not already. This check is not confirmed: Brandon chose to merge #10 before it was done.
+2. **Brandon: decide the drift in section C.**
+3. **After that decision:** run the Supabase workflow from the default branch: `database` (0009 to 0016), then `functions` if needed, then `verify` again. Each run's link goes in the thread, and a Claude reads each run before the next one starts. Leave `MANAGER_URL` off `production` until Stripe step 5.
+4. **Brandon:** the live checks in `launch/checks/live-check-walkthrough.md` and the to-do list (`/mnt/project-files/plans/2026-10-07-needs-from-brandon.md`). Version 0.6.0 is cut only after his results come back.
+
+### E. What Brandon owes
+- The Supabase decision in section C, and the GitHub integration check in D.1.
+- Answers to the owner-decisions questions in `reviews/2026-10-06-owner-decisions.md` (the recommended answers are in the to-do file). The attorney engagement and packet; the employment answer is needed by 16 October.
+- The live checks on his own PC, first sitting by Monday 12 October.
+- The cloud environment's network access from Trusted to Custom, with the dealer domains in `survey/run-survey-brief.md`; and the Stripe test account (`launch/stripe-checklist.md`).
+- The pilot ask to his manager by 19 October, in person. Claude contacts no one.
+
+### F. Test commands (run from the repo root, after `npm install` once)
+- `npm test`: unit tests, node:test, no dependencies. 1847 pass at `930151f` (README states the count; `test/docs.test.js` checks it).
 - `npm run test:e2e`: all nine browser flows against the mock sites (or `npm run test:e2e:popup`, `:post`, `:queue`, `:wizard`, `:upkeep`, `:standard`, `:platforms`, `:panel` for one).
 - `npm run test:demo`, `npm run test:a11y`, `npm run test:site`.
 - `npm run store-check`, `node scripts/legal-pages.mjs --check`, `node scripts/site-pages.mjs --check`.
 - `npm run test:sql` needs a local Postgres. `npm run test:stack` needs a local Supabase stack. CI runs both; a local run may not.
 - Never run anything against the real facebook.com.
 
-### F. Known open items (from the PR bodies, not yet done)
+### G. Known open items (from the PR bodies, not yet done)
+- **Supabase drift** (section C). It blocks the `database` and `functions` steps.
 - **R-6** (#10): a car beside one other car's price tile on some standard-data layouts gets no price instead of its own. Still open, named in HANDOFF 22.5.
 - **R-17** (#9): obeying robots.txt `Disallow` on dealer websites waits on Brandon's answer (recommended: yes).
-- **Supabase functions** import `npm:@supabase/supabase-js@2` without a pin. A new release broke a CI stack run once (2026-10-07). Pinning it is recommended and waits on Brandon.
+- **Supabase functions** import `npm:@supabase/supabase-js@2` without a pin. A new release broke a CI stack run once (2026-10-07). Pinning is recommended and waits on Brandon.
 - **`LEGAL.version`** is still the draft stamp.
 - **No real dealer website has been read.** The cloud network is Trusted, so dealer sites are blocked. The branding crop was tested only on synthetic photos (`node scripts/branding-eval/run.mjs --seeds=5`). Run it on the pilot dealer's photos only with Brandon's OK.
 - **Stripe** test account is Brandon's.
