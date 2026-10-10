@@ -6,6 +6,70 @@ The owner's first message will be something like "read HANDOFF.md and continue" 
 
 ---
 
+## START HERE (2026-10-10): the cold-start handoff for a smaller model
+
+Written 2026-10-10 by a thread asked to close the open work for review and prepare a handoff to a smaller model (Haiku 5.5). Every PR state below was read from GitHub that day. Re-check with `mcp__github__pull_request_read` before you act, because merges change it. Read this section, then `CLAUDE.md`, then `CHANGELOG.md` "Unreleased". Sections 0 to 20 below are history and reference.
+
+### A. The rules that never change
+- A person publishes every post. The extension never clicks Publish, Update, Delete or Mark as sold.
+- Do not merge pull requests. Brandon merges. Do not close a PR unless Brandon asks.
+- Ask Brandon before: spending money, adding a paid service, widening extension permissions, anything outward-facing (email, posting, contacting a dealer), touching a real Facebook account.
+- No dealer outreach. Claude never contacts a dealership. Brandon asks his own manager.
+- No dealer-specific values in shipped code (Waynesburg, Ron Lewis, town names, doc fees). Those live only in `test/fixtures/` and the pilot record.
+- Every PR body starts with the project attribution block the harness gives you. Every commit ends with the Co-Authored-By trailer the current instructions name.
+- Report test failures plainly, with the output. Never skip, disable or weaken a test to get green.
+
+### B. Open pull requests on 2026-10-10 (all four ready for review, all CI green on their heads)
+
+| PR | Head (branch, commit) | Base | What it is | State |
+|---|---|---|---|---|
+| #10 | `claude/project-thread-ijg7ld`, `a06d852` | default `claude/fervent-fermi-exkhz9` (`2275b97`) | Full review fixes. Includes PR #8. | Ready, clean, every check green. Merge first. |
+| #9 | `claude/project-thread-9c3h7h`, `3dd9c8f` | default | DealerOn and Dealer.com readers, safety fixes. Already has #10 merged in. | Ready, clean today, green. Merge second. |
+| #12 | `claude/plan-build-g3z6aj`, `6c727f9` | `claude/project-thread-ijg7ld` (PR #10's head) | Pilot build: zip without sign-in, open review items. | Ready, green. Needs a base change after #10 (step C.4). |
+| #13 | `claude/photo-branding-removal-5fjk07`, `f113af6` | `claude/plan-build-g3z6aj` (PR #12's head) | Crop dealer branding off photos, crop only. | Ready, green (CI run 37727498891). Merge last of the four. |
+
+Also open, to be closed by Brandon later:
+- **#8** is fully contained in #10. Close it after #10 merges.
+- **#11** is conflicting (`dirty`) and superseded: #12 ported its stricter old-name check. Close it after #12 merges.
+
+**Known conflict, found 2026-10-10.** A trial merge of #9 into the #13 stack conflicts in six files: `CHANGELOG.md`, `HANDOFF.md`, `README.md`, `docs/data-inventory.md`, `test/docs.test.js`, `test/e2e/wizard.e2e.mjs`. The trial was aborted and nothing was pushed. It is resolved in step C.5 below, after #9 merges, on #12's branch. Do not resolve it earlier, because #9 can still change.
+
+### C. Step by step, in order
+
+1. **Brandon (before the first merge):** in Supabase's dashboard (Integrations, GitHub), check whether merging a PR deploys to production. If it does, turn that off. Add `SUPABASE_PROJECT_REF` on the GitHub `manager-view` environment. Make Brandon the required reviewer on `production` (R-101).
+2. **Brandon merges #10** (merge commit). Then closes #8 if GitHub left it open.
+3. **Brandon runs the Supabase workflow from the default branch:** `verify`, then `database` (migrations 0009 to 0016), then `functions` (all four), then `verify` again. The first verify is red by design. Each run's link goes in the thread, and a Claude reads each run before the next one starts. Leave `MANAGER_URL` off `production` until Stripe step 5.
+4. **Brandon merges #9** (merge commit). Then change #12's base from `claude/project-thread-ijg7ld` to `claude/fervent-fermi-exkhz9`, with `mcp__github__update_pull_request` (`base`). Check that GitHub's diff for #12 no longer shows #10's files.
+5. **A Claude session resolves #12 onto the default branch.** Merge the default branch into `claude/plan-build-g3z6aj`, keep both sides in the six conflicting files, then run `npm test`, `npm run test:e2e` and `npm run store-check`. Push as a merge commit. Never rebase or force-push. Tell Brandon when CI is green.
+6. **Brandon merges #12** (merge commit). Then closes #11.
+7. **A Claude session retargets #13** to the default branch the same way as step 4, merges the default into it, runs the same checks, and pushes. **Brandon merges #13.**
+8. **After all four merges:** from the default branch run `npm run pack -- --pilot`. Copy the zip into `/mnt/project-files/launch/pilot/` under the same name as the old one. The current zip there was built from #13's branch, so it holds #10, #12 and #13 but not #9.
+9. **Owner's live checks:** see `launch/checks/live-check-walkthrough.md` and the to-do list (`/mnt/project-files/plans/2026-10-07-needs-from-brandon.md`). Version 0.6.0 is cut only after Brandon's results come back.
+
+### D. What Brandon owes (full list in the owner's to-do file)
+- Merge #10, #9, #12, #13 in that order, and the steps in C.1 to C.3 above.
+- Answer the owner-decisions questions in `reviews/2026-10-06-owner-decisions.md` (the recommended answers are in the to-do file). Then the attorney engagement and packet (target Fri 9 Oct, employment answer needed by 16 Oct).
+- The live checks on his own PC, first sitting by Mon 12 Oct.
+- Settings only he can change: the cloud environment's network access from Trusted to Custom with the dealer domains in `survey/run-survey-brief.md`; the Stripe test account (`launch/stripe-checklist.md`).
+
+### E. Test commands (run from the repo root, after `npm install` once)
+- `npm test`: unit tests, node:test, no dependencies (1790 at the #13 head).
+- `npm run test:e2e`: all nine browser flows against the mock sites (or `npm run test:e2e:popup`, `:post`, `:queue`, `:wizard`, `:upkeep`, `:standard`, `:platforms`, `:panel` for one).
+- `npm run test:demo`, `npm run test:a11y`, `npm run test:site`.
+- `npm run store-check`, `node scripts/legal-pages.mjs --check`, `node scripts/site-pages.mjs --check`.
+- `npm run test:sql` needs a local Postgres. `npm run test:stack` needs a local Supabase stack. CI runs both; a local run may not.
+- Never run anything against the real facebook.com.
+
+### F. Known open items (from the PR bodies, not yet done)
+- **R-6** (#10): a car beside one other car's price tile on some standard-data layouts gets no price instead of its own. Still open, named in HANDOFF 22.5.
+- **R-17** (#9): obeying robots.txt `Disallow` on dealer websites waits on Brandon's answer (recommended: yes).
+- **Supabase functions** import `npm:@supabase/supabase-js@2` without a pin. A new release broke a CI stack run once (2026-10-07). Pinning it is recommended and waits on Brandon.
+- **`LEGAL.version`** is still the draft stamp.
+- **No real dealer website has been read.** The cloud network is Trusted, so dealer sites are blocked. The branding crop was tested only on synthetic photos (`node scripts/branding-eval/run.mjs --seeds=5`). Run it on the pilot dealer's photos only with Brandon's OK.
+- **Stripe** test account is Brandon's.
+
+---
+
 ## 0. Where things stand in five lines
 
 1. **Product and name:** a Chrome extension (Manifest V3, plain JavaScript ES modules, no build step) for car-dealership salespeople. It reads the dealership website's used inventory, lets only pre-owned cars through, pre-fills a Facebook Marketplace vehicle listing that the salesperson publishes by hand, and rescans the website to flag sold cars and price changes on the listings they made. **The business and the product are now called Lot Current** (owner's decision 2026-10-01, after "Lot Sync" turned out to be an existing dealership-software company; section 15.5). **The rename landed with pull request #1** (section 16, merged 2026-10-01): everything a person reads says Lot Current; internal identifiers keep `lotsync`.
