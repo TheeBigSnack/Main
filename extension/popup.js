@@ -1071,6 +1071,10 @@ function viewSettings() {
       <label class="field"><span class="k">Vehicle condition</span><select name="defaultCondition">${choices(CONDITIONS, s.defaults.condition)}</select></label>
       <p class="hint">Filled in on every listing, unless the website's own text says otherwise (a car described as rebuilt or salvage gets no title default). These are statements about each car that your dealership stands behind; the side panel shows them so you can change them on the form.</p>
     </fieldset>
+    <fieldset><legend>Photos</legend>
+      <label><input type="checkbox" name="cropBranding" aria-describedby="cropBrandingHint" ${s.cropBranding !== false ? 'checked' : ''} /> <span>Crop the website's dealer branding off the photos</span></label>
+      <p class="hint" id="cropBrandingHint">You see each photo before you post and can use the original. Lot Current only cuts a strip off the edges; it never paints over anything.</p>
+    </fieldset>
     <fieldset><legend>Safety</legend>
       ${field('Posts per day, per salesperson', 'dailyCap', s.dailyCap, 'type="number" min="1" max="100"')}
       <p class="hint">A safety setting, not a guarantee: Meta doesn't publish its limits.</p>
@@ -1763,6 +1767,7 @@ async function onSettingsSubmit(ev) {
       defaults: { titleStatus: str('defaultTitleStatus'), condition: str('defaultCondition') },
       autoRescan: form.get('autoRescan') === 'on',
       notify: form.get('notify') === 'on',
+      cropBranding: form.get('cropBranding') === 'on', // this website's choice (src/settings.js withDefaults): never in the synced profile
       legal: form.get('legalAccept') === 'on' && legalHosted() ? acceptLegal() : prev.legal, // the tick is the same acceptance the wizard's Terms step records; nothing while the documents are placeholders
       rulesReadAt: form.get('rulesAccept') === 'on' ? new Date().toISOString() : prev.rulesReadAt, // the same tick as set-up's rules step and the side panel's
     },

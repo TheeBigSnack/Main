@@ -420,6 +420,8 @@ test('the Web Store answers name every place that turns automatic rescans on: se
   assert.match(alarms, /set-up wizard, or in the popup's Settings/, 'the alarms row does not say Settings can turn automatic rescans on too');
   for (const [where, row] of [['legal/chrome-web-store-privacy.md', rowText(cws, 'Optional host `https://*/*`')], ['store/listing.md', rowText(listing, '`https://*/*` (optional)')]]) {
     assert.match(row, /The set-up wizard, and the popup's Settings when the (?:user|person) saves with the rescan box ticked or clicks Allow automatic rescans \(a button the To do tab also shows[^)]*\), request only the chosen dealership's website origin and its inventory-service origin/, `${where}: the https://*/* row does not name every place that asks for the website's origins`);
+    // the dealer-branding check asks for a car's photo servers from its click (sidepanel.js case 'brandingCheck'), never by itself
+    assert.match(row, /click(?:s| on)? Check the photos for dealer branding on the review screen/, `${where}: the https://*/* row does not name Check the photos for dealer branding among the clicks that ask for photo servers`);
   }
   const tester = listing.split('\n').find((l) => l.includes('Background rescans happen only'));
   assert.ok(tester, 'store/listing.md no longer has its tester step about background rescans');

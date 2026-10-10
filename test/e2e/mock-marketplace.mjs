@@ -266,6 +266,28 @@ function page(lang) {
   document.getElementById('photos').addEventListener('change', (e) => {
     photos += e.target.files.length;
     document.getElementById('photoCount').textContent = photos + ' ' + ${JSON.stringify(t('photos'))};
+    // Each attached file as decoded (test/e2e/branding.e2e.mjs): its name,
+    // type, size and the colour of a few pixels along its bottom row.
+    const files = Array.from(e.target.files);
+    const pending = (document.body.dataset.photoReads = String(Number(document.body.dataset.photoReads || 0) + 1));
+    Promise.all(files.map(async (f) => {
+      try {
+        const bmp = await createImageBitmap(f);
+        const cv = new OffscreenCanvas(bmp.width, bmp.height);
+        const cx = cv.getContext('2d');
+        cx.drawImage(bmp, 0, 0);
+        const bottom = [5, 20, Math.floor(bmp.width / 2), bmp.width - 6].map((x) => Array.from(cx.getImageData(Math.min(x, bmp.width - 1), bmp.height - 1, 1, 1).data.slice(0, 3)));
+        const out = { name: f.name, type: f.type, w: bmp.width, h: bmp.height, bottom };
+        bmp.close();
+        return out;
+      } catch (err) {
+        return { name: f.name, type: f.type, w: 0, h: 0, bottom: [] };
+      }
+    })).then((read) => {
+      const all = JSON.parse(document.body.dataset.photoSizes || '[]').concat(read);
+      document.body.dataset.photoSizes = JSON.stringify(all);
+      if (document.body.dataset.photoReads === pending) document.body.dataset.photoReadsDone = pending;
+    });
   });
   // Only a person clicks this. The extension has no code path to it.
   document.getElementById('publish').addEventListener('click', async () => {

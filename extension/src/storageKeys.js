@@ -28,6 +28,7 @@ export const SITE_KEY_NAMES = Object.freeze({
   sync: 'sync', // the sync state for this website (src/sync.js, Milestone 4): since, dealership id, role, the plan state, today's server-side post count
   postLog: 'postLog', // today's posts recorded on this computer, take-downs and unmarks included: the daily cap's record of the day's posts (src/cap.js logPost, dayLog)
   takenDown: 'takenDown', // the posts this salesperson took off their posted list (src/takenDown.js): the re-post notice, and the cap's source for a post of the day the day's log never had
+  coverSamples: 'coverSamples', // small copies (at most 128 pixels across, RGB) of the cover photo of the last cars whose photos were checked (src/photoBranding.js withCover): the photo check's evidence across cars; this computer only, never synced or sent
 });
 
 // { settings: 'settings:<origin>', queue: 'postQueue:<origin>', ... }: every

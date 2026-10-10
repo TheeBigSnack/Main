@@ -257,6 +257,17 @@ test("the Ready list's order and the new-arrival window are this website's setti
   assert.equal(seeded.newDays, 7);
 });
 
+test("cropping the dealer branding off the photos is this website's setting: on by default, and never in the synced profile", () => {
+  assert.equal(withDefaults({}).cropBranding, true, 'on by default');
+  assert.equal(withDefaults({ cropBranding: false }).cropBranding, false);
+  assert.equal(withDefaults({ cropBranding: true }).cropBranding, true);
+  assert.equal(withDefaults({ cropBranding: 'no' }).cropBranding, true, 'only an explicit false turns it off');
+  // like the Ready list's order: the dealership's choice for its own website does not travel with the person
+  const p = profileFrom(withDefaults({ cropBranding: false }), 'https://www.example-dealer.test');
+  assert.ok(!('cropBranding' in p), 'the profile does not carry it');
+  assert.equal(settingsFromProfile(p, { origin: 'https://www.example-dealer.test' }).cropBranding, true, 'a website seeded from the profile gets the default');
+});
+
 // ---------- Settings, Save: says when no dealership name is set ----------
 import { readFileSync } from 'node:fs';
 import { NO_DEALER_NAME, dealerNameMissing } from '../extension/src/settings.js';
@@ -317,6 +328,13 @@ test('Settings saves with no dealership name but says so: nothing can be posted 
   // with no dealership website open nothing is saved (settings belong to a website), and there is no dealership to name yet
   const none = await saveSettings({ fields, origin: null });
   assert.deepEqual([none.saved, none.note, none.said], [[], '', [['no website open', 'error']]]);
+});
+
+test('Settings saves the photo crop box as ticked, and an unticked box as off', async () => {
+  const fields = { salespersonName: 'Sam', salespersonTitle: 'sales consultant', closingLine: '', dealerName: 'Example Motors', dealerCity: 'Springfield', dealerState: 'oh', dealerZip: '43215', priceNote: '', dailyCap: '10', newDays: '7' };
+  assert.equal((await saveSettings({ fields: { ...fields, cropBranding: 'on' } })).saved[0][1].cropBranding, true);
+  assert.equal((await saveSettings({ fields })).saved[0][1].cropBranding, false, 'a checkbox left unticked is not sent: off');
+  assert.equal((await saveSettings({ fields: { ...fields, cropBranding: 'on' }, settings: withDefaults({ cropBranding: false }) })).saved[0][1].cropBranding, true, 'ticked again: on');
 });
 
 test('Settings saves a price note the checks would refuse: the warning under it holds nothing back', async () => {

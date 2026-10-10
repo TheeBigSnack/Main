@@ -30,6 +30,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { startServer } from '../demo/serve.mjs';
 import { PAGES } from './site-pages.mjs';
+import { photoPng } from '../test/e2e/mock-dealer-site.mjs';
 
 // Runs inside the page: must be self-contained. `opts.fieldEdges` also
 // judges each form field's edge (WCAG 1.4.11 non-text contrast).
@@ -367,6 +368,8 @@ async function main() {
     await popupFrame.locator('.tabs button[data-view="ready"]').click();
     await popupFrame.locator('button[data-action="openPost"]').first().click();
     await panelFrame.locator('#description, textarea').first().waitFor({ timeout: 30000 });
+    // the photo check (the sandbox's SVG photos are not checked) has ended, so the review is as the person reads it
+    await panelFrame.waitForFunction(() => Boolean(document.getElementById('photoPick')) && !document.getElementById('brandingProgress'), null, { timeout: 30000 });
     await audit('side panel, reviewing a car', panelFrame);
     await page.close();
 
@@ -404,6 +407,49 @@ async function main() {
     await audit('side panel, photos not allowed', panel2);
     await audit('sandbox page', photos); // last: its walk leaves focus wherever it ends
     await photos.close();
+
+    // The sandbox with real-size photos that carry the same dealer band (the
+    // e2e mock website's, test/e2e/mock-dealer-site.mjs), six per car and
+    // answered slowly at first: the side panel while the photo check runs
+    // (Skip the check, the form's button off with its reason), then with
+    // every photo cropped (Use original on each, the notes, Use all ...).
+    const branded = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+    current = branded;
+    let slow = true;
+    await branded.route('**/demo/site/inventory.js', async (route) => {
+      const res = await route.fetch();
+      const body = (await res.text()).replace('Array.from({ length: photos }, (_, i) => `${base}photos/${c.key}-${i + 1}.svg`)', 'Array.from({ length: photos ? 6 : 0 }, (_, i) => `${base}photos/${c.key}-${i + 1}.png`)');
+      if (!body.includes('photos ? 6 : 0')) throw new Error("demo/site/inventory.js no longer builds its photo addresses the way this check changes them; update scripts/a11y.mjs");
+      await route.fulfill({ response: res, body });
+    });
+    const pngs = new Map();
+    await branded.route('**/demo/site/photos/*.png', async (route) => {
+      const name = new URL(route.request().url()).pathname.split('/').pop();
+      if (!pngs.has(name)) pngs.set(name, photoPng([...name].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7), true));
+      if (slow) await new Promise((r) => setTimeout(r, 1500));
+      await route.fulfill({ status: 200, contentType: 'image/png', body: pngs.get(name) });
+    });
+    await branded.goto(`${base}/demo/`);
+    await branded.waitForFunction(() => Boolean(document.body.dataset.ready), null, { timeout: 30000 });
+    if (await branded.locator('#popupHost').isHidden()) await branded.click('#lotSyncButton');
+    await branded.locator('#popupHost').waitFor({ state: 'visible' });
+    await branded.check('#pinPopup');
+    const popup3 = branded.frameLocator('#popupFrame');
+    const panel3 = await (await branded.waitForSelector('#panelFrame', { state: 'attached' })).contentFrame();
+    await popup3.locator('#scan').click();
+    await popup3.locator('.banner.info').waitFor({ timeout: 20000 });
+    await popup3.locator('.tabs button[data-view="ready"]').click();
+    await popup3.locator('button[data-action="openPost"]').first().click();
+    await panel3.locator('#brandingProgress').waitFor({ timeout: 30000 });
+    await audit('side panel, photo check running', panel3);
+    slow = false;
+    await panel3.locator('#photoCrop-0').waitFor({ timeout: 60000 });
+    await panel3.waitForFunction(() => !document.getElementById('brandingProgress'), null, { timeout: 60000 });
+    await audit('side panel, photos cropped', panel3);
+    await panel3.locator('#photoCrop-0').click();
+    await panel3.waitForFunction(() => document.getElementById('photoCrop-0')?.textContent === 'Use cropped');
+    await audit('side panel, a photo set back to the original', panel3);
+    await branded.close();
   } finally {
     await browser.close();
     server.close();

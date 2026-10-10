@@ -6,6 +6,7 @@
 
 import http from 'node:http';
 import { readFileSync } from 'node:fs';
+import { deflateSync } from 'node:zlib';
 
 const fx = JSON.parse(readFileSync(new URL('../fixtures/records.json', import.meta.url)));
 delete fx._about;
@@ -53,10 +54,26 @@ export const SCENARIOS = {
     tradesman.extra_fields.meta_location = 'Ron Lewis Chrysler Dodge Jeep Ram Waynesburg';
     return list;
   },
+  // Day 1 with real-size photos (test/e2e/branding.e2e.mjs): the Ram's 6
+  // carry a photo vendor's band along the bottom, the Wagoneer's 6 are plain.
+  // The Wagoneer's fuel reads plain gasoline here and it sits at the same
+  // store as the Ram, so nothing but its photos decides whether the queue
+  // opens its form by itself.
+  branded: () => SCENARIOS.day1().map((r) => {
+    if (r.vin === fx.usedNormal.vin) r.media.image_count = 6;
+    if (r.vin === fx.certified.vin) {
+      r.media.image_count = 6;
+      r.mechanical.fuel_type = 'Gasoline Fuel';
+      r.extra_fields.meta_location = 'Ron Lewis Chrysler Dodge Jeep Ram Waynesburg';
+      r.extra_fields.location_rt = r.extra_fields.meta_location;
+    }
+    return r;
+  }),
 };
 
 let current = 'day1';
 let directSearches = 0;
+let photoDelayMs = 0; // /photo-delay?ms=: every photo answers this late (a slow photo server)
 
 // The real site's `description` field mixes a lot-wide disclaimer, feature
 // bullets, and (on some cars) a genuine write-up; `features` is a clean list.
@@ -98,6 +115,103 @@ function enrich(r, origin) {
   return c;
 }
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+
+// ---- real-size photos for the 'branded' scenario ----
+// A 640x480 photo-like picture (a random gradient, a few shapes, a little
+// noise, different for every photo), as an RGB PNG encoded here (zlib and a
+// CRC-32, no image library). The branded car's photos carry the same band
+// over their bottom 48 rows, the way a photo vendor's overlay is laid on:
+// BAND_COLOUR with white bars for lettering.
+export const PHOTO_W = 640;
+export const PHOTO_H = 480;
+export const BAND_ROWS = 48;
+export const BAND_COLOUR = [0x1a, 0x3c, 0x8c];
+export const BRANDED_VIN = fx.usedNormal.vin;
+export const PLAIN_VIN = fx.certified.vin;
+
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  return c >>> 0;
+});
+function crc32(buf) {
+  let c = 0xffffffff;
+  for (const b of buf) c = CRC_TABLE[(c ^ b) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+function chunk(type, data) {
+  const head = Buffer.alloc(8);
+  head.writeUInt32BE(data.length, 0);
+  head.write(type, 4, 'ascii');
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(Buffer.concat([head.subarray(4), data])), 0);
+  return Buffer.concat([head, data, crc]);
+}
+function encodePng(w, h, rgb) {
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0);
+  ihdr.writeUInt32BE(h, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 2; // RGB
+  const raw = Buffer.alloc(h * (w * 3 + 1));
+  for (let y = 0; y < h; y++) {
+    raw[y * (w * 3 + 1)] = 0; // no filter
+    rgb.copy(raw, y * (w * 3 + 1) + 1, y * w * 3, (y + 1) * w * 3);
+  }
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+}
+function rng(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const inBand = (x, y) => y >= PHOTO_H - BAND_ROWS;
+// Every photo also has a strip EDGE_COLS wide down its left and right edges
+// (above the band) in a colour of its own, so it is part of the picture, not
+// of the overlay: test/e2e/branding.e2e.mjs reads a cropped thumbnail's
+// outermost columns to see that the whole width that goes is shown.
+export const EDGE_COLS = 24;
+const EDGE_PALETTE = [[230, 30, 30], [30, 200, 60], [240, 220, 20], [220, 40, 220], [30, 210, 220], [250, 140, 20]];
+export const edgeColour = (seed) => EDGE_PALETTE[seed % EDGE_PALETTE.length];
+const atEdge = (x) => x < EDGE_COLS || x >= PHOTO_W - EDGE_COLS;
+const bandPixel = (x, y) => (y >= PHOTO_H - 36 && y < PHOTO_H - 12 && (x >> 3) % 3 === 0 && x >= 40 && x < 560 ? [250, 250, 250] : BAND_COLOUR);
+// Also used by scripts/a11y.mjs for the side panel's cropped-photos state.
+export function photoPng(seed, branded) {
+  const r = rng(seed);
+  const c = () => [r() * 255, r() * 255, r() * 255];
+  const [a, b, d, e] = [c(), c(), c(), c()];
+  const shapes = Array.from({ length: 6 }, () => ({ x: r() * PHOTO_W, y: r() * PHOTO_H, rad: 25 + r() * 120, col: c() }));
+  const rgb = Buffer.alloc(PHOTO_W * PHOTO_H * 3);
+  for (let y = 0; y < PHOTO_H; y++) {
+    for (let x = 0; x < PHOTO_W; x++) {
+      const o = (y * PHOTO_W + x) * 3;
+      const band = branded && inBand(x, y) ? bandPixel(x, y) : !inBand(x, y) && atEdge(x) ? edgeColour(seed) : null;
+      const u = x / PHOTO_W;
+      const v = y / PHOTO_H;
+      for (let k = 0; k < 3; k++) {
+        if (band) { rgb[o + k] = band[k]; continue; }
+        let val = a[k] * (1 - u) * (1 - v) + b[k] * u * (1 - v) + d[k] * (1 - u) * v + e[k] * u * v;
+        for (const s of shapes) if ((x - s.x) ** 2 + (y - s.y) ** 2 < s.rad ** 2) val = s.col[k];
+        rgb[o + k] = Math.max(0, Math.min(255, Math.round(val + (r() - 0.5) * 8)));
+      }
+    }
+  }
+  return encodePng(PHOTO_W, PHOTO_H, rgb);
+}
+const photoCache = new Map();
+// The seed of photo n of a car in the 'branded' scenario (its picture and its edge colour).
+export const photoSeed = (vin, n) => (vin === BRANDED_VIN ? 1000 : 2000) + Number(n);
+// The photo the 'branded' scenario serves at /photo/<vin>/<n>.png, or null (every other photo is the 1x1 PNG).
+function brandedPhoto(vin, n) {
+  if (vin !== BRANDED_VIN && vin !== PLAIN_VIN) return null;
+  const key = `${vin}/${n}`;
+  if (!photoCache.has(key)) photoCache.set(key, photoPng(photoSeed(vin, n), vin === BRANDED_VIN));
+  return photoCache.get(key);
+}
 
 const PAGE = `<!doctype html><html><head><meta charset="utf-8">
 <title>Used Vehicles for Sale Near Washington | Ron Lewis Chrysler Dodge Jeep Ram Waynesburg</title>
@@ -146,8 +260,20 @@ export function startMockSite(port = 0) {
       return;
     }
     if (url.pathname.startsWith('/photo/')) {
-      res.writeHead(200, { 'content-type': 'image/png' });
-      return res.end(PNG);
+      const m = /^\/photo\/([^/]+)\/(\d+)\.png$/.exec(url.pathname);
+      const big = current === 'branded' && m ? brandedPhoto(m[1], m[2]) : null;
+      const send = () => {
+        res.writeHead(200, { 'content-type': 'image/png' });
+        res.end(big || PNG);
+      };
+      if (photoDelayMs) setTimeout(send, photoDelayMs);
+      else send();
+      return;
+    }
+    if (url.pathname === '/photo-delay') {
+      photoDelayMs = Math.max(0, Number(url.searchParams.get('ms')) || 0);
+      res.writeHead(200, { 'content-type': 'text/plain' });
+      return res.end(String(photoDelayMs));
     }
     // how many searches reached the service directly (not through the page's helper): the side panel's tabless reads count here
     if (url.pathname === '/direct-count') {

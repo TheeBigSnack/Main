@@ -57,11 +57,16 @@ ul.thumbs { list-style: none; margin: 6px 0; padding: 0; display: grid; grid-tem
 .thumb { border: 2px solid var(--line); border-radius: var(--radius); padding: 4px; font-size: 11px; display: flex; flex-direction: column; gap: 4px; }
 .thumb.on { border-color: var(--good); }
 .thumb .pic { display: flex; flex-direction: column; gap: 4px; cursor: pointer; }
-.thumb img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 4px; background: var(--line); }
+/* contain, never cover: the whole of what goes shows, so a cropped photo (object-view-box, sidepanel.js photoPickHtml) or one of another shape is never trimmed again to fill the box */
+.thumb img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: contain; border-radius: 4px; background: var(--line); }
 .thumb:not(.on) img { opacity: .55; }
 .thumb .row { display: flex; align-items: center; gap: 4px; }
 .thumb .row input { margin: 0; }
-.thumb .copy { margin-left: 0; align-self: flex-start; }
+.thumb .copy { margin-left: 0; align-self: flex-start; min-height: 24px; }
+/* the dealer-branding check's word on one photo, and the choices for all (sidepanel.js brandingHtml) */
+.thumb .note { color: var(--muted); font-size: 11px; line-height: 1.3; overflow-wrap: anywhere; }
+.branding { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--line); }
+.branding h4 { margin: 0 0 4px; font-size: 13px; }
 /* the highlights the salesperson picks from the website's features */
 fieldset.highlights { border: 1px solid var(--line); border-radius: var(--radius); margin: 10px 0 0; padding: 6px 10px 8px; }
 fieldset.highlights legend { font-weight: 600; padding: 0 4px; }
