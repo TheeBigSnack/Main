@@ -10,6 +10,10 @@
 //   other posted car's price drop.
 //   Dealer.com: the same scan paging by "start" -> the sold car's page
 //   answers 410 and goes on To do.
+// Throughout, nothing but the test's one Publish click touches the mock
+// form's action controls, and no listing is marked sold, deleted or updated
+// (the mock form's /actions and /listing-actions logs stay empty, as in the
+// other flows).
 //
 // The real facebook.com is never automated, and no real dealer website is
 // read. Run: node test/e2e/platforms.e2e.mjs (npm run test:e2e runs every flow)
@@ -21,7 +25,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { startMockPlatformSite, PLATFORM_LOT, DEALER_NAMES } from './mock-platform-sites.mjs';
-import { startMockMarketplace } from './mock-marketplace.mjs';
+import { startMockMarketplace, INITIAL_LISTINGS } from './mock-marketplace.mjs';
 import { blockFacebook } from './noFacebook.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
@@ -68,6 +72,10 @@ const requests = async (kind) => JSON.parse(await control(kind, '/requests'));
 // mock form's decoy action controls or submitted it (see mock-marketplace.mjs).
 const publishCount = async () => {
   assert.deepEqual(await (await fetch(`${marketOrigin}/actions`)).json(), [], 'nothing may touch an action control but the person');
+  // nor did anything mark a listing sold, delete one or save an edit: Facebook lands on a listing page after Publish,
+  // and the day-2 rescan puts a sold car and a price drop on To do, which only the person acts on
+  assert.deepEqual(await (await fetch(`${marketOrigin}/listing-actions`)).json(), [], 'nothing may mark sold, delete or update a listing but the person');
+  assert.deepEqual(await (await fetch(`${marketOrigin}/listing-state`)).json(), INITIAL_LISTINGS, 'every listing is as it was');
   return (await fetch(`${marketOrigin}/publish-count`)).text();
 };
 
@@ -182,6 +190,7 @@ try {
       await panel.waitForSelector('#detected', { timeout: 15000 });
       await panel.click('#confirmPosted');
       await panel.waitForSelector('#done');
+      assert.equal(await publishCount(), '1', "the person's click, and nothing on the listing page Facebook lands on");
       await panel.close();
       panelRef = null;
       popup = await openPopup();
@@ -208,6 +217,7 @@ try {
     assert.deepEqual(diff.takeDown.map((t) => [t.vin, t.why]), [[sold.vin, 'gone']]);
     assert.deepEqual(diff.priceUpdates.map((p) => [p.vin, p.from, p.to]), [[dropped.vin, dropped.base + dropped.fee, dropped.base - 1000 + dropped.fee]]);
     assert.deepEqual(vinsOf(diff.needsALook), []);
+    assert.equal(await publishCount(), '1', 'the rescan puts the sold car and the price drop on To do and touches no listing');
     await popup.close();
     popup = await openPopup();
     assert.match(await popup.textContent('.panel'), /Take down\s*1[\s\S]*Gone from the website/);
