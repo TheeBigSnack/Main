@@ -4,8 +4,9 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { toServerRows, syncPayload, mergeRegistry, mergeFlags, scanRow, scanSummary, nextSyncState, localDayRange, planFrom, postKey, SYNC_VERSION, MAX_KNOWN } from '../extension/src/sync.js';
-import { markPosted, markPriceUpdated, markTakenDown } from '../extension/src/rescan.js';
+import { readFileSync } from 'node:fs';
+import { toServerRows, syncPayload, mergeRegistry, mergeFlags, scanRow, scanSummary, nextSyncState, localDayRange, planFrom, postKey, SYNC_VERSION, MAX_KNOWN, UPLOAD_MARGIN_MS, FUTURE_SKEW_MS, flagsAwaitingSync, clearNumbersKeepingUnsynced, notSharedFrom } from '../extension/src/sync.js';
+import { markPosted, markPriceUpdated, markTakenDown, diffScans, withSeenBasis } from '../extension/src/rescan.js';
 import { beginPost, endPost, noteFlags, resolveFlag } from '../extension/src/pilot.js';
 
 const T = (min, sec = 0) => new Date(Date.UTC(2026, 10, 16, 9, min, sec)).toISOString(); // Nov 16 2026 09:mm:ss
@@ -33,9 +34,9 @@ test('toServerRows: a registry entry becomes one listing row, the caller\'s, wit
   assert.equal(listings.length, 2, 'the colleague\'s entry, the garbage and the entry without a time are left out');
   assert.deepEqual(listings[0], {
     dealership_id: D, user_id: U1, vin: VIN_A, name: '2019 Ram 1500', price: 28995, posted_at: T(0),
-    listing_url: 'https://www.facebook.com/marketplace/item/1/', salesperson: 'Alex', updated_at: T(5), status: 'listed', taken_down_at: null,
+    listing_url: 'https://www.facebook.com/marketplace/item/1/', salesperson: 'Alex', updated_at: T(5), status: 'listed', taken_down_at: null, listed_before: false, basis: null,
   });
-  assert.deepEqual(listings[1], { dealership_id: D, user_id: U1, vin: VIN_B, name: '2020 Jeep', price: null, posted_at: T(1), listing_url: null, salesperson: null, updated_at: null, status: 'listed', taken_down_at: null });
+  assert.deepEqual(listings[1], { dealership_id: D, user_id: U1, vin: VIN_B, name: '2020 Jeep', price: null, posted_at: T(1), listing_url: null, salesperson: null, updated_at: null, status: 'listed', taken_down_at: null, listed_before: false, basis: null });
   assert.deepEqual(postAttempts, []);
   assert.deepEqual(todoItems, []);
   // an http link is not a listing link
@@ -65,11 +66,15 @@ test('scan summary and row', () => {
   assert.equal(scanSummary(null), null);
   assert.equal(scanSummary({ cars: 3 }), null, 'a scan without a time is not a scan');
   assert.deepEqual(scanRow({ takenAt: T(0), cars: 41, ready: 29, takeDownCount: 2, priceUpdateCount: '1' }, { origin: ORIGIN, dealershipId: D }), {
-    dealership_id: D, website_origin: ORIGIN, taken_at: T(0), cars: 41, ready: 29, take_down_count: 2, price_update_count: 1,
+    dealership_id: D, website_origin: ORIGIN, taken_at: T(0), cars: 41, ready: 29, take_down_count: 2, price_update_count: 1, withheld: false,
   });
+  // a read held back as a likely website hiccup says so; anything but true is a trusted scan
+  assert.deepEqual(scanSummary({ takenAt: T(0), cars: 4, withheld: true }), { takenAt: T(0), cars: 4, ready: null, takeDownCount: null, priceUpdateCount: null, withheld: true });
+  assert.equal('withheld' in scanSummary({ takenAt: T(0), cars: 4, withheld: 'yes' }), false);
+  assert.equal(scanRow({ takenAt: T(0), cars: 4, withheld: true }, { origin: ORIGIN, dealershipId: D }).withheld, true);
 });
 
-test('syncPayload: the caller\'s whole registry, only the pilot entries that changed since the last sync, the scan and since', () => {
+test('syncPayload: the caller\'s whole registry, only the pilot entries that changed since the last sync (by this machine\'s clock), the scan and since', () => {
   const posted = {
     [VIN_A]: { name: 'A', price: 1, postedAt: T(0), listingUrl: 'https://www.facebook.com/marketplace/item/1/', salesperson: 'Alex', postedWith: '0.4.0' },
     [VIN_C]: { name: 'C', price: 3, postedAt: T(0), userId: U2 },
@@ -78,13 +83,14 @@ test('syncPayload: the caller\'s whole registry, only the pilot entries that cha
   pilot = endPost(pilot, VIN_A, 'posted', { at: T(1) });
   pilot = beginPost(pilot, { vin: VIN_B, at: T(20) });
   pilot = noteFlags(pilot, { takeDown: [{ vin: VIN_A, name: 'A', yours: true }], priceUpdates: [], warnings: [] }, { at: T(2) });
-  const body = syncPayload({ origin: ORIGIN, posted, pilot, scan: { takenAt: T(30), cars: 10 }, since: T(15), userId: U1 });
+  const localSince = new Date(Date.parse(T(15)) + UPLOAD_MARGIN_MS).toISOString(); // T(15) once the margin is taken off
+  const body = syncPayload({ origin: ORIGIN, posted, pilot, scan: { takenAt: T(30), cars: 10 }, since: T(15), localSince, userId: U1 });
   assert.equal(body.version, SYNC_VERSION);
   assert.equal(body.origin, ORIGIN);
   assert.deepEqual(Object.keys(body.posted), [VIN_A], 'the colleague\'s entry is theirs to sync');
   assert.deepEqual(body.posted[VIN_A], { name: 'A', price: 1, postedAt: T(0), listingUrl: 'https://www.facebook.com/marketplace/item/1/', salesperson: 'Alex' }, 'postedWith stays local');
   assert.deepEqual(body.pilot.posts.map((a) => a.vin), [VIN_B], 'the attempt from before since is already on the server');
-  assert.deepEqual(body.pilot.flags, [], 'the flag from before since too');
+  assert.deepEqual(body.pilot.flags.map((f) => f.vin), [VIN_A], 'an open flag goes up on every sync, even one flagged before since');
   assert.deepEqual(body.scan, { takenAt: T(30), cars: 10, ready: null, takeDownCount: null, priceUpdateCount: null });
   assert.equal(body.since, T(15));
   assert.deepEqual(body.known, [], 'no known keys given: none go up, so the function takes nothing down');
@@ -97,9 +103,39 @@ test('syncPayload: the caller\'s whole registry, only the pilot entries that cha
   assert.deepEqual(first.known, []);
   // a flag closed after since goes up again so the server closes it too
   const closed = resolveFlag(pilot, VIN_A, 'takeDown', { at: T(16), how: 'manual' });
-  assert.equal(syncPayload({ origin: ORIGIN, posted, pilot: closed, since: T(15), userId: U1 }).pilot.flags.length, 1);
+  assert.equal(syncPayload({ origin: ORIGIN, posted, pilot: closed, since: T(15), localSince, userId: U1 }).pilot.flags.length, 1);
+  // a flag closed before since is already closed on the server
+  const closedBefore = resolveFlag(pilot, VIN_A, 'takeDown', { at: T(14), how: 'manual' });
+  assert.deepEqual(syncPayload({ origin: ORIGIN, posted, pilot: closedBefore, since: T(15), localSince, userId: U1 }).pilot.flags, []);
+  // the server's since never decides what goes up: with no localSince (a state from an older build) everything goes once
+  assert.equal(syncPayload({ origin: ORIGIN, posted, pilot: closedBefore, since: T(15), userId: U1 }).pilot.posts.length, 2);
   // fills never leave the browser
   assert.equal('fills' in body.pilot, false);
+});
+
+test('syncPayload: an open price flag whose website price moved again goes up with the new prices, though its stamp is from before since', () => {
+  let pilot = noteFlags(null, { takeDown: [], priceUpdates: [{ vin: VIN_A, name: 'A', yours: true, from: 20000, to: 19000 }], warnings: [] }, { at: T(2) });
+  pilot = noteFlags(pilot, { takeDown: [], priceUpdates: [{ vin: VIN_A, name: 'A', yours: true, from: 20000, to: 18000 }], warnings: [] }, { at: T(20) });
+  assert.equal(pilot.flags[0].flaggedAt, T(2), 'the open item keeps its stamp');
+  const body = syncPayload({ origin: ORIGIN, posted: {}, pilot, since: T(15), localSince: T(15), userId: U1 });
+  assert.deepEqual(body.pilot.flags.map((f) => [f.vin, f.from, f.to, f.flaggedAt]), [[VIN_A, 20000, 18000, T(2)]]);
+});
+
+test('syncPayload: a clock six minutes slow here still sends the post made and the to-do item ticked off just after a sync', () => {
+  // since is the server's clock; this machine's stamps run six minutes behind it
+  const since = T(30);
+  const here = (min) => T(30 - 6 + min);
+  let pilot = noteFlags(null, { takeDown: [{ vin: VIN_A, name: 'A', yours: true }], priceUpdates: [], warnings: [] }, { at: T(0) });
+  pilot = beginPost(pilot, { vin: VIN_B, at: here(1) });
+  pilot = endPost(pilot, VIN_B, 'posted', { at: here(2) });
+  pilot = resolveFlag(pilot, VIN_A, 'takeDown', { at: here(2), how: 'manual' });
+  assert.ok(Date.parse(here(2)) < Date.parse(since), 'both stamps look older than the last sync');
+  // this machine's clock when that sync began: the cutoff comes from the same clock as the stamps
+  const body = syncPayload({ origin: ORIGIN, posted: {}, pilot, since, localSince: here(0), userId: U1 });
+  assert.deepEqual(body.pilot.posts.map((a) => a.vin), [VIN_B], 'the post attempt goes up');
+  assert.deepEqual(body.pilot.flags.map((f) => [f.vin, Boolean(f.doneAt)]), [[VIN_A, true]], 'the closed to-do item goes up, so the server closes it');
+  // entries from before the margin ahead of the last sync's start, by this machine's clock, are on the server already and stay here
+  assert.deepEqual(syncPayload({ origin: ORIGIN, posted: {}, pilot, since: T(59), localSince: here(35), userId: U1 }).pilot.posts, []);
 });
 
 test('syncPayload sends the state\'s known keys as the function matches them: VIN@postedAt, each once, well formed, at most MAX_KNOWN', () => {
@@ -179,12 +215,130 @@ test('mergeRegistry: the newest change wins for the price, both ways; a local ch
   assert.equal(plain[VIN_A].price, 19000);
 });
 
+test('mergeRegistry: a change stamped more than FUTURE_SKEW_MS ahead of the server\'s clock never outranks a later one', () => {
+  const fn = readFileSync(new URL('../supabase/functions/sync/index.ts', import.meta.url), 'utf8');
+  const skew = fn.match(/const FUTURE_SKEW_MS = ([\d *]+);/)[1].split('*').reduce((a, b) => a * Number(b), 1);
+  assert.equal(FUTURE_SKEW_MS, skew, 'the sync function\'s FUTURE_SKEW_MS');
+  const ahead = T(10 + 6 * 60); // a clock 6 hours ahead
+  const local = { [VIN_A]: { name: 'A', price: 19000, postedAt: T(0), updatedAt: ahead, userId: U1 } };
+  const sent = { [VIN_A]: { name: 'A', price: 19000, postedAt: T(0), updatedAt: ahead } };
+  // the request carried the change: the server wrote it as made at its own time, and that stamp replaces the one from the future
+  const taken = mergeRegistry(local, { serverTime: T(11), listings: [row(VIN_A, { user_id: U1, price: 19000, updated_at: T(10) })] }, { userId: U1, sent });
+  assert.deepEqual([taken[VIN_A].price, taken[VIN_A].updatedAt], [19000, T(10)]);
+  // a later change made elsewhere since then wins as well
+  const later = mergeRegistry(local, { serverTime: T(31), listings: [row(VIN_A, { user_id: U1, price: 18000, updated_at: T(30) })] }, { userId: U1, sent });
+  assert.deepEqual([later[VIN_A].price, later[VIN_A].updatedAt], [18000, T(30)]);
+  // a change made here while the request was out has not reached the server yet: it is kept and goes up next time
+  const meanwhile = mergeRegistry(local, { serverTime: T(11), listings: [row(VIN_A, { user_id: U1, price: 20000, updated_at: null })] }, { userId: U1, sent: { [VIN_A]: { ...sent[VIN_A], updatedAt: undefined } } });
+  assert.deepEqual([meanwhile[VIN_A].price, meanwhile[VIN_A].updatedAt], [19000, ahead]);
+  // without the server's clock nothing is known to be ahead: the newest stamp wins, as before
+  assert.equal(mergeRegistry(local, [row(VIN_A, { user_id: U1, price: 18000, updated_at: T(30) })], { userId: U1, sent })[VIN_A].price, 19000);
+  // a server stamp that far ahead counts as no change time: a real change made here wins and goes up
+  const mine = { [VIN_A]: { name: 'A', price: 17500, postedAt: T(0), updatedAt: T(20), userId: U1 } };
+  const theirs = mergeRegistry(mine, { serverTime: T(21), listings: [row(VIN_A, { user_id: U1, price: 30000, updated_at: ahead })] }, { userId: U1 });
+  assert.deepEqual([theirs[VIN_A].price, theirs[VIN_A].updatedAt], [17500, T(20)]);
+  // a stamp just inside the margin is a clock a little fast, and still counts
+  const near = T(11 + 4); // 4 minutes ahead of the server
+  const fine = mergeRegistry({ [VIN_A]: { ...local[VIN_A], updatedAt: near } }, { serverTime: T(11), listings: [row(VIN_A, { user_id: U1, price: 18000, updated_at: T(10) })] }, { userId: U1, sent: { [VIN_A]: { ...sent[VIN_A], updatedAt: near } } });
+  assert.deepEqual([fine[VIN_A].price, fine[VIN_A].updatedAt], [19000, near]);
+});
+
+// The price basis a listing was posted with (rescan.js markPosted) travels
+// with it: a basis switch in Settings is not a price change on any of the
+// salesperson's computers. The server writes it on insert and into a row
+// that has none (supabase/functions/sync, migration 0015).
+test('mergeRegistry: the price basis goes up with the post, comes down with it, and a row without one leaves the local one', () => {
+  const local = markPosted({}, { vin: VIN_A, name: 'A', price: 19000, priceBeforeFees: 18500 }, 'beforeFees', T(0));
+  assert.equal(local[VIN_A].basis, 'beforeFees');
+  assert.equal(syncPayload({ posted: local }).posted[VIN_A].basis, 'beforeFees');
+  assert.equal(toServerRows({ posted: local, dealershipId: D, userId: U1 }).listings[0].basis, 'beforeFees');
+  // nothing but the two bases ever goes up
+  assert.equal('basis' in syncPayload({ posted: { [VIN_A]: { ...local[VIN_A], basis: 'sticker' } } }).posted[VIN_A], false);
+  assert.equal(toServerRows({ posted: { [VIN_A]: { ...local[VIN_A], basis: 'sticker' } }, dealershipId: D, userId: U1 }).listings[0].basis, null);
+  // the same post: a row without one (an older build posted it) leaves the local one; a row with one is the record
+  const same = mergeRegistry(local, [row(VIN_A, { price: 18000, updated_at: T(12) })]);
+  assert.deepEqual([same[VIN_A].price, same[VIN_A].basis], [18000, 'beforeFees']);
+  assert.equal(mergeRegistry({ [VIN_A]: { name: 'A', price: 18500, postedAt: T(0) } }, [row(VIN_A, { price: 18500, basis: 'beforeFees' })])[VIN_A].basis, 'beforeFees');
+  // another post of the car: its own row's basis, or none when the row has none
+  assert.equal(mergeRegistry(local, [row(VIN_A, { posted_at: T(6), price: 19000 })])[VIN_A].basis, undefined, 'the next rescan reads it from the price (rescan.js postedBasis)');
+  assert.equal(mergeRegistry(local, [row(VIN_A, { posted_at: T(6), price: 19000, basis: 'website' })])[VIN_A].basis, 'website');
+  // a post only on the server comes with its basis; an unknown value is no basis
+  assert.equal(mergeRegistry({}, [row(VIN_B, { user_id: U1, basis: 'beforeFees' })], { userId: U1 })[VIN_B].basis, 'beforeFees');
+  assert.equal('basis' in mergeRegistry({}, [row(VIN_B, { user_id: U1, basis: 'sticker' })], { userId: U1 })[VIN_B], false);
+});
+
+// The case the server's copy is for: posted at the lower second price on one
+// computer, brought by sync to the salesperson's other computer, whose
+// setting is the main price; the website then drops the price by $500 on
+// both. The listing is asked for the $500 drop on the price it carries,
+// whatever the computer's setting, and even when no scan ever showed the
+// listed price (so it could not be read off the website).
+test('a listing synced from another computer is compared on the price it was posted at, after a setting switch and a real drop', () => {
+  const car = { vin: VIN_A, name: 'A', price: 27163, priceBeforeFees: 26673 };
+  const posted = markPosted({}, car, 'beforeFees', T(0));
+  const elsewhere = mergeRegistry({}, { listings: toServerRows({ posted, dealershipId: D, userId: U1 }).listings.map((r) => ({ ...r, id: 'x' })) }, { userId: U1 });
+  assert.deepEqual([elsewhere[VIN_A].price, elsewhere[VIN_A].basis], [26673, 'beforeFees']);
+  const snap = (price, priceBeforeFees) => ({ vehicles: { [VIN_A]: { vin: VIN_A, name: 'A', price, priceBeforeFees, decision: 'ready' } } });
+  const dropped = snap(26663, 26173);
+  const d = diffScans(dropped, dropped, { posted: elsewhere, basis: 'website', confirm: { checked: [], notFound: [] } });
+  assert.deepEqual(d.priceUpdates.map((u) => [u.from, u.to, u.change]), [[26673, 26173, -500]]);
+  // without the basis the server now keeps, that computer had only its setting to go by
+  const { basis, ...bare } = elsewhere[VIN_A];
+  assert.equal(basis, 'beforeFees');
+  assert.deepEqual(diffScans(dropped, dropped, { posted: { [VIN_A]: bare }, basis: 'website', confirm: { checked: [], notFound: [] } }).priceUpdates.map((u) => u.change), [-10]);
+});
+
+// One rule for a listing's basis across the scan and the sync: the basis
+// recorded on the listing wins (the posting computer's, which the server
+// keeps once a row has one); a listing that came down with none (an older
+// build posted it) gets the one a scan taken once it had its price reads
+// (rescan.js withSeenBasis, scanCar), never one read off a scan from before,
+// and that reading goes up with the next sync into the row that has none.
+test('a basis read off the website for a synced listing with none goes up with the next sync; one from a scan before its price never records; a recorded one wins', () => {
+  const down = mergeRegistry({}, [row(VIN_A, { user_id: U1, price: 27163, posted_at: T(1), updated_at: null, basis: null })], { userId: U1 });
+  assert.equal('basis' in down[VIN_A], false, 'posted by an older build: no basis');
+  const snap = (takenAt, price, priceBeforeFees) => ({ takenAt, vehicles: { [VIN_A]: { vin: VIN_A, name: 'A', price, priceBeforeFees, decision: 'ready' } } });
+  // the scan before the post shows the website before a $490 cut: the listing's price is its second price there
+  const before = snap(T(0), 27653, 27163);
+  const after = snap(T(2), 27163, 26673);
+  assert.equal(withSeenBasis(down, before, snap(T(2), 27000, 26510)), undefined, 'neither price on the scan since matches, and the scan before the post never decides');
+  const read = withSeenBasis(down, before, after);
+  assert.equal(read[VIN_A].basis, 'website', 'read off the scan taken after the post: the main price');
+  assert.equal(syncPayload({ posted: read, userId: U1 }).posted[VIN_A].basis, 'website', 'the reading goes up with the next sync');
+  assert.equal(toServerRows({ posted: read, dealershipId: D, userId: U1 }).listings[0].basis, 'website');
+  assert.equal(mergeRegistry(read, [row(VIN_A, { user_id: U1, price: 27163, posted_at: T(1), basis: null })], { userId: U1 })[VIN_A].basis, 'website', 'a row still without one leaves it');
+  // the posting computer's record, once the row has one, is the listing's basis, and no scan reading replaces it
+  const recorded = mergeRegistry(read, [row(VIN_A, { user_id: U1, price: 27163, posted_at: T(1), basis: 'beforeFees' })], { userId: U1 });
+  assert.equal(recorded[VIN_A].basis, 'beforeFees');
+  assert.equal(withSeenBasis(recorded, before, after), undefined);
+});
+
 test('mergeRegistry: a missing link, name or salesperson is filled from the server; the newer post of a car re-posted elsewhere replaces the old one', () => {
   const local = { [VIN_A]: { name: '', price: 1, postedAt: T(0), postedWith: '0.4.0' } };
   const filled = mergeRegistry(local, [row(VIN_A, { listing_url: 'https://www.facebook.com/marketplace/item/9/', user_id: U1 })]);
   assert.deepEqual(filled[VIN_A], { name: 'Car A1', price: 1, postedAt: T(0), postedWith: '0.4.0', listingUrl: 'https://www.facebook.com/marketplace/item/9/', salesperson: 'Sam', userId: U1 });
   const reposted = mergeRegistry(local, [row(VIN_A, { posted_at: T(0) , status: 'taken_down', taken_down_at: T(5) }), row(VIN_A, { posted_at: T(6), price: 7 })]);
   assert.deepEqual(reposted[VIN_A], { name: 'Car A1', price: 7, postedAt: T(6), postedWith: '0.4.0', salesperson: 'Sam', userId: U2 });
+});
+
+// forget_person clears a departed salesperson's name on the server (0006_privacy.sql), but a colleague's
+// machine that synced before kept it on every car of theirs still listed: a name was only ever filled in
+test('mergeRegistry: a colleague\'s entry follows the server\'s salesperson name, a cleared one included; the caller\'s own keeps theirs', () => {
+  const local = {
+    [VIN_A]: { name: 'Car A1', price: 20000, postedAt: T(0), salesperson: 'Jane Colleague', userId: U2, mine: false },
+    [VIN_B]: { name: 'Car B2', price: 20000, postedAt: T(0), salesperson: 'Alex', userId: U1 },
+  };
+  // what forget_person leaves: the colleague's row still listed, under their bare account id, with no name
+  for (const updated of [null, T(5)]) {
+    const out = mergeRegistry(local, [row(VIN_A, { salesperson: null, updated_at: updated }), row(VIN_B, { user_id: U1, salesperson: null, updated_at: updated })], { userId: U1 });
+    assert.equal('salesperson' in out[VIN_A], false, `the cleared name leaves the colleague's copy (updated_at ${updated})`);
+    assert.deepEqual([out[VIN_A].userId, out[VIN_A].mine], [U2, false], 'the entry stays the colleague\'s, under the id the server keeps');
+    assert.equal(out[VIN_B].salesperson, 'Alex', 'the caller\'s own entry keeps the name from their Settings');
+  }
+  // a name the owner corrected on the server reaches the colleague's copy too
+  assert.equal(mergeRegistry(local, [row(VIN_A, { salesperson: 'Jane C.' })], { userId: U1 })[VIN_A].salesperson, 'Jane C.');
+  // without the caller's id nobody's row is known to be a colleague's: a missing name is only filled in
+  assert.equal(mergeRegistry(local, [row(VIN_A, { salesperson: null })])[VIN_A].salesperson, 'Jane Colleague');
 });
 
 // Round H review: Taken down clicked while a sync was out came back with that
@@ -213,7 +367,19 @@ test('mergeRegistry: the same post read listed and then taken down in one answer
   assert.deepEqual(mergeRegistry({}, { listings: [down, listed] }, { userId: U1 }), {}, 'in either order');
 });
 
-test('mergeFlags: a flag closed on another machine closes here; nothing is added or reopened', () => {
+test('toServerRows and syncPayload store a number too big for an integer column as unknown, as the sync function does', () => {
+  const huge = 2499525495;
+  const posted = { [VIN_A]: { name: 'A', price: huge, postedAt: T(0) }, [VIN_B]: { name: 'B', price: '2147483647', postedAt: T(1) } };
+  const pilot = { posts: [{ vin: VIN_A, startedAt: T(0), endedAt: T(1), outcome: 'posted', seconds: 9e12 }], flags: [{ vin: VIN_A, kind: 'price', flaggedAt: T(2), from: 20000, to: huge }] };
+  const rows = toServerRows({ posted, pilot, userId: U1 });
+  assert.deepEqual(rows.listings.map((l) => l.price), [null, 2147483647]);
+  assert.equal(rows.postAttempts[0].seconds, null);
+  assert.deepEqual([rows.todoItems[0].from_price, rows.todoItems[0].to_price], [20000, null]);
+  assert.equal(syncPayload({ posted, userId: U1 }).posted[VIN_A].price, null);
+  assert.equal(scanSummary({ takenAt: T(3), cars: -3e9, ready: 1 }).cars, null);
+});
+
+test('mergeFlags: a flag closed on another machine closes here; nothing is reopened, and without the registry nothing is added', () => {
   let pilot = noteFlags(null, { takeDown: [{ vin: VIN_A, name: 'A', yours: true }], priceUpdates: [{ vin: VIN_B, name: 'B', yours: true, from: 2, to: 1 }], warnings: [] }, { at: T(0) });
   const remote = {
     todoItems: [
@@ -236,13 +402,127 @@ test('mergeFlags: a flag closed on another machine closes here; nothing is added
   assert.deepEqual(mergeFlags(pilot, null), pilot, 'no answer: the same record back');
 });
 
+test('mergeFlags: the same sold car or price change flagged on the salesperson\'s other machine is one item: its time is taken, and its close closes the flag here', () => {
+  // this machine (the laptop) flagged three items at its own scan, T(20)
+  const pilot = noteFlags(null, { takeDown: [{ vin: VIN_A, name: 'A', yours: true }], priceUpdates: [{ vin: VIN_B, name: 'B', yours: true, from: 2, to: 1 }, { vin: VIN_C, name: 'C', yours: true, from: 3, to: 2 }], warnings: [] }, { at: T(20) });
+  const remote = {
+    todoItems: [
+      // the desktop flagged A at T(10) and ticked it off at T(40)
+      { vin: VIN_A, kind: 'takeDown', flagged_at: T(10), done_at: T(40), how: 'manual' },
+      // the desktop flagged B at T(5); still open
+      { vin: VIN_B, kind: 'price', flagged_at: T(5), done_at: null },
+      // C: an older item of the same car, closed before this flag was raised, is another item
+      { vin: VIN_C, kind: 'price', flagged_at: T(1), done_at: T(15), how: 'detected' },
+    ],
+  };
+  const merged = mergeFlags(pilot, remote);
+  const flag = (vin) => merged.flags.find((f) => f.vin === vin);
+  assert.equal(merged.flags.length, 3, 'nothing added');
+  assert.deepEqual([flag(VIN_A).doneAt, flag(VIN_A).how, flag(VIN_A).flaggedAt], [T(40), 'manual', T(20)], 'closed here as it was closed there');
+  assert.deepEqual([flag(VIN_B).flaggedAt, flag(VIN_B).doneAt], [T(5), undefined], 'still open, under the first sighting\'s time');
+  assert.deepEqual([flag(VIN_C).flaggedAt, flag(VIN_C).doneAt], [T(20), undefined], 'left as it is');
+  assert.deepEqual(mergeFlags(merged, remote), merged, 'a second answer changes nothing');
+  // a flag raised after the other machine's item closed is a new item
+  const later = noteFlags(null, { takeDown: [{ vin: VIN_A, name: 'A', yours: true }], priceUpdates: [], warnings: [] }, { at: T(45) });
+  assert.deepEqual(mergeFlags(later, remote), later);
+});
+
+test('mergeFlags: a flag the merged registry shows already handled, with no item open on the server, was raised from a registry that had not heard of the fix, and is dropped', () => {
+  // this machine's rescan ran on its registry from before a fix made on the
+  // salesperson's other machine: A's sale, B's price drop to 19000, C's to 18000
+  const pilot = noteFlags(null, { takeDown: [{ vin: VIN_A, name: 'A', yours: true }], priceUpdates: [{ vin: VIN_B, name: 'B', yours: true, from: 20000, to: 19000 }, { vin: VIN_C, name: 'C', yours: true, from: 20000, to: 18000 }], warnings: [] }, { at: T(50) });
+  // the registry this sync merged: A is down, B is at the website price, C is not yet
+  const registry = { [VIN_B]: { name: 'B', price: 19000, postedAt: T(0), updatedAt: T(30) }, [VIN_C]: { name: 'C', price: 19500, postedAt: T(0), updatedAt: T(30) } };
+  // the other machine's items, closed before this flag was raised (or long ago, and not in the answer at all)
+  const closedThere = { todoItems: [{ vin: VIN_A, kind: 'takeDown', flagged_at: T(10), done_at: T(30), how: 'manual' }, { vin: VIN_B, kind: 'price', flagged_at: T(10), done_at: T(30), how: 'manual', from_price: 20000, to_price: 19000 }] };
+  for (const remote of [closedThere, { todoItems: [] }]) {
+    const merged = mergeFlags(pilot, remote, { posted: registry });
+    assert.deepEqual(merged.flags.map((f) => [f.vin, f.kind, f.doneAt]), [[VIN_C, 'price', undefined]], 'A and B dropped; C, which the listing does not show, kept open');
+  }
+  // an item open on the server (this flag's own, or the other machine's) is followed as before, whatever the registry says
+  const open = { todoItems: [{ vin: VIN_A, kind: 'takeDown', flagged_at: T(50), done_at: null }, { vin: VIN_B, kind: 'price', flagged_at: T(20), done_at: null }] };
+  const followed = mergeFlags(pilot, open, { posted: registry });
+  assert.deepEqual(followed.flags.map((f) => [f.vin, f.flaggedAt, f.doneAt]), [[VIN_A, T(50), undefined], [VIN_B, T(20), undefined], [VIN_C, T(50), undefined]]);
+  // a colleague's entry of the car is not the salesperson's own: B's flag stands
+  assert.equal(mergeFlags(pilot, { todoItems: [] }, { posted: { ...registry, [VIN_B]: { ...registry[VIN_B], mine: false } } }).flags.length, 2);
+  // without the registry nothing is dropped, and a closed flag is never touched
+  assert.deepEqual(mergeFlags(pilot, closedThere), pilot);
+  const ticked = resolveFlag(pilot, VIN_B, 'price', { at: T(55), how: 'manual' });
+  assert.deepEqual(mergeFlags(ticked, { todoItems: [] }, { posted: registry }).flags.map((f) => [f.vin, Boolean(f.doneAt)]), [[VIN_B, true], [VIN_C, false]]);
+});
+
+// A machine that no longer holds an open item (Clear the numbers before it
+// kept open items, Clear everything for this website) would open a second
+// one at its next scan and close only that one: the first stayed open on
+// the manager's list for good. It takes the item in instead.
+test('mergeFlags: an open item on one of the caller\'s own listings that this machine does not hold is taken in with its flagging time', () => {
+  const posted = {
+    [VIN_A]: { name: 'A', price: 20000, postedAt: T(-60), userId: U1 },
+    [VIN_B]: { name: 'B', price: 21000, postedAt: T(-60) },
+    [VIN_C]: { name: 'C', price: 22000, postedAt: T(-60), userId: U2, mine: false },
+    TESTVIN00000000D4: { name: 'D', price: 23000, postedAt: T(5), userId: U1 },
+  };
+  const remote = {
+    todoItems: [
+      { dealership_id: D, vin: VIN_A.toLowerCase(), kind: 'takeDown', name: 'A', flagged_at: T(0), done_at: null, how: null },
+      { dealership_id: D, vin: VIN_B, kind: 'price', name: 'B', flagged_at: T(0), done_at: null, how: null, from_price: 21000, to_price: 20500 },
+      { dealership_id: D, vin: VIN_C, kind: 'takeDown', name: 'C', flagged_at: T(0), done_at: null, how: null }, // a colleague's listing
+      { dealership_id: D, vin: 'TESTVIN00000000D4', kind: 'takeDown', name: 'D', flagged_at: T(0), done_at: null, how: null }, // flagged before this post of the car
+      { dealership_id: D, vin: VIN_B, kind: 'takeDown', name: 'B', flagged_at: T(1), done_at: T(2), how: 'manual' }, // closed
+      { dealership_id: D, vin: VIN_A, kind: 'bogus', flagged_at: T(0), done_at: null },
+    ],
+  };
+  const merged = mergeFlags(null, remote, { posted, userId: U1 });
+  assert.deepEqual(merged.flags, [
+    { vin: VIN_A, kind: 'takeDown', name: 'A', flaggedAt: T(0) },
+    { vin: VIN_B, kind: 'price', name: 'B', flaggedAt: T(0), from: 21000, to: 20500 },
+  ]);
+  // held already (open or closed here): not taken in twice, never reopened
+  assert.deepEqual(mergeFlags(merged, remote, { posted, userId: U1 }), merged);
+  const closedHere = resolveFlag(merged, VIN_A, null, { at: T(9), how: 'manual' });
+  assert.deepEqual(mergeFlags(closedHere, remote, { posted, userId: U1 }), closedHere);
+  // and it closes the dealership's item it came from
+  const up = syncPayload({ origin: ORIGIN, posted, pilot: closedHere, since: null, userId: U1, now: new Date(T(10)) });
+  assert.deepEqual(up.pilot.flags.filter((f) => f.doneAt).map((f) => [f.vin, f.kind, f.flaggedAt]), [[VIN_A, 'takeDown', T(0)]]);
+});
+
+// "Clear the numbers": a to-do flag closed since the last sync has not gone
+// up yet, and only its upload closes the dealership's copy of the item.
+test('clearNumbersKeepingUnsynced keeps the closed to-do items the next sync still sends, and only while there is a last sync to measure from', () => {
+  const gone = (vin) => ({ vin, name: vin, yours: true, why: 'gone' });
+  let pilot = noteFlags(null, { takeDown: [gone(VIN_A), gone(VIN_B), gone(VIN_C)], priceUpdates: [], warnings: [] }, { at: T(0) });
+  pilot = resolveFlag(pilot, VIN_A, null, { at: T(10), how: 'manual' }); // closed, then the T(30) sync sent it
+  pilot = resolveFlag(pilot, VIN_B, null, { at: T(35), how: 'manual' }); // Taken down after that sync
+  pilot = beginPost(pilot, { vin: VIN_C, at: T(1) });
+  pilot = endPost(pilot, VIN_C, 'posted', { at: T(2) });
+  const state = { version: SYNC_VERSION, since: T(30), localSince: T(30), known: [] };
+  const sent = syncPayload({ origin: ORIGIN, posted: {}, pilot, since: state.since, localSince: state.localSince, userId: U1 }).pilot.flags.filter((f) => f.doneAt);
+  assert.deepEqual(flagsAwaitingSync(pilot, state), sent, 'exactly the closed flags the next sync sends');
+  const kept = clearNumbersKeepingUnsynced(pilot, state);
+  assert.deepEqual(kept.flags.map((f) => [f.vin, f.doneAt || null]), [[VIN_B, T(35)], [VIN_C, null]], 'the closed one not sent yet and the open one stay');
+  assert.deepEqual(kept.posts, [], 'the finished post goes');
+  // the next sync sends it closed, and a clear after that one lets it go
+  assert.deepEqual(syncPayload({ origin: ORIGIN, posted: {}, pilot: kept, since: state.since, localSince: state.localSince, userId: U1 }).pilot.flags.filter((f) => f.doneAt).map((f) => f.vin), [VIN_B]);
+  assert.deepEqual(clearNumbersKeepingUnsynced(kept, { ...state, since: T(50), localSince: T(50) }).flags.map((f) => f.vin), [VIN_C]);
+  // a flag closed within UPLOAD_MARGIN_MS before the last sync began (that sync may have read storage before it was written) still waits for it
+  assert.deepEqual(flagsAwaitingSync(resolveFlag(pilot, VIN_C, null, { at: T(25) }), state).map((f) => f.vin), [VIN_B, VIN_C]);
+  // a state from a build that kept no localSince: the next sync sends every closed flag, so every one waits
+  assert.deepEqual(flagsAwaitingSync(pilot, { version: SYNC_VERSION, since: T(30), known: [] }).map((f) => f.vin), [VIN_A, VIN_B]);
+  // no last sync (never synced here, a first sync still pending, or Sign out forgot the state): nothing waits
+  for (const none of [null, undefined, {}, { version: SYNC_VERSION, since: null, known: [], pending: true }, 'garbage']) {
+    assert.deepEqual(flagsAwaitingSync(pilot, none), []);
+    assert.deepEqual(clearNumbersKeepingUnsynced(pilot, none).flags.map((f) => f.vin), [VIN_C]);
+  }
+});
+
 test('the state kept for the next sync: since, the dealership, the role, the plan and the server\'s count of today\'s posts', () => {
   const today = { from: T(0), to: new Date(Date.UTC(2026, 10, 17, 9, 0)).toISOString() };
   const s = nextSyncState(null, { serverTime: T(1), dealership: { id: D, name: 'Example Motors' }, role: 'salesperson' });
-  assert.deepEqual(s, { version: SYNC_VERSION, since: T(1), known: [], dealershipId: D, dealershipName: 'Example Motors', role: 'salesperson', lastSyncAt: T(1), plan: null, postsToday: null }, 'an answer without a plan or a count (an older function) leaves both null');
+  assert.deepEqual(s, { version: SYNC_VERSION, since: T(1), localSince: null, known: [], dealershipId: D, dealershipName: 'Example Motors', role: 'salesperson', lastSyncAt: T(1), plan: null, postsToday: null, notShared: [] }, 'an answer without a plan or a count (an older function) leaves both null');
   assert.equal(nextSyncState(s, { ok: false }).since, T(1), 'a failed answer keeps the last state');
   const plan = { state: 'pilot', pilotEndsAt: T(30), currentPeriodEnd: null, seats: 5 };
-  const s2 = nextSyncState(s, { serverTime: T(2), plan, postsToday: 3 }, { today });
+  const s2 = nextSyncState(s, { serverTime: T(2), plan, postsToday: 3 }, { today, localSince: T(1, 50) });
+  assert.equal(s2.localSince, T(1, 50), 'the machine\'s own clock when this sync began, for what goes up next');
   assert.deepEqual(s2.plan, plan);
   assert.deepEqual(s2.postsToday, { count: 3, from: today.from, to: today.to });
   assert.equal(s2.dealershipName, 'Example Motors', 'what the answer leaves out is kept');
@@ -258,6 +538,7 @@ test('the state kept for the next sync: since, the dealership, the role, the pla
   const lapsed = nextSyncState(s2, { ok: false, error: 'lapsed', code: 'lapsed', plan: { state: 'lapsed', pilotEndsAt: T(0), currentPeriodEnd: null, seats: null } });
   assert.deepEqual(lapsed.plan, { state: 'lapsed', pilotEndsAt: T(0), currentPeriodEnd: null, seats: null });
   assert.equal(lapsed.since, T(2));
+  assert.equal(nextSyncState(s2, { ok: false, code: 'lapsed' }, { localSince: T(9) }).localSince, T(1, 50), 'an answer that did not sync keeps the last localSince');
   assert.equal(lapsed.lastSyncAt, T(2));
   assert.equal(lapsed.postsToday, null);
   // an answer without a plan keeps the last one learned
@@ -276,6 +557,42 @@ test('the state kept for the next sync: since, the dealership, the role, the pla
   assert.equal(planFrom({ state: 'gold' }).state, 'none');
   assert.equal(planFrom('pilot'), null);
   assert.equal(planFrom(null), null);
+});
+
+// The sync function skips an upload of a VIN a colleague has up
+// (counts.conflicts) and sets aside a post stamped more than FUTURE_SKEW_MS
+// ahead of its clock (counts.rejected). The person is told which of their
+// posts the dealership's list does not hold, read off the answer, which
+// carries every listing that is up.
+test('a post the function refused, because a colleague has the car up or because its time is ahead of the server\'s clock, is named in the state until a sync shares it', () => {
+  const VIN_D = 'TESTVIN00000000D4';
+  const VIN_E = 'TESTVIN00000000E5';
+  const fn = readFileSync(new URL('../supabase/functions/sync/index.ts', import.meta.url), 'utf8');
+  assert.match(fn, /^const FUTURE_SKEW_MS = 5 \* 60 \* 1000;/m, 'the function\'s skew and FUTURE_SKEW_MS here are the same');
+  assert.equal(FUTURE_SKEW_MS, 5 * 60 * 1000);
+  // Pat (U2) posted the Ram at 09:10; this salesperson's machine, last synced at 09:00, still offered it, and they posted it at 09:30
+  const local = {
+    [VIN_A]: { name: 'Ram', price: 28995, postedAt: T(30) }, // refused: Pat has it up
+    [VIN_B]: { name: 'Jeep', price: 34995, postedAt: T(5) }, // shared
+    [VIN_C]: { name: 'Honda', price: 21495, postedAt: T(39) }, // made while the request was out, no colleague: goes up next time
+    [VIN_D]: { name: 'Ford', price: 15995, postedAt: T(50) }, // stamped ten minutes past the server's 09:40
+  };
+  const answer = { serverTime: T(40), counts: { conflicts: 1, rejected: 1 }, listings: [row(VIN_A, { user_id: U2, posted_at: T(10), salesperson: 'Pat' }), row(VIN_B, { user_id: U1, posted_at: T(5) }), row(VIN_E, { user_id: U2, posted_at: T(1) })] };
+  const held = mergeRegistry(local, answer, { userId: U1 });
+  assert.deepEqual(held[VIN_A], local[VIN_A], 'the person\'s own Ram stays theirs here (it goes up again)');
+  const expected = [{ vin: VIN_A, postedAt: T(30), reason: 'colleague', by: 'Pat' }, { vin: VIN_D, postedAt: T(50), reason: 'clock' }];
+  assert.deepEqual(notSharedFrom(held, answer, { userId: U1 }), expected);
+  const state = nextSyncState({ since: T(0) }, answer, { sent: local, userId: U1, held });
+  assert.deepEqual(state.notShared, expected, 'kept for My listings and Settings');
+  assert.deepEqual(nextSyncState(state, { ok: false, code: 'lapsed', plan: { state: 'lapsed' } }).notShared, expected, 'a 402 synced nothing: the list stands');
+  // Pat takes the Ram down and the clock is put right: the next sync shares both, and the list empties
+  const later = { serverTime: T(59), listings: [row(VIN_A, { user_id: U2, posted_at: T(10), status: 'taken_down', taken_down_at: T(55) }), row(VIN_A, { user_id: U1, posted_at: T(30) }), row(VIN_B, { user_id: U1, posted_at: T(5) }), row(VIN_D, { user_id: U1, posted_at: T(50) })] };
+  assert.deepEqual(nextSyncState(state, later, { userId: U1, held: mergeRegistry(held, later, { userId: U1 }) }).notShared, []);
+  // a colleague's entry is never the person's to share, and without a user or a serverTime nothing is said
+  assert.deepEqual(notSharedFrom({ [VIN_E]: { postedAt: T(1), userId: U2, mine: false } }, answer, { userId: U1 }), []);
+  assert.deepEqual(notSharedFrom(held, answer, {}), []);
+  assert.deepEqual(notSharedFrom(held, { listings: answer.listings }, { userId: U1 }), []);
+  assert.deepEqual(notSharedFrom(null, answer, { userId: U1 }), []);
 });
 
 // ---------- two machines converge ----------

@@ -60,7 +60,10 @@ export async function updateKey(key, change, storage) {
 // instead of an unhandled rejection.
 export const STORAGE_FULL = "Couldn't save: Chrome's storage for Lot Current is full. Clear the numbers on the Numbers tab, or open an old dealership website and click Clear everything for this website in Settings.";
 
+// True when a rejected write hit the quota (Chrome names it in the message).
+export const isStorageFull = (e) => /quota/i.test(String((e && e.message) || e || ''));
+
 export function storageErrorText(e) {
   const msg = String((e && e.message) || e || '');
-  return /quota/i.test(msg) ? STORAGE_FULL : "Couldn't save: " + (msg || 'unknown error');
+  return isStorageFull(e) ? STORAGE_FULL : "Couldn't save: " + (msg || 'unknown error');
 }

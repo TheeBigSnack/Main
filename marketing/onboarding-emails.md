@@ -14,7 +14,7 @@ Welcome to the Lot Current pilot. Two things today:
 
 **1. Install (2 minutes).** Unzip the file I sent into a new folder that will stay put, like Documents\Lot Current (the zip holds the files themselves). In Chrome go to chrome://extensions, turn on Developer mode (top right), click Load unpacked and choose that folder (the one with manifest.json in it). If I sent you a Chrome Web Store link instead, install from there and skip the unzip. Pin Lot Current from the puzzle-piece icon.
 
-**2. Set-up (5 minutes).** Open [dealership used inventory URL], click the Lot Current icon, then **Set up Lot Current**. The side panel walks you through: reading the website, your store, your name and role, the store's address (already filled from the website), the price to post and the price note that goes into every description (a suggested sentence is shown; only your store can say whether it is true), permission for automatic rescans (say yes so your To do list stays current), the posting rules and the Terms. Please read the rules once; they are short and they matter. The price note can be changed later under Settings.
+**2. Set-up (5 minutes).** Open [dealership used inventory URL], click the Lot Current icon, then **Set up Lot Current**. The side panel walks you through: reading the website, your store, your name and role, your account (click **Skip for now**: this pilot runs without Lot Current accounts, so don't sign in under Settings later either), the store's address (filled from the website when it shows one; type any part it leaves blank), the price to post and the price note that goes into every description (a suggested sentence is shown; only your store can say whether it is true), permission for automatic rescans (say yes so your To do list stays current), the posting rules and the Terms. Please read the rules once; they are short and they matter. The price note can be changed later under Settings.
 
 That's it. Tomorrow's email is about your first posts. If anything doesn't work, reply with what you saw on screen.
 
@@ -50,7 +50,7 @@ Hi [name],
 
 By now Lot Current has re-read the website a few times. Click the icon and look at **To do**:
 
-- **Take down** means a car you listed sold or went sale-pending. Click **Open listing**, then Mark as sold (or Delete) on Facebook yourself. The panel notices and ticks it off.
+- **Take down** means a car you listed sold or went sale-pending, or the website now calls it new, demo or loaner. Click **Open listing**, then on Facebook yourself: Mark as sold (or Delete) for a sold car, and Delete for a car that is no longer pre-owned, since dealers may not list those. The panel notices and ticks it off.
 - **Update price** means the website price changed. Click **Open & update price**, click Edit listing on Facebook, and the new price is in the box; click Update yourself.
 
 Same-day take-downs are the point of the pilot, so please clear To do items the day they appear.

@@ -7,6 +7,8 @@
 // the extension never makes them, and the sample Marketplace counts them.
 //
 // Run:  npm run screenshots        -> site/screenshots/*.png
+// site/ is published whole, so only the page images go there: a failed run
+// leaves its full-page capture in demo/screenshots/ (git-ignored), never in site/.
 // Needs the repo's Playwright (npm ci) and a Chromium: LOTSYNC_CHROME=<path>
 // to a Chrome/Chromium binary, else the one Playwright installed
 // (npx playwright install chromium).
@@ -19,13 +21,14 @@
 
 import { chromium } from 'playwright';
 import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startServer } from '../demo/serve.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const shots = join(root, 'site/screenshots');
 mkdirSync(shots, { recursive: true });
+const failureShot = join(root, 'demo/screenshots', 'screenshots-failure.png');
 
 const WIDTH = 1280;
 const HEIGHT = 800;
@@ -181,7 +184,8 @@ try {
     console.log(`${relative(root, join(shots, s.name))}: ${s.width} x ${s.height}, ${kb} KB${note}`);
   }
 } catch (e) {
-  await page.screenshot({ path: join(shots, 'failure.png'), fullPage: true }).catch(() => {});
+  mkdirSync(dirname(failureShot), { recursive: true });
+  await page.screenshot({ path: failureShot, fullPage: true }).then(() => console.error('Failure capture:', relative(root, failureShot))).catch(() => {});
   console.error('Panel:', (await panel.locator('#panel').textContent().catch(() => '')).replace(/\s+/g, ' ').slice(0, 600));
   console.error('Popup status:', await popup.locator('#status').textContent().catch(() => ''));
   console.error('Errors:', errors);

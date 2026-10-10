@@ -22,13 +22,14 @@ import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { startMockPlatformSite, PLATFORM_LOT, DEALER_NAMES } from './mock-platform-sites.mjs';
 import { startMockMarketplace } from './mock-marketplace.mjs';
+import { blockFacebook } from './noFacebook.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const shots = join(root, 'test/e2e/screenshots');
 mkdirSync(shots, { recursive: true });
 
 // Test copy of the extension: it may script the local mock servers and nothing else.
-const extDir = mkdtempSync(join(tmpdir(), 'lot-sync-ext-'));
+const extDir = mkdtempSync(join(tmpdir(), 'lot-current-ext-'));
 cpSync(join(root, 'extension'), extDir, { recursive: true });
 const manifest = JSON.parse(readFileSync(join(extDir, 'manifest.json'), 'utf8'));
 manifest.host_permissions = ['http://127.0.0.1/*'];
@@ -41,13 +42,14 @@ const market = await startMockMarketplace();
 const originOf = (kind) => `http://127.0.0.1:${sites[kind].address().port}`;
 const LIST = { dealerOn: '/searchused.aspx', dealerCom: '/used-inventory/index.htm' };
 const marketOrigin = `http://127.0.0.1:${market.address().port}`;
-const profileDir = mkdtempSync(join(tmpdir(), 'lot-sync-profile-platforms-'));
+const profileDir = mkdtempSync(join(tmpdir(), 'lot-current-profile-platforms-'));
 const context = await chromium.launchPersistentContext(profileDir, {
   channel: process.env.LOTSYNC_E2E_CHANNEL || 'chromium',
   headless: true,
   args: [`--disable-extensions-except=${extDir}`, `--load-extension=${extDir}`],
   viewport: { width: 760, height: 900 },
 });
+const facebook = await blockFacebook(context); // the real facebook.com is never loaded (./noFacebook.mjs)
 
 const [sold, dropped, ...rest] = PLATFORM_LOT;
 const lowMiles = PLATFORM_LOT[PLATFORM_LOT.length - 1];
@@ -62,7 +64,12 @@ const watch = (p) => {
 };
 const control = async (kind, path) => (await fetch(originOf(kind) + path)).text();
 const requests = async (kind) => JSON.parse(await control(kind, '/requests'));
-const publishCount = async () => (await fetch(`${marketOrigin}/publish-count`)).text();
+// How many times Publish was clicked; and first, that nothing ever touched the
+// mock form's decoy action controls or submitted it (see mock-marketplace.mjs).
+const publishCount = async () => {
+  assert.deepEqual(await (await fetch(`${marketOrigin}/actions`)).json(), [], 'nothing may touch an action control but the person');
+  return (await fetch(`${marketOrigin}/publish-count`)).text();
+};
 
 try {
   const ext = await context.newPage();
@@ -81,6 +88,7 @@ try {
       dealer: { name, city: 'Springfield', state: 'OH', zip: '43215' },
       priceNote: 'Price includes the $490 doc fee; tax and tags extra.',
       dailyCap: 10,
+      rulesReadAt: new Date().toISOString(), // set-up's posting rules, ticked (the side panel asks first otherwise: test/e2e/panel.e2e.mjs)
       rewrite: { enabled: false, endpoint: '', key: '' },
     });
     await chrome.storage.local.set({
@@ -181,9 +189,11 @@ try {
     // the second car was listed by hand
     await tab(popup, 'ready').click();
     await popup.click(`button[data-action="post"][data-vin="${dropped.vin}"]`);
+    await popup.click(`button[data-action="markBefore"][data-vin="${dropped.vin}"]`); // listed before today
     await popup.waitForSelector(`button[data-action="unpost"][data-vin="${dropped.vin}"]`);
     if (kind === 'dealerCom') {
       await popup.click(`button[data-action="post"][data-vin="${sold.vin}"]`);
+      await popup.click(`button[data-action="markBefore"][data-vin="${sold.vin}"]`);
       await popup.waitForSelector(`button[data-action="unpost"][data-vin="${sold.vin}"]`);
     }
 
@@ -209,6 +219,7 @@ try {
   assert.equal(await publishCount(), '1', "only the person's one click");
   assert.equal(rest.length > 0, true);
   assert.deepEqual(errors, [], 'no console errors');
+  facebook.assertNone();
   console.log('DealerOn and Dealer.com E2E passed. Screenshots in test/e2e/screenshots/');
 } catch (e) {
   for (const [name, p] of [['Panel', panelRef], ['Popup', popupRef]]) {

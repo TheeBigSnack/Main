@@ -6,7 +6,7 @@ Last updated: [date]. These Terms are between [Lot Current entity name] ("Lot Cu
 
 ## 1. What Lot Current is
 
-Lot Current is browser software and related services that read a dealership's own website inventory, help a User prepare a Facebook Marketplace vehicle listing, and report inventory changes. Lot Current fills in forms and opens pages. **The User publishes, edits and removes every listing personally.** Lot Current does not publish, edit or delete listings on the User's behalf and does not act while the User is away.
+Lot Current is browser software and related services that read a dealership's own website inventory, help a User prepare a Facebook Marketplace vehicle listing, and report inventory changes. Lot Current fills in forms and opens pages. **The User publishes, edits and removes every listing personally.** Lot Current does not publish, edit or delete listings on the User's behalf, and never posts or edits a listing in the background or while the User is away. It acts on Facebook only in a tab it opened for a post or a to-do item the User started: there it fills in the form and reads the page, and in a queue the User started it opens and fills the next car's form, without another click, once the User has published the previous one. If the User allows it, Lot Current re-reads the dealership's website every 3 hours while Chrome is open, to keep the to-do list current, and, while the User is signed in to a Lot Current account, sends that rescan's results to the dealership's records.
 
 Lot Current is not affiliated with, endorsed by or partnered with Meta Platforms, Inc. "Facebook" and "Marketplace" are used only to name the third-party service on which Users post.
 
@@ -42,7 +42,7 @@ Lot Current and its software are ours. Dealership data stays the Customer's. The
 
 ## 9. Privacy
 
-Our Privacy Policy explains what we collect and why. In short: dealership and user account details, the posted-listing registry (VIN, listing link, prices, times, who posted), post timings and to-do items, scan counts, billing standing, and, only with the description writer on, the car's facts and the sign-off sent to Anthropic for a draft. No Facebook credentials, messages or buyer data.
+Our Privacy Policy explains what we collect and why. In short: dealership and user account details, the posted-listing registry (VIN, listing link, prices, times, who posted), post timings and to-do items, scan counts, billing standing, and, only with the description writer on, the car's facts and the sign-off sent to Anthropic for a draft and, for a colour guess, up to four of the car's photo addresses, from which Anthropic's servers fetch those photos. No Facebook credentials, messages or buyer data.
 
 ## 10. Disclaimer of warranties
 

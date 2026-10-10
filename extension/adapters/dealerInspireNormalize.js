@@ -13,23 +13,53 @@ function positive(value) {
   return n !== null && n > 0 ? n : null;
 }
 
+// A field with digits in it that does not read as one amount ("$24,995
+// $25,495", two prices in one field; "$24,995*"; a phone number): no price
+// can be read from it.
+const UNREADABLE = 'the price does not read as one amount';
+const unreadable = (value) => typeof value === 'string' && /\d/.test(value) && toNumber(value) === null;
+
 // The price the website shows as its main price. On Dealer Inspire sites the
 // display pricing lives in extra_fields.lightning.pricing; when that says
 // "Please call for price" there is no price, even if a number exists elsewhere
-// in the record.
+// in the record. A main price that can't be read as one amount is no price:
+// the second line (often the "Was" price) never stands in for it.
 export function websitePrice(raw) {
   const display = raw?.extra_fields?.lightning?.pricing;
   if (display && typeof display === 'object') {
+    if (display.low && unreadable(display.low.value)) return { value: null, label: UNREADABLE };
     const low = display.low && positive(display.low.value);
     if (low) return { value: low, label: display.low.label || 'Price' };
+    if (display.high && unreadable(display.high.value)) return { value: null, label: UNREADABLE };
     const high = display.high && positive(display.high.value);
     if (high) return { value: high, label: display.high.label || 'Price' };
     const text = display.high && typeof display.high.value === 'string' ? display.high.value : '';
     return { value: null, label: text || 'Call for price' };
   }
   const p = raw?.pricing || {};
-  const value = positive(p.our_price) || positive(p.price) || positive(p.internet_price);
-  return { value, label: value ? raw?.extra_fields?.our_price_label || 'Price' : 'Call for price' };
+  for (const field of [p.our_price, p.price, p.internet_price]) {
+    if (unreadable(field)) return { value: null, label: UNREADABLE };
+    const value = positive(field);
+    if (value) return { value, label: raw?.extra_fields?.our_price_label || 'Price' };
+  }
+  return { value: null, label: 'Call for price' };
+}
+
+// The second price the website shows next to its main one (the "Was" line
+// under a fee-included main price), for the dealer's "lower second price"
+// basis. Only a number the display itself shows counts: the hidden pricing
+// fields (internet_price, price) can hold a number while the page says "call
+// for price" or shows one price only, and a number labelled MSRP is not a
+// price before fees. Null when the display shows no main price, no second
+// price, or is absent.
+export function displayedSecondPrice(raw) {
+  const display = raw?.extra_fields?.lightning?.pricing;
+  if (!display || typeof display !== 'object') return null;
+  const main = display.low && positive(display.low.value);
+  const second = display.high && positive(display.high.value);
+  if (!main || !second) return null;
+  if (/\bmsrp\b/i.test(String(display.high.label || ''))) return null;
+  return second;
 }
 
 // Reads the condition word out of a vehicle page address, e.g.
@@ -45,7 +75,6 @@ export function normalizeVehicle(raw) {
   const extra = raw.extra_fields || {};
   const display = extra.lightning || {};
   const history = raw.history_report || {};
-  const pricing = raw.pricing || {};
   const media = raw.media || {};
   const images = Array.isArray(media.images) ? media.images.filter((u) => typeof u === 'string' && u) : [];
   const price = websitePrice(raw);
@@ -77,7 +106,7 @@ export function normalizeVehicle(raw) {
     // Everything the "ready to post" check and the rescan look at
     price: price.value, // the website's main price, under the dealer's own label
     priceLabel: price.label,
-    priceBeforeFees: positive(pricing.internet_price) || positive(pricing.price),
+    priceBeforeFees: displayedSecondPrice(raw), // shown on the page, never only in the hidden pricing fields
     status: raw.status || '', // "publish", "modified", "pend-sale"
     statusLabel: display.statusLabel || '',
     availability, // "In-Stock", "In-Transit"

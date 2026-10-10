@@ -1,12 +1,12 @@
 # Lot Current: positioning (internal, draft)
 
-Written 2026-09-28 for Milestone 3, before any pilot feedback. Everything here is a hypothesis to test at Waynesburg. No invented testimonials, logos, reviews or statistics: every number below is either from our own live runs or is labelled as a guess.
+Written 2026-09-28 for Milestone 3, before any pilot feedback. Everything here is a hypothesis to test in the first pilot (the store is named in `PILOT.md`, not here). No invented testimonials, logos, reviews or statistics: every number below is either from our own live runs or is labelled as a guess.
 
 ## Who it is for
 
 - **Buyer:** the used car manager (or general manager) of a franchise dealership, one rooftop at a time. They approve the tool, set the rules, and want to know who posted what and that sold cars came down.
 - **User:** the salespeople who post their store's used cars on Facebook Marketplace from their own accounts, because Marketplace no longer takes vehicle listings from dealer Pages or partner feeds (since January 2023 and September 2021).
-- **First market:** dealerships on Dealer Inspire websites in western Pennsylvania, starting with Ron Lewis CDJR Waynesburg and its sister stores in Cranberry and Pleasant Hills.
+- **First market:** dealerships on Dealer Inspire websites, starting with the first pilot's dealer group (named in `PILOT.md`).
 
 ## The problem in their words
 
@@ -17,9 +17,9 @@ Written 2026-09-28 for Milestone 3, before any pilot feedback. Everything here i
 
 ## What Lot Current is
 
-A Chrome extension. It reads the dealership's own website inventory, lets only pre-owned cars through, pre-fills the Marketplace vehicle listing (photos included) for the salesperson to check and publish, and re-reads the website every 3 hours to flag sold cars and price changes on the listings they made, with a button that opens the right listing ready to fix.
+A Chrome extension. It reads the dealership's own website inventory, lets through only the cars the website marks as pre-owned, pre-fills the Marketplace vehicle listing (photos included) for the salesperson to check and publish, and, with automatic rescans allowed, re-reads the website every 3 hours while Chrome is open to flag sold cars and price changes on the listings they made, with a button that opens the right listing ready to fix.
 
-**One line:** Lot Current fills in the Marketplace listing from your website in about ten seconds. You click Publish, and it tells you the same day when a car sells or its price changes.
+**One line:** Lot Current fills in the Marketplace listing from your website in seconds. You click Publish, and with automatic rescans on and Chrome open it tells you the same day when a car sells or its price changes.
 
 ## Why it is different (the angle: careful and accurate)
 
@@ -28,8 +28,8 @@ A Chrome extension. It reads the dealership's own website inventory, lets only p
 | Who publishes | The tool, on a schedule | The salesperson, every time |
 | What gets listed | Whatever is in the feed | Only cars the website says are pre-owned, at your store, with photos and a price |
 | Price | Often set in the tool | Always the website price; changes only mirror the website |
-| Sold cars | Depends | Flagged within one rescan (3 hours while Chrome is open), with the listing opened for you |
-| Description | Templates or free text | Written from the website's facts, checked against them, reviewed by the salesperson |
+| Sold cars | Depends | Flagged within one rescan (with automatic rescans on, every 3 hours while Chrome is open), with the listing opened for you |
+| Description | Templates or free text | Written from the car's listed facts on the website (not copied from its write-up), checked against them, reviewed by the salesperson |
 | Facebook login | Some ask for it | Never. No passwords, cookies or tokens; no extra accounts; no tricks |
 | The dealership | Sometimes hidden | Named in every description, with the salesperson's role |
 
@@ -39,16 +39,16 @@ Other tools in this space list at roughly $39 to $1,299 a month as of September 
 
 Say:
 - "You click Publish. Lot Current never does." (True by construction: there is no code for it and a test that fails if any appears.)
-- "Only pre-owned cars, only at your store, only at the website price."
-- "Sold cars flagged the same day." (While Chrome is open, with rescans on; say that when asked.)
-- "On the live form at Waynesburg, every field filled with nothing left over." (Our own live runs on 2026-09-27; say "in our tests", not "always".)
+- "Only cars your website marks as pre-owned, only at your store, only at the website price." (It goes by the website's labels as Lot Current reads them: a car the website labels wrong, or a demo or loaner whose label Lot Current misses, can get through, so the salesperson still looks over each car.)
+- "With automatic rescans on and Chrome open, sold cars flagged the same day." (With automatic rescans on, they run every 3 hours while Chrome is open. Say both conditions with the claim, not only when asked: a salesperson who skips the rescan permission is flagged only when they rescan by hand. Each salesperson installs Lot Current in their own Chrome, with their own settings, and their listings are rescanned only there: one salesperson's Chrome being open does nothing for another's listings, and nothing flags a salesperson's sold car while their own Chrome is closed.)
+- "On Facebook's live form, with a real dealership's cars, every field filled with nothing left over." (Our own live runs on 2026-09-27; say "in our tests", not "always". Never name the store or its results without its written permission, pilot agreement section 3.)
 - "Not affiliated with Meta Platforms, Inc."
 
 Don't say (until the attorney answers the questions in `legal/questions-for-attorney.md`):
 - Anything that sounds like Meta approval, partnership or compliance.
 - "Safe", "allowed", "compliant", or any promise about what will happen to a salesperson's account. The honest line: having a person click Publish is the safest design available, not a guarantee.
 - A slogan built on the word "bot" (asked in the attorney questions).
-- Any number we did not measure: time saved per week, more leads, more sales.
+- Any number we did not measure: seconds per post, time saved per week, more leads, more sales. No fill time has been measured yet; the Numbers tab's CSV records the seconds from Post to the form opened and to the form filled, and a figure from it goes into copy only with the store's written permission (pilot agreement section 3, `legal/trademark-note.md`).
 
 ## Proof we can build honestly during the pilot
 

@@ -6,8 +6,8 @@
 // what each must look like). Then it prints the `supabase secrets set` lines
 // for the ids. docs/stripe-setup.md is the owner's step-by-step.
 //
-//   STRIPE_SECRET_KEY=sk_test_... npm run stripe-setup                       read only: what exists, what is missing
-//   STRIPE_SECRET_KEY=sk_test_... npm run stripe-setup -- --apply --webhook-url <project ref>
+//   npm run stripe-setup                                       read only: what exists, what is missing
+//   npm run stripe-setup -- --apply --webhook-url <project ref>
 //
 //   --apply            create what is missing; set the portal's features and the webhook's events back
 //   --webhook-url X    a Supabase project ref, or the full https address ending in /billing/webhook
@@ -17,30 +17,38 @@
 //   --reprice          with --apply, replace a price whose amount differs from pricing.json
 //   --live             allow a live key (sk_live_ / rk_live_); refused without it
 //
-// The key is read from the environment and never printed. On Windows
-// PowerShell: $env:STRIPE_SECRET_KEY = 'sk_test_...'; npm run stripe-setup
+// The key is read from STRIPE_SECRET_KEY in the environment and never
+// printed. Set it at a prompt, not in a command a shell's history file keeps:
+// on Windows PowerShell $env:STRIPE_SECRET_KEY = Read-Host 'Stripe secret key',
+// on macOS or Linux read -rs STRIPE_SECRET_KEY && export STRIPE_SECRET_KEY
+// (docs/stripe-setup.md, step 3).
 // Exit code 0 when nothing failed.
 
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { runSetup, secretsCommands } from './stripe-setup-lib.mjs';
+import { runSetup, secretsCommands, webhookSecretLines } from './stripe-setup-lib.mjs';
 
+// A flag given with no value (last on the line, `--site-url=`, or followed by
+// another flag) goes in `missing`, so the run refuses instead of treating it
+// as not given.
 export function parseArgs(argv) {
-  const out = { apply: false, live: false, reprice: false, webhookUrl: '', siteUrl: '', productName: 'Lot Current', unknown: [] };
+  const out = { apply: false, live: false, reprice: false, webhookUrl: '', siteUrl: '', productName: 'Lot Current', unknown: [], missing: [] };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
-    const value = () => {
+    const value = (flag, fallback = '') => {
       const [, inline] = a.split(/=(.*)/s);
-      if (inline !== undefined) return inline;
-      i += 1;
-      return argv[i] ?? '';
+      const next = argv[i + 1];
+      const given = inline !== undefined ? inline : next !== undefined && !next.startsWith('--') ? argv[(i += 1)] : '';
+      if (given.trim()) return given;
+      out.missing.push(flag);
+      return fallback;
     };
     if (a === '--apply') out.apply = true;
     else if (a === '--live') out.live = true;
     else if (a === '--reprice') out.reprice = true;
-    else if ((a === '--webhook-url' || a.startsWith('--webhook-url='))) out.webhookUrl = value();
-    else if ((a === '--site-url' || a.startsWith('--site-url='))) out.siteUrl = value();
-    else if ((a === '--product-name' || a.startsWith('--product-name='))) out.productName = value();
+    else if ((a === '--webhook-url' || a.startsWith('--webhook-url='))) out.webhookUrl = value('--webhook-url');
+    else if ((a === '--site-url' || a.startsWith('--site-url='))) out.siteUrl = value('--site-url');
+    else if ((a === '--product-name' || a.startsWith('--product-name='))) out.productName = value('--product-name', out.productName);
     else out.unknown.push(a);
   }
   return out;
@@ -52,15 +60,20 @@ async function main() {
     console.error(`unknown option: ${args.unknown.join(' ')} (see the top of scripts/stripe-setup.mjs)`);
     process.exit(2);
   }
+  if (args.missing.length) {
+    console.error(`${args.missing.join(', ')} needs a value, so nothing was read or changed (see the top of scripts/stripe-setup.mjs)`);
+    process.exit(2);
+  }
   const pricing = JSON.parse(readFileSync(new URL('../marketing/pricing.json', import.meta.url), 'utf8'));
   const result = await runSetup({ ...args, key: process.env.STRIPE_SECRET_KEY || '', pricing });
   for (const l of result.lines) console.log(`${l.ok ? 'ok  ' : l.note ? 'note' : 'FAIL'}  ${l.check}${l.detail ? ': ' + l.detail : ''}`);
   const commands = secretsCommands(result);
   if (commands.length) {
-    console.log('\nPut these in the billing function\'s secrets (and STRIPE_SECRET_KEY yourself, if it is not set yet):');
+    console.log('\nPut these ids in the billing function\'s secrets (and STRIPE_SECRET_KEY yourself, in the Supabase Dashboard, if it is not set yet):');
     for (const c of commands) console.log('  ' + c);
   }
-  if (result.webhookSecret) console.log('\nThe webhook signing secret above is shown by Stripe only now. Set it before closing this window; never paste it into a chat or a file in the repository.');
+  const webhook = webhookSecretLines(result);
+  if (webhook.length) console.log('\n' + webhook.join('\n'));
   if (result.mode === 'test' && result.ok) console.log('\nTest mode: nobody is charged. Stripe keeps test and live objects apart, so the live switch runs this again with the live key and --live.');
   console.log(result.ok ? '\nNothing failed.' : '\nSomething failed: see the FAIL lines.');
   process.exit(result.ok ? 0 : 1);

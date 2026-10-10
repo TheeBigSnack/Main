@@ -589,27 +589,150 @@ function isHidden(attrs) {
 
 // Crossed-out text is a price or a figure the page no longer stands by
 // ("<s>$24,995</s> $23,995"), so the text a price is checked against leaves
-// it out. The style is read one declaration at a time, in one pass.
+// it out: <s>, <strike> and <del>; a line-through style on the element; a
+// class the page's own <style> rules strike through; and a class named for
+// it. A class is read word by word (split at "-", "_" and camelCase), never
+// by a piece of a word ("font-bold" holds "old" but is not crossed out): a
+// word that says struck ("strike", "strikethrough", "crossed",
+// "line-through"), or one class that names an old price ("old-price",
+// "price-was", "originalPrice"). The style is read one declaration at a
+// time, in one pass.
 const CROSSED_OUT = new Set(['s', 'strike', 'del']);
-function isCrossedOut(el) {
+const STRUCK_WORDS = new Set(['strike', 'strikethrough', 'striked', 'struck', 'crossed', 'crossedout', 'linethrough']);
+const OLD_WORDS = new Set(['was', 'old', 'original', 'orig', 'previous', 'prev', 'former']);
+const PRICE_WORDS = new Set(['price', 'pricing', 'amount']);
+const classWords = (cls) => cls.split(/[-_]+|(?<=[a-z0-9])(?=[A-Z])/).map((w) => w.toLowerCase()).filter(Boolean);
+function isCrossedOut(el, struck) {
   if (CROSSED_OUT.has(el.tag)) return true;
   const style = el.attrs.style;
-  return typeof style === 'string' && /line-through/i.test(style) && style.split(';').some((d) => /^\s*text-decoration(?:-line)?\s*:/i.test(d) && /line-through/i.test(d));
+  if (typeof style === 'string' && /line-through/i.test(style) && style.split(';').some((d) => /^\s*text-decoration(?:-line)?\s*:/i.test(d) && /line-through/i.test(d))) return true;
+  const cls = el.attrs.class;
+  if (typeof cls !== 'string' || !cls.trim()) return false;
+  for (const c of cls.trim().split(/\s+/).slice(0, 40)) {
+    if (struck.has(c)) return true;
+    const words = classWords(c);
+    if (words.some((w) => STRUCK_WORDS.has(w))) return true;
+    for (let k = 0; k + 1 < words.length; k += 1) if (words[k] === 'line' && words[k + 1] === 'through') return true;
+    if (words.some((w) => OLD_WORDS.has(w)) && words.some((w) => PRICE_WORDS.has(w))) return true;
+  }
+  return false;
 }
 
-function visibleText(root) {
-  const parts = [];
-  let size = 0;
+// The classes the page's own <style> rules strike through
+// (".was { text-decoration: line-through }"): the last class of each
+// selector of such a rule. The rules are split at their braces in one pass
+// (a pattern over the whole block would cost the square of a long one).
+function struckClasses(doc) {
+  const out = new Set();
+  for (const t of doc.tokens) {
+    if (t.open !== 'style' || typeof t.raw !== 'string' || !/line-through/i.test(t.raw)) continue;
+    const parts = t.raw.slice(0, 500000).split(/([{}])/);
+    for (let k = 0; k + 3 < parts.length; k += 2) {
+      if (parts[k + 1] !== '{' || parts[k + 3] !== '}' || !/text-decoration(?:-line)?\s*:[^;]*line-through/i.test(parts[k + 2])) continue;
+      for (const selector of parts[k].split(',')) {
+        const last = selector.trim().split(/[\s>+~]+/).pop() || '';
+        const names = [...last.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)];
+        if (names.length) out.add(names[names.length - 1][1]);
+      }
+    }
+  }
+  return out;
+}
+
+// The car each element's links go to, and whether it shows anything: worked
+// out from the leaves up, in one pass over the elements a person sees. Each
+// link's car is the one factsFrom already named (kept on its attributes
+// under LINK; absent for a link that goes to no car, to this page itself, an
+// in-page fragment or another website), so no address is parsed twice. An
+// element's `cars` is null (no car link inside), that car's key (every car
+// link inside goes to one car), or MANY (two or more cars). The page's first
+// heading (h1) counts as a link to the page's own car (HERE): the element
+// around the car's own title and price is never another car's card. `shown`
+// counts the pieces of text inside that are more than spaces.
+const MANY = {};
+const HERE = {};
+const LINK = Symbol('link');
+function linkTargets(root, unseen) {
+  const order = [];
   walk(root, (n) => {
-    if (size > TEXT_LIMIT * 2) return false; // enough read; whitespace is squeezed below
+    if (n.text !== undefined) return false;
+    if (n.tag !== '#document' && unseen(n)) return false;
+    order.push(n);
+    return true;
+  });
+  const heading = order.find((el) => el.tag === 'h1') || null;
+  for (let k = order.length - 1; k >= 0; k -= 1) {
+    const el = order[k];
+    let t = el === heading ? HERE : (el.tag === 'a' || el.tag === 'area') ? el.attrs[LINK] ?? null : null;
+    let shown = 0;
+    for (const c of el.children) {
+      if (c.text !== undefined) {
+        if (/\S/.test(c.text)) shown += 1;
+        continue;
+      }
+      if (c.cars === undefined) continue; // not seen: hidden, crossed out, a script
+      shown += c.shown;
+      if (t === MANY || c.cars === null) continue;
+      t = t === null || t === c.cars ? c.cars : MANY;
+    }
+    el.cars = t;
+    el.shown = shown;
+  }
+}
+
+// An element is a car's card when every car link inside it goes to that one
+// car, and the element around it holds another car's link or shows
+// something besides it: the largest such element, so a tile's price, photo
+// and "Check availability" button all sit in its card.
+const isCard = (parent, child) => child.cars !== null && child.cars !== undefined && child.cars !== MANY && (parent.cars === MANY || parent.shown > child.shown);
+
+/**
+ * What a person sees on the page, as one string (text) and as segments of
+ * it tied to the car whose card holds them (segments: { car, text }). A
+ * card is the largest element whose links to cars all go to one car,
+ * inside one that also links to another car or shows something else (one
+ * car's tile in a "similar vehicles" carousel, one car's card on a list);
+ * its links to anything else (a contact form, financing) don't split it.
+ * Which car a link goes to is the caller's carKey (parseVehiclePage);
+ * without one, every address on this website is a car of its own. Text
+ * outside any card, and inside the card around the page's first heading,
+ * has car null. The adapter reads a car's own text from them: on its page,
+ * everything but other cars' cards; on a list, its own card.
+ */
+function visibleText(root, { struck = new Set() } = {}) {
+  const unseen = (n) => UNSEEN.has(n.tag) || isHidden(n.attrs) || isCrossedOut(n, struck);
+  linkTargets(root, unseen);
+  const parts = [];
+  const segments = []; // { car, raw }, consecutive texts of one card together
+  let size = 0;
+  const nodes = [root];
+  const cards = [null];
+  while (nodes.length) {
+    const n = nodes.pop();
+    const card = cards.pop();
+    if (size > TEXT_LIMIT * 2) break; // enough read; whitespace is squeezed below
     if (n.text !== undefined) {
       parts.push(n.text);
+      const car = card === HERE ? null : card;
+      const last = segments[segments.length - 1];
+      if (last && last.car === car) last.raw += ' ' + n.text;
+      else segments.push({ car, raw: n.text });
       size += n.text.length;
-      return false;
+      continue;
     }
-    return n.tag === '#document' || (!UNSEEN.has(n.tag) && !isHidden(n.attrs) && !isCrossedOut(n));
-  });
-  return decodeEntities(parts.join(' ')).replace(/\s+/g, ' ').trim().slice(0, TEXT_LIMIT);
+    if (n.tag !== '#document' && unseen(n)) continue;
+    for (let k = n.children.length - 1; k >= 0; k -= 1) {
+      const c = n.children[k];
+      nodes.push(c);
+      // inside a card, everything is that card's; outside, a child may be one
+      cards.push(card !== null || c.text !== undefined ? card : isCard(n, c) ? c.cars : null);
+    }
+  }
+  const squeeze = (t) => decodeEntities(t).replace(/\s+/g, ' ').trim();
+  return {
+    text: squeeze(parts.join(' ')).slice(0, TEXT_LIMIT),
+    segments: segments.map((g) => ({ car: g.car, text: squeeze(g.raw).slice(0, TEXT_LIMIT) })).filter((g) => g.text),
+  };
 }
 
 const relHas = (attrs, word) => String(attrs.rel || '').toLowerCase().split(/\s+/).includes(word);
@@ -626,7 +749,7 @@ function isCarfax(u) {
   return host === 'carfax.com' || host.endsWith('.carfax.com');
 }
 
-function factsFrom(doc, pageUrl) {
+function factsFrom(doc, pageUrl, carOf = null) {
   const page = absolute(pageUrl);
   const base = baseOf(doc, pageUrl);
   const origin = page ? new URL(page).origin : null;
@@ -634,11 +757,15 @@ function factsFrom(doc, pageUrl) {
   let ogTitle = '';
   let canonical = null;
   let next = null;
+  let prev = null;
   const links = [];
   const carfaxLinks = [];
   // a Set beside each list: a page of thousands of links is read in one pass
   const seenLinks = new Set();
   const seenCarfax = new Set();
+  // the page's own address as its links give it: a link to it goes to no
+  // other car (the cards of visibleText)
+  const here = page ? withoutFragment(new URL(page)) : '';
   for (const t of doc.tokens) {
     if (!t.open) continue;
     const a = t.attrs;
@@ -646,6 +773,7 @@ function factsFrom(doc, pageUrl) {
     else if (t.open === 'meta' && !ogTitle && String(a.property || a.name || '').toLowerCase() === 'og:title') ogTitle = String(a.content || '').replace(/\s+/g, ' ').trim();
     else if (t.open === 'link' && relHas(a, 'canonical') && !canonical) canonical = absolute(a.href, base);
     if ((t.open === 'link' || t.open === 'a') && relHas(a, 'next') && !next) next = absolute(a.href, base);
+    if ((t.open === 'link' || t.open === 'a') && (relHas(a, 'prev') || relHas(a, 'previous')) && !prev) prev = absolute(a.href, base);
     if (t.open === 'a' || t.open === 'area' || t.open === 'iframe') {
       // parsed once, then read for its host, its origin and its address
       const u = urlOf(t.open === 'iframe' ? a.src : a.href, base);
@@ -657,6 +785,10 @@ function factsFrom(doc, pageUrl) {
       }
       if (t.open !== 'iframe' && origin && u.origin === origin) {
         const clean = withoutFragment(u);
+        if (clean !== here) {
+          const car = typeof carOf === 'function' ? carOf(clean) : clean;
+          if (typeof car === 'string' && car) a[LINK] = car;
+        }
         if (!seenLinks.has(clean)) {
           seenLinks.add(clean);
           links.push(clean);
@@ -664,7 +796,8 @@ function factsFrom(doc, pageUrl) {
       }
     }
   }
-  return { title: ogTitle || title, canonical, next, links, carfaxLinks, text: visibleText(doc.root) };
+  const seen = visibleText(doc.root, { struck: struckClasses(doc) });
+  return { title: ogTitle || title, canonical, next, prev, links, carfaxLinks, text: seen.text, segments: seen.segments };
 }
 
 /**
@@ -673,18 +806,22 @@ function factsFrom(doc, pageUrl) {
  *                the site's name tacked on), else the <title>
  *   canonical    the rel=canonical address, absolute, or null
  *   next         the rel=next address (the next page of a list), or null
+ *   prev         the rel=prev (or rel=previous) address, or null
  *   links        every same-origin link, absolute, once each, in page order,
  *                without in-page fragments
  *   carfaxLinks  every link to a carfax.com page, once each
  *   text         the text a person sees (no scripts, styles, head or hidden
- *                elements), without crossed-out text (<s>, <strike>, <del>
- *                or a line-through style: an old price), whitespace
- *                squeezed, at most TEXT_LIMIT characters
+ *                elements), without crossed-out text (<s>, <strike>, <del>,
+ *                a line-through style or a class for it: an old price),
+ *                whitespace squeezed, at most TEXT_LIMIT characters
+ *   segments     the same text in pieces, each with the car whose card
+ *                holds it, or null (visibleText above)
  * @param {string} html
  * @param {string} pageUrl  the page's own address
+ * @param {{ carKey?: Function }} [options]  as for parseVehiclePage (given no cars)
  */
-export function pageFacts(html, pageUrl) {
-  return factsFrom(readDocument(html), pageUrl);
+export function pageFacts(html, pageUrl, { carKey = null } = {}) {
+  return factsFrom(readDocument(html), pageUrl, typeof carKey === 'function' ? carKey([]) : null);
 }
 
 /**
@@ -694,9 +831,14 @@ export function pageFacts(html, pageUrl) {
  * and the page facts.
  * @param {string} html
  * @param {string} pageUrl
+ * @param {{ carKey?: Function }} [options]  carKey(vehicles), given the
+ *   page's vehicle nodes, returns the function that names the car a link on
+ *   this website goes to (a key string), or null when it goes to no car's
+ *   page; the page's text is cut into cards by it (facts.segments). Without
+ *   it, every address on this website is a car of its own.
  * @returns {{ vehicles: object[], facts: ReturnType<typeof pageFacts> }}
  */
-export function parseVehiclePage(html, pageUrl) {
+export function parseVehiclePage(html, pageUrl, { carKey = null } = {}) {
   const doc = readDocument(html);
   const nodes = [...vehicleNodes(blocksFrom(doc.tokens)), ...vehicleNodes(microdataItems(doc.root, baseOf(doc, pageUrl)))];
   const vins = new Set();
@@ -707,5 +849,5 @@ export function parseVehiclePage(html, pageUrl) {
     vins.add(vin);
     return true;
   });
-  return { vehicles, facts: factsFrom(doc, pageUrl) };
+  return { vehicles, facts: factsFrom(doc, pageUrl, typeof carKey === 'function' ? carKey(vehicles) : null) };
 }

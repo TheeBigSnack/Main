@@ -5,23 +5,28 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { expectedHeaders, configUrl, parentDomain, dnsName, checkPage, checkAppDns, checkSenderDns, report, parseArgs } from '../scripts/check-hosting.mjs';
+import { expectedHeaders, configUrl, configClient, committedClient, parentDomain, dnsName, checkPage, checkAppDns, checkSenderDns, report, parseArgs, pagesHostOf } from '../scripts/check-hosting.mjs';
+import { CONFIG } from '../manager/config.js';
 
 const headersText = readFileSync(new URL('../manager/_headers', import.meta.url), 'utf8');
 const WANT = expectedHeaders(headersText);
 const PROJECT = 'https://abcdefghijklmnopqrst.supabase.co';
 const APP = 'https://app.example-product.com/';
+const CLIENT = { path: './vendor/supabase-js-9.8.7.js', text: 'export const { createClient } = supabase;\n' };
+const CLIENT_CHECK = 'it serves the supabase-js copy this checkout pins';
 
 // A host serving the deployed folder: the page with its headers, config.js,
-// and (like Cloudflare Pages) the page itself for any unknown path.
-function fakeHost({ headers = WANT, config = `export const CONFIG = {\n  supabaseUrl: '${PROJECT}',\n};\n`, serveMjs = null, pageStatus = 200 } = {}) {
+// the supabase-js copy, and (like Cloudflare Pages) the page itself for any
+// unknown path.
+function fakeHost({ headers = WANT, config = `export const CONFIG = {\n  supabaseUrl: '${PROJECT}',\n  supabaseJs: '${CLIENT.path}',\n};\n`, serveMjs = null, pageStatus = 200, client = CLIENT.text, clientType = 'application/javascript', clientStatus = 200 } = {}) {
   const seen = [];
   const page = '<!doctype html><script type="module" src="./manager.js"></script>';
   const fetchImpl = async (url) => {
     seen.push(url);
     const path = new URL(url).pathname;
+    if (path === CLIENT.path.slice(1) && client !== null) return { status: clientStatus, headers: new Headers({ ...headers, 'content-type': clientType }), text: async () => client };
     const body = path.endsWith('/config.js') ? config : path.endsWith('/serve.mjs') && serveMjs ? serveMjs : page;
-    return { status: path.endsWith('/') ? pageStatus : 200, headers: new Headers(headers), text: async () => body };
+    return { status: path.endsWith('/') ? pageStatus : 200, headers: new Headers({ ...headers, 'content-type': 'text/html; charset=utf-8' }), text: async () => body };
   };
   return { fetchImpl, seen };
 }
@@ -45,10 +50,45 @@ test('configUrl and the domain helpers', () => {
 
 test('a correctly deployed page passes every page check', async () => {
   const { fetchImpl, seen } = fakeHost();
-  const findings = await checkPage({ fetchImpl, appUrl: APP, headersText, committedUrl: PROJECT });
+  const findings = await checkPage({ fetchImpl, appUrl: APP, headersText, committedUrl: PROJECT, committedClient: CLIENT });
   assert.deepEqual(failedChecks(findings), []);
-  assert.equal(findings.length, 1 + 5 + 2);
-  assert.deepEqual(seen, [APP, `${APP}config.js`, `${APP}serve.mjs`]);
+  assert.equal(findings.length, 1 + 5 + 3);
+  assert.deepEqual(seen, [APP, `${APP}config.js`, `${APP}vendor/supabase-js-9.8.7.js`, `${APP}serve.mjs`]);
+});
+
+// The signed-in page imports supabase-js before it shows anything, and no
+// other check loads the hosted copy: a missing, stale or mistyped file would
+// leave every manager on an error page while the deploy stayed green.
+test('the hosted supabase-js: missing, of another type, another copy or another version fails, naming why', async () => {
+  const detail = async (over, client = CLIENT) => {
+    const findings = await checkPage({ ...fakeHost(over), appUrl: APP, headersText, committedUrl: PROJECT, committedClient: client });
+    const f = findings.find((x) => x.check === CLIENT_CHECK);
+    assert.ok(f, 'the client is checked');
+    return f.ok ? '' : f.detail;
+  };
+  assert.equal(await detail({}), '');
+  assert.equal(await detail({ clientType: 'text/javascript; charset=utf-8' }), '');
+  assert.equal(await detail({}, { path: CLIENT.path, text: CLIENT.text.replace(/\n/g, '\r\n') }), '', 'a Windows checkout\'s line endings are the same copy');
+  // Pages answers a file that is not there with the page itself
+  assert.match(await detail({ client: null }), /comes as text\/html; charset=utf-8, not JavaScript: is manager\/vendor\/ deployed with the page\?/);
+  assert.match(await detail({ clientType: 'application/octet-stream' }), /not JavaScript/);
+  assert.match(await detail({ clientStatus: 404 }), /\/vendor\/supabase-js-9\.8\.7\.js: 404/);
+  assert.match(await detail({ client: 'export const { createClient } = somethingElse;\n' }), /is not this checkout's copy: deploy again/);
+  assert.match(await detail({ config: `  supabaseUrl: '${PROJECT}',\n  supabaseJs: './vendor/supabase-js-9.8.6.js',\n` }), /names \.\/vendor\/supabase-js-9\.8\.6\.js vs \.\/vendor\/supabase-js-9\.8\.7\.js: deploy again/);
+  assert.match(await detail({ config: `  supabaseUrl: '${PROJECT}',\n` }), /names \(none\) vs/);
+  assert.match(await detail({}, { path: CLIENT.path, text: '' }), /is not a file in manager\//, 'nothing to compare with is a failure, not a pass');
+  assert.match(await detail({ config: `  supabaseUrl: '${PROJECT}',\n  supabaseJs: 'https://cdn.example.test/x.js',\n` }, { path: 'https://cdn.example.test/x.js', text: 'x' }), /not on the page's own origin/);
+});
+
+test('the committed client is the file manager/config.js names, read from manager/', () => {
+  const mine = committedClient(CONFIG.supabaseJs);
+  assert.equal(mine.path, CONFIG.supabaseJs);
+  assert.equal(mine.text, readFileSync(new URL(`../manager/${CONFIG.supabaseJs.slice(2)}`, import.meta.url), 'utf8'));
+  assert.ok(mine.text.length > 1000);
+  for (const bad of ['./vendor/nothing-here.js', '../package.json', './../package.json', '/etc/passwd', '']) assert.equal(committedClient(bad).text, '', bad);
+  assert.equal(configClient(`  supabaseJs: '${CONFIG.supabaseJs}',`), CONFIG.supabaseJs);
+  assert.equal(configClient(readFileSync(new URL('../manager/config.js', import.meta.url), 'utf8')), CONFIG.supabaseJs);
+  assert.equal(configClient('nothing here'), '');
 });
 
 test('a page without its headers, with another project, or with the demo server fails, naming each', async () => {
@@ -57,7 +97,7 @@ test('a page without its headers, with another project, or with the demo server 
     config: "  supabaseUrl: 'https://zzzzzzzzzzzzzzzzzzzz.supabase.co',\n",
     serveMjs: "import { createServer } from 'node:http';",
   });
-  const findings = await checkPage({ fetchImpl, appUrl: APP, headersText, committedUrl: PROJECT });
+  const findings = await checkPage({ fetchImpl, appUrl: APP, headersText, committedUrl: PROJECT, committedClient: CLIENT });
   const failed = failedChecks(findings);
   assert.ok(failed.includes('sends x-frame-options'));
   assert.ok(failed.includes('sends content-security-policy'));
@@ -105,6 +145,31 @@ test('the app CNAME: right target passes, missing or wrong fails, a pages.dev ad
   assert.deepEqual(await checkAppDns({ resolver: fakeResolver({}), appUrl: 'https://lotcurrent-app.pages.dev/' }), []);
 });
 
+// Cloudflare gives a project a suffixed pages.dev address when its name is
+// taken there (production-setup.md step 6.6: "usually lotcurrent-app.pages.dev").
+// The CNAME the owner sets to the address Cloudflare shows is right, and the
+// check holds it to that address, never to the guess from the project's name.
+test('the app CNAME: a suffixed pages.dev address Cloudflare gave the project passes when given, and the guess no longer steers the owner to it', async () => {
+  const suffixed = fakeResolver({ 'CNAME app.example-product.com': ['lotcurrent-app-4xk.pages.dev.'] });
+  assert.deepEqual(failedChecks(await checkAppDns({ resolver: suffixed, appUrl: APP, pagesHost: 'lotcurrent-app-4xk.pages.dev' })), []);
+  const [given] = await checkAppDns({ resolver: suffixed, appUrl: APP, pagesHost: 'lotcurrent-app-4xk.pages.dev' });
+  assert.equal(given.check, 'app.example-product.com points at lotcurrent-app-4xk.pages.dev');
+  // the unsuffixed name, someone else's project, is a failure when Cloudflare named the suffixed one
+  const squatted = fakeResolver({ 'CNAME app.example-product.com': ['lotcurrent-app.pages.dev'] });
+  const [held] = await checkAppDns({ resolver: squatted, appUrl: APP, pagesHost: 'lotcurrent-app-4xk.pages.dev' });
+  assert.equal(held.ok, false);
+  assert.doesNotMatch(held.detail, /--pages-host/, 'the address was given: no hint to give it');
+  // without it, the guess fails, and the line says the address Cloudflare shows is the right one
+  const [guess] = await checkAppDns({ resolver: suffixed, appUrl: APP });
+  assert.equal(guess.ok, false);
+  assert.match(guess.detail, /^CNAME lotcurrent-app-4xk\.pages\.dev\.; if Cloudflare shows another \.pages\.dev address for the project, that one is right: give it with --pages-host$/);
+  // only a pages.dev address counts as one
+  assert.equal(pagesHostOf(' Lotcurrent-App-4xk.pages.dev. '), 'lotcurrent-app-4xk.pages.dev');
+  for (const bad of ['', 'lotcurrent-app', 'evil.example.com', 'x.pages.dev.evil.com', '-x.pages.dev', 'https://x.pages.dev/', 'a b.pages.dev']) assert.equal(pagesHostOf(bad), '', bad);
+  const junk = await checkAppDns({ resolver: squatted, appUrl: APP, pagesHost: 'evil.example.com' });
+  assert.equal(junk[0].check, 'app.example-product.com points at lotcurrent-app.pages.dev', 'a host that is not pages.dev is ignored, not trusted');
+});
+
 const SENDER = 'mail.example-product.com';
 const goodZone = {
   [`MX send.${SENDER}`]: [{ exchange: 'feedback-smtp.us-east-1.amazonses.com', priority: 10 }],
@@ -146,7 +211,9 @@ test('report and parseArgs', () => {
   assert.equal(r.notes, 1);
   assert.match(r.text, /^note {2}b \(x\)$/m);
   assert.equal(report([{ check: 'c', ok: false }]).failed, 1);
-  assert.deepEqual(parseArgs(['--app', APP, '--sender', SENDER]), { app: APP, sender: SENDER, pages: 'lotcurrent-app' });
+  assert.deepEqual(parseArgs(['--app', APP, '--sender', SENDER]), { app: APP, sender: SENDER, pages: 'lotcurrent-app', pagesHost: '' });
+  assert.equal(parseArgs(['--app', APP, '--pages-host', 'Lotcurrent-App-4xk.pages.dev']).pagesHost, 'lotcurrent-app-4xk.pages.dev');
+  assert.throws(() => parseArgs(['--app', APP, '--pages-host', 'app.example-product.com']), /--pages-host app\.example-product\.com is not a \.pages\.dev address/);
   assert.throws(() => parseArgs([]), /give --app, --sender or both/);
   assert.throws(() => parseArgs(['--app']), /unexpected --app/);
   assert.throws(() => parseArgs(['--bogus', 'x']), /unexpected --bogus/);

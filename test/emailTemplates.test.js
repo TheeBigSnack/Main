@@ -220,3 +220,22 @@ test('docs/launch-checklist.md gives each template its Dashboard name and config
   assert.ok(sender, 'the checklist has no item for the sender');
   for (const w of ['host', 'port', 'user', 'password', 'sender address', 'paid service', 'spam']) assert.ok(sender.includes(w), `the sender item does not mention "${w}"`);
 });
+
+test('the checklist and the Supabase README name the sign-in sender docs/production-setup.md chose, and never say none is chosen', () => {
+  const setup = read('../docs/production-setup.md');
+  const row = setup.split('\n').find((l) => l.startsWith('| Sign-in email sender |'));
+  assert.ok(row, 'docs/production-setup.md has no "Sign-in email sender" choice');
+  const [, provider, domain] = row.match(/\*\*([^*]+)\*\*, sending from the subdomain `([^`]+)`/) || [];
+  assert.ok(provider && domain, `the choice row does not name a provider and a sending subdomain: ${row}`);
+  const daily = row.match(/at most (\d[\d,]*) a day/);
+  assert.ok(daily, 'the choice row does not give the free plan\'s daily limit');
+  const sender = read('../docs/launch-checklist.md').split('\n').find((l) => l.startsWith('- [ ] **Choose the sender'));
+  const readme = read('../supabase/README.md').split('\n').find((l) => l.startsWith('**The sender.**'));
+  for (const [where, text] of [['docs/launch-checklist.md', sender], ['supabase/README.md', readme]]) {
+    assert.ok(text, `${where} has no sender passage`);
+    assert.ok(text.includes(`**${provider}**`) && text.includes(`\`${domain}\``), `${where} does not name the chosen sender (${provider}, ${domain})`);
+    assert.ok(text.includes('docs/production-setup.md'), `${where} does not point to docs/production-setup.md for the values`);
+    assert.ok(text.includes(`${daily[1]} a day`), `${where} does not give the free plan's daily limit (${daily[1]} a day)`);
+    assert.doesNotMatch(text, /nothing in the repo picks|it is a paid service and the owner's choice/i, `${where} says no sender is chosen, or that the sender itself is a paid service`);
+  }
+});

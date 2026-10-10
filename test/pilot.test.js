@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  withPilotDefaults, hasPilotData, beginPost, notePostStep, endPost, noteFill, noteFlags, resolveFlag,
+  withPilotDefaults, hasPilotData, beginPost, notePostStep, endPost, noteFill, noteFlags, resolveFlag, clearNumbers,
   summarizePilot, pilotText, pilotCsv, pilotFileName, updatePilot, recordFlags, median, secondsBetween, hoursBetween, pilotKey,
   DEFINITIONS, fmtLocal, PILOT_RETENTION_DAYS,
 } from '../extension/src/pilot.js';
@@ -129,6 +129,73 @@ test('an open flag is cleared only by a complete, confirmed scan that no longer 
   p = noteFlags(p, { ...base, takenAt: T(90) });
   assert.equal(p.flags.length, 4);
   assert.equal(noteFlags(p, null).flags.length, 4);
+});
+
+test('a posted car the website keeps showing as sale-pending keeps its take-down flag open scan after scan, never "cleared"', () => {
+  const posted = { [RAM]: { name: '2019 Ram 1500 Classic Express', price: 27163 } };
+  const pending = (at) => snapshot([['usedNormal', { status: 'pend-sale' }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']], undefined, at);
+  let prev = snapshot(LOT);
+  let p = null;
+  for (const at of [T(0), T(180), T(360)]) {
+    const now = pending(at);
+    const diff = diffScans(prev, now, { posted, confirm: confirmed() });
+    diff.takenAt = at;
+    p = noteFlags(p, diff);
+    prev = now; // the scan's snapshot is saved, as background.js and the popup save it
+  }
+  assert.deepEqual(p.flags.map((f) => [f.vin, f.kind, f.why, f.flaggedAt, f.doneAt]), [[RAM, 'takeDown', 'sale-pending', T(0), undefined]]);
+  assert.equal(summarizePilot(p, { now: T(360), labels }).takeDowns.cleared, 0);
+  // Taken down closes it with the hours from the first scan that flagged it
+  p = resolveFlag(p, RAM, null, { at: T(420) });
+  assert.deepEqual(p.flags.map((f) => [f.how, f.hours]), [['manual', 7]]);
+});
+
+// A posted car the website retypes new is a take-down on To do, but no sold
+// car: the pilot agreement lets these numbers time only how long sold cars
+// stayed listed and price changes stayed unfixed, so it gets no flag. A flag
+// the car already had (it was sale-pending first) stays open, not "cleared".
+test('a take-down of a car the website now calls new is not timed as a sold car, and leaves an open flag of the car open', () => {
+  const posted = { [RAM]: { name: '2019 Ram 1500 Classic Express', price: 27163 } };
+  const NEW = { type: 'New', vdp_url: 'https://x.com/inventory/new-2019-ram-1500-x/', extra_fields: { title: 'New 2019 Ram 1500 Classic Express', readable_type: 'New', lightning: { inventoryType: 'New', vdp_title: 'New 2019 Ram 1500 Classic Express' } } };
+  const retyped = (at) => snapshot([['usedNormal', NEW], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']], undefined, at);
+  const diff = diffScans(snapshot(LOT), retyped(T(0)), { posted, confirm: confirmed() });
+  diff.takenAt = T(0);
+  assert.deepEqual(diff.takeDown.map((t) => [t.vin, t.why]), [[RAM, 'not-pre-owned']]);
+  assert.deepEqual(noteFlags(null, diff).flags, []);
+  // sale-pending first (flagged), then retyped new on a complete scan: the flag stays open
+  const pending = snapshot([['usedNormal', { status: 'pend-sale' }], ['certified'], ['usedNoCarfax'], ['usedNoPhotos']], undefined, T(0));
+  const first = diffScans(snapshot(LOT), pending, { posted, confirm: confirmed() });
+  first.takenAt = T(0);
+  let p = noteFlags(null, first);
+  const next = diffScans(pending, retyped(T(180)), { posted, confirm: confirmed() });
+  next.takenAt = T(180);
+  assert.deepEqual([next.warnings, next.unreliable], [[], false]);
+  p = noteFlags(p, next);
+  assert.deepEqual(p.flags.map((f) => [f.vin, f.kind, f.why, f.flaggedAt, f.doneAt]), [[RAM, 'takeDown', 'sale-pending', T(0), undefined]]);
+});
+
+test('a sold car\'s take-down flag stays open while a later scan could not check its page, and is never "cleared" by that', () => {
+  const posted = { [RAM]: { name: '2019 Ram 1500 Classic Express', price: 27163 } };
+  const gone = (at) => snapshot([['certified'], ['usedNoCarfax'], ['usedNoPhotos']], undefined, at);
+  const day2 = gone(T(0));
+  const flagged = diffScans(snapshot(LOT), day2, { posted, confirm: confirmed(RAM) });
+  flagged.takenAt = T(0);
+  let p = noteFlags(null, flagged);
+  assert.deepEqual(p.flags.map((f) => [f.vin, f.kind, f.why]), [[RAM, 'takeDown', 'gone']]);
+  // the next scans: its page answers 500, so this car alone is unchecked; the scan is otherwise complete
+  let prev = day2;
+  for (const at of [T(180), T(360)]) {
+    const now = gone(at);
+    const diff = diffScans(prev, now, { posted, confirm: { checked: [], notFound: [], error: null, unchecked: { [RAM]: 'its page gave HTTP 500' } } });
+    diff.takenAt = at;
+    assert.deepEqual([diff.warnings, diff.takeDown, diff.needsALook.map((n) => [n.vin, n.yours])], [[], [], [[RAM, true]]]);
+    p = noteFlags(p, diff);
+    prev = now;
+  }
+  assert.deepEqual(p.flags.map((f) => [f.vin, f.kind, f.flaggedAt, f.doneAt]), [[RAM, 'takeDown', T(0), undefined]]);
+  // Taken down closes it with the hours from the scan that flagged it
+  p = resolveFlag(p, RAM, null, { at: T(420) });
+  assert.deepEqual(p.flags.map((f) => [f.how, f.hours]), [['manual', 7]]);
 });
 
 test('resolving a flag: seen on the listing, ticked off by hand, or the car unmarked; kind null closes both kinds', () => {
@@ -416,4 +483,35 @@ test('posts and fills older than 90 days go when the next one is recorded; open 
   // a stamp that cannot be read never causes a drop
   const odd = { version: 1, posts: [{ vin: 'X', startedAt: 'garbage' }], fills: [], flags: [] };
   assert.equal(beginPost(odd, { vin: 'Y', at: later(200) }).posts.length, 2);
+});
+
+// "Clear the numbers": an open to-do flag is the item still on To do, and
+// once synced only this flag, closed, closes the dealership's copy.
+test('clearNumbers keeps the to-do items still open and a post under way; finished posts, fills and closed items go', () => {
+  let p = noteFlags(null, { takeDown: [{ vin: RAM, name: 'Ram', yours: true, why: 'gone' }], priceUpdates: [{ vin: WAGONEER, name: 'Wagoneer', yours: true, from: 2, to: 1 }], warnings: [] }, { at: T(0) });
+  p = resolveFlag(p, WAGONEER, 'price', { at: T(30), how: 'manual' });
+  p = beginPost(p, { vin: WAGONEER, name: 'Wagoneer', salesperson: 'Sam', at: T(1) });
+  p = endPost(p, WAGONEER, 'posted', { at: T(2) });
+  p = noteFill(p, { vin: WAGONEER, fill: { filled: [{ key: 'price' }] }, at: T(2) });
+  p = beginPost(p, { vin: RAM, name: 'Ram', salesperson: 'Sam', at: T(40) });
+  const kept = clearNumbers(p);
+  assert.deepEqual(kept.flags, [p.flags[0]], 'the open take-down stays, flagging time and all');
+  assert.deepEqual(kept.posts.map((a) => [a.vin, a.endedAt]), [[RAM, undefined]], 'the post the side panel is still on stays');
+  assert.deepEqual(kept.fills, []);
+  // the open item closes as usual later, from its own flagging time
+  const later = resolveFlag(noteFlags(kept, { takeDown: [{ vin: RAM, name: 'Ram', yours: true, why: 'gone' }], priceUpdates: [], warnings: [] }, { at: T(55) }), RAM, null, { at: T(60), how: 'manual' });
+  assert.deepEqual(later.flags.map((f) => [f.vin, f.flaggedAt, f.doneAt, f.hours]), [[RAM, T(0), T(60), 1]], 'no second flag; one hour from the first scan');
+  assert.equal(hasPilotData(clearNumbers(resolveFlag(p, RAM, null, { at: T(50) }))), true, 'the post under way still');
+  assert.equal(hasPilotData(clearNumbers(endPost(resolveFlag(p, RAM, null, { at: T(50) }), RAM, 'posted', { at: T(51) }))), false, 'nothing open: nothing left');
+});
+
+test('clearNumbers keeps the closed flags it is told to keep (matched by VIN, kind and flagging time), and only those', () => {
+  let p = noteFlags(null, { takeDown: [{ vin: RAM, name: 'Ram', yours: true, why: 'gone' }], priceUpdates: [{ vin: WAGONEER, name: 'Wagoneer', yours: true, from: 2, to: 1 }], warnings: [] }, { at: T(0) });
+  p = resolveFlag(p, RAM, null, { at: T(20), how: 'manual' });
+  p = resolveFlag(p, WAGONEER, null, { at: T(25), how: 'manual' });
+  const ram = structuredClone(p.flags[0]); // as read back from storage: equal, not the same object
+  assert.deepEqual(clearNumbers(p, { keep: [ram] }).flags, [p.flags[0]]);
+  assert.deepEqual(clearNumbers(p, { keep: [{ ...ram, flaggedAt: T(1) }, { ...ram, kind: 'price' }] }).flags, [], 'another flagging time or kind is another item');
+  assert.deepEqual(clearNumbers(p, { keep: 'garbage' }).flags, []);
+  assert.deepEqual(clearNumbers(p, { keep: [null, 7] }).flags, []);
 });

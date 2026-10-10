@@ -3,27 +3,30 @@ import assert from 'node:assert/strict';
 import { generateDescription, rewriteFacts, rewriteWithBackend, guessColorsWithBackend } from '../extension/src/rewriter.js';
 import { SYSTEM_PROMPT, buildRewritePrompt } from '../backend/rewritePrompt.js';
 import { vehicle } from './helpers.js';
+import { readFileSync } from 'node:fs';
 
 const DEALER = { name: 'Ron Lewis Chrysler Dodge Jeep Ram Waynesburg', city: 'Waynesburg', zip: '15370' };
 const ME = { name: 'Roger', title: 'sales consultant' };
 const NOTE = 'Price includes the $490 doc fee; tax and tags extra.';
 const DISCLAIMER = 'Ron Lewis Real Price includes all costs to be paid by a consumer except for licensing costs, registration fees and taxes. Documentation fee of $490 is not included.';
-const on = { rewrite: { enabled: true, endpoint: 'http://localhost:8787/', key: 'secret' } };
+// the service on, and the store the salesperson ticked: the one the website lists the Ram at
+const on = { myStores: [vehicle('usedNormal').location], rewrite: { enabled: true, endpoint: 'http://localhost:8787/', key: 'secret' } };
 
 const args = (extra = {}) => ({
   vehicle: vehicle('usedNormal', { features: ['Backup Camera', 'Bluetooth', 'Keyless Entry', 'Tow Package'], description: `Local trade with new tires.<br>${DISCLAIMER}` }),
   dealer: DEALER, salesperson: ME, priceNote: NOTE, price: 27163, boilerplate: [DISCLAIMER],
-  settings: { rewrite: { enabled: false } },
+  settings: { myStores: on.myStores, rewrite: { enabled: false } },
   ...extra,
 });
 const reply = (status, body) => async () => ({ ok: status < 400, status, json: async () => body });
 
-test('with the service off: the template, with the disclaimer stripped and the write-up kept', async () => {
+test('with the service off: the template, written from the listed facts, with neither the disclaimer nor the write-up copied', async () => {
   const r = await generateDescription(args());
   assert.equal(r.source, 'template');
   assert.ok(r.guardrails.ok, JSON.stringify(r.guardrails.problems));
+  // the write-up, without the disclaimer, is what the service would be sent; the template copies none of it
   assert.deepEqual(r.narrative, ['Local trade with new tires.']);
-  assert.match(r.text, /Local trade with new tires\./);
+  assert.doesNotMatch(r.text, /Local trade/);
   assert.doesNotMatch(r.text, /Documentation fee/);
 });
 
@@ -69,6 +72,26 @@ test('a service error or an unreachable service falls back to the template', asy
   assert.match(b.note, /connection refused/);
 });
 
+test('a Claude draft that drops the salesperson\'s role is not used: the template is shown and the note says why', async () => {
+  const template = (await generateDescription(args())).text;
+  assert.match(template, /sales consultant/);
+  const draft = template.replace(/^I'm Roger, sales consultant at (.+)\.$/m, 'Ask for Roger at $1.');
+  assert.doesNotMatch(draft, /sales consultant/);
+  const r = await generateDescription(args({ settings: on, fetchImpl: reply(200, { ok: true, text: draft }) }));
+  assert.equal(r.source, 'template');
+  assert.match(r.note, /Doesn't give your role \("sales consultant"\)/);
+});
+
+test('with no dealership name set, the service is not asked and the template says what to fix', async () => {
+  let calls = 0;
+  const counting = async () => { calls += 1; return { ok: true, status: 200, json: async () => ({ ok: true, text: 'x' }) }; };
+  const r = await generateDescription(args({ dealer: { name: '', city: '' }, settings: on, fetchImpl: counting }));
+  assert.equal(calls, 0, 'no paid draft that cannot pass');
+  assert.equal(r.source, 'template');
+  assert.match(r.note, /name isn't set in Settings/);
+  assert.ok(r.guardrails.problems.some((p) => p.code === 'no-dealer'));
+});
+
 test('the service is only called when switched on with an address', async () => {
   let calls = 0;
   const counting = async () => { calls += 1; return { ok: true, status: 200, json: async () => ({ ok: true, text: 'x' }) }; };
@@ -77,7 +100,7 @@ test('the service is only called when switched on with an address', async () => 
   assert.equal(calls, 0);
 });
 
-test('only facts leave the browser: no VIN, no Facebook data', () => {
+test('only facts leave the browser: no VIN or price field, no Facebook data', () => {
   const v = vehicle('usedNormal');
   const f = rewriteFacts({ vehicle: v, dealer: DEALER, salesperson: ME, priceNote: NOTE, narrative: ['x'] });
   assert.ok(!('vin' in f));
@@ -88,8 +111,50 @@ test('only facts leave the browser: no VIN, no Facebook data', () => {
   assert.deepEqual(f.salesperson, ME);
 });
 
+test('the website\'s write-up goes to the service as the website wrote it, a VIN, price or phone number in it included', async () => {
+  // what docs/data-inventory.md and the privacy texts say: the VIN and the price are not among the fields,
+  // and the description's own sentences go as the website wrote them; the boilerplate is the only thing taken out
+  const v = vehicle('usedNormal', { description: `Local trade with new tires. VIN: ${vehicle('usedNormal').vin}. Internet price $27,163. Call Dana at 555-201-3344.<br>${DISCLAIMER}` });
+  let body = null;
+  const fetchImpl = async (url, init) => {
+    body = JSON.parse(init.body);
+    return { ok: true, status: 200, json: async () => ({ ok: true, text: '' }) };
+  };
+  const r = await generateDescription(args({ vehicle: v, settings: on, fetchImpl }));
+  assert.ok(body, 'the service was called');
+  assert.ok(!('vin' in body) && !('price' in body), 'no VIN or price field');
+  assert.deepEqual(body.narrative, [r.narrative.join(' ')], 'the write-up\'s lines, unchanged, as one text');
+  const sent = body.narrative.join(' ');
+  for (const part of [v.vin, '$27,163', '555-201-3344', 'Local trade with new tires.']) assert.ok(sent.includes(part), `${part} goes as written`);
+  assert.ok(!sent.includes('Documentation fee'), 'the lot-wide boilerplate does not');
+});
+
+// The write-up's lines go to the service as one text: a sentence the
+// website broke across paragraphs or lines reaches it whole, and the
+// services' checks (which join the list with spaces) read the same words.
+test('a sentence the website broke across paragraphs reaches the rewrite service whole', async () => {
+  const v = vehicle('usedNormal', { description: `<p>Runs great and</p><p>drives like new.</p><p>Local trade.</p><br>${DISCLAIMER}` });
+  let body = null;
+  const fetchImpl = async (url, init) => {
+    body = JSON.parse(init.body);
+    return { ok: true, status: 200, json: async () => ({ ok: true, text: '' }) };
+  };
+  const r = await generateDescription(args({ vehicle: v, settings: on, fetchImpl }));
+  assert.deepEqual(r.narrative, ['Runs great and', 'drives like new.', 'Local trade.'], 'the lines as the website lays them out');
+  assert.deepEqual(body.narrative, ['Runs great and drives like new. Local trade.'], 'one text, no half sentence on its own');
+  assert.deepEqual(rewriteFacts({ vehicle: v, narrative: [] }).narrative, [], 'no write-up: nothing');
+  assert.deepEqual(rewriteFacts({ vehicle: v, narrative: ['', '  '] }).narrative, []);
+});
+
 test('the service system prompt names no real person or dealer', () => {
   assert.doesNotMatch(SYSTEM_PROMPT, /Ron Lewis|Waynesburg|Roger/);
+});
+
+test('the service system prompt asks for none of the claims the checks refuse unless the facts make them', () => {
+  const rule = SYSTEM_PROMPT.split('\n').find((l) => l.startsWith('- Use only facts from the JSON.'));
+  for (const what of ['condition', 'service history', 'previous owners', 'how or where it was driven', 'where it came from', 'accidents', 'tires', 'keys', 'title', 'financing', 'warranty']) {
+    assert.ok(rule.includes(what), what);
+  }
 });
 
 test('the service user prompt tells Claude the exact sign-off, built from the facts', () => {
@@ -100,6 +165,9 @@ test('the service user prompt tells Claude the exact sign-off, built from the fa
   // no name: the same form the template writer uses
   const anon = buildRewritePrompt({ ...facts, salesperson: { name: '', title: 'sales consultant' } });
   assert.match(anon.user, /Sign off with exactly: "Sales consultant at Test Motors\."/);
+  // a title that starts with an emoji or a mark: the template's line too (signOffLine)
+  assert.match(buildRewritePrompt({ ...facts, salesperson: { name: '', title: '\u{1F697} sales pro' } }).user, /Sign off with exactly: "\u{1F697} Sales pro at Test Motors\."/u);
+  assert.match(buildRewritePrompt({ ...facts, salesperson: { name: '', title: ', sales' } }).user, /Sign off with exactly: "I'm the , sales at Test Motors\."/);
   // the line survives a regeneration with fixes
   const again = buildRewritePrompt(facts, ['too long']);
   assert.match(again.user, /I'm Dana, sales consultant at Test Motors\./);
@@ -137,4 +205,170 @@ test('the salesperson\'s highlights are the features the service sees', async ()
   const all = rewriteFacts({ vehicle: vehicle('usedNormal', { features: ['Backup Camera', 'Bluetooth'] }) });
   assert.deepEqual(all.features, ['Backup Camera', 'Bluetooth'], 'no pick: the whole list, as before');
   assert.ok(!('highlightsPicked' in all));
+});
+
+test('a Claude draft that drops the salesperson\'s role falls back to the template, which states it', async () => {
+  const example = { name: 'Example Motors', city: 'Springfield' };
+  const specialist = { name: 'Sam', title: 'product specialist' };
+  const base = args({ dealer: example, salesperson: specialist, priceNote: '' });
+  const template = (await generateDescription(base)).text;
+  assert.match(template, /I'm Sam, product specialist at Example Motors\./);
+  const roleless = template.replace("I'm Sam, product specialist at Example Motors.", "I'm Sam at Example Motors.");
+  const r = await generateDescription({ ...base, settings: on, fetchImpl: reply(200, { ok: true, text: roleless }) });
+  assert.equal(r.source, 'template');
+  assert.match(r.note, /Doesn't give your role \("product specialist"\)/);
+  // the role the salesperson set in Settings is the one looked for, not the default
+  const other = template.replace('product specialist', 'sales consultant');
+  const o = await generateDescription({ ...base, settings: on, fetchImpl: reply(200, { ok: true, text: other }) });
+  assert.equal(o.source, 'template');
+  // with the role, the draft is used
+  const fine = await generateDescription({ ...base, settings: on, fetchImpl: reply(200, { ok: true, text: template.replace('Highlights:', 'What I like:') }) });
+  assert.equal(fine.source, 'claude', fine.note);
+});
+
+// Drafts a rewrite could write that only look honest: each number is one the
+// website has, but in the wrong place (the model's "1500" as the mileage, the
+// year as a price), or the words are wrong (a number spelled out, care the
+// website never mentions, no role, a seller who is not the dealership). Every
+// one falls back to the template, and the note says why.
+test('a Claude draft with a wrong number, an invented fact, no role or a private-seller pose falls back to the template', async () => {
+  const example = { name: 'Example Motors', city: 'Springfield' };
+  const dana = { name: 'Dana', title: 'sales consultant' };
+  const base = args({ dealer: example, salesperson: dana, priceNote: '' }); // the 2019 Ram 1500 Classic, 20,986 miles, posted at 27,163
+  const template = (await generateDescription(base)).text;
+  const signoff = "I'm Dana, sales consultant at Example Motors.";
+  assert.ok(template.includes('with 20,986 miles') && template.includes(signoff) && /^Pre-owned and on the lot at .*$/m.test(template), template);
+  const drafts = {
+    '1,500 miles (the model\'s number)': [template.replace('20,986 miles', '1,500 miles'), /Says 1,500 miles, but the website shows 20,986 miles/],
+    '$2,019 (the year)': [template.replace('Highlights:', 'Priced at just $2,019 this week.\nHighlights:'), /Says \$2,019, but this listing's price is \$27,163/],
+    'a mileage in words': [template.replace('with 20,986 miles', 'with only twelve thousand miles'), /"twelve thousand" isn't in the website's data/],
+    'care the website never mentions': [template.replace('Highlights:', 'Garage kept, non-smoker, full service records.\nHighlights:'), /Says "Garage kept"/],
+    'no role': [template.replace(signoff, 'Ask for Dana at Example Motors.'), /Doesn't give your role \("sales consultant"\)/],
+    'the owner\'s seller, no role': [template.replace(/^Pre-owned and on the lot at .*\n/m, '').replace(signoff, "I'm Dana. Selling this truck for the owner, text me. Message me directly, not the dealership."), /Doesn't give your role/],
+    'the owner\'s seller, role kept': [template.replace(/^Pre-owned and on the lot at .*\n/m, '').replace(signoff, `${signoff} Selling this truck for the owner, text me. Message me directly, not the dealership.`), /Says "not the dealership"/],
+  };
+  for (const [what, [draft, why]] of Object.entries(drafts)) {
+    assert.notEqual(draft, template, what);
+    const r = await generateDescription({ ...base, settings: on, fetchImpl: reply(200, { ok: true, text: draft }) });
+    assert.equal(r.source, 'template', what);
+    assert.match(r.note, why, what);
+    assert.equal(r.text, template, what);
+  }
+});
+
+test('on a one-owner car, a Claude draft that hides a claim inside the one-owner wording falls back to the template', async () => {
+  const base = args({ dealer: { name: 'Example Motors', city: 'Springfield' }, salesperson: { name: 'Dana', title: 'sales consultant' }, priceNote: '' });
+  base.vehicle = { ...base.vehicle, carfaxOneOwner: true };
+  const template = (await generateDescription(base)).text;
+  assert.match(template, /One owner according to the Carfax report\./);
+  const drafts = {
+    'One damage-free owner.': /Says "damage", but the website says nothing about accident, damage or title history/,
+    'One non-smoking owner.': /Says "non-smoking"/,
+    'One adult owner.': /Says "One adult owner", but the website says nothing about its owners/,
+  };
+  for (const [sentence, why] of Object.entries(drafts)) {
+    const draft = template.replace('One owner according to the Carfax report.', `${sentence} One owner according to the Carfax report.`);
+    const r = await generateDescription({ ...base, settings: on, fetchImpl: reply(200, { ok: true, text: draft }) });
+    assert.equal(r.source, 'template', sentence);
+    assert.match(r.note, why, sentence);
+  }
+  // the count alone is the Carfax flag's, so that draft is used
+  const counted = template.replace('One owner according to the Carfax report.', 'Just one previous owner, according to the Carfax report.');
+  const kept = await generateDescription({ ...base, settings: on, fetchImpl: reply(200, { ok: true, text: counted }) });
+  assert.equal(kept.source, 'claude', kept.note);
+});
+
+test('a Claude draft that drops the dealership\'s price note falls back to the template, which carries it', async () => {
+  const example = { name: 'Example Motors', city: 'Springfield' };
+  const note = 'Price is before the $490 doc fee; tax and tags extra.';
+  const base = args({ dealer: example, priceNote: note, price: 26673 });
+  const template = (await generateDescription(base)).text;
+  assert.ok(template.includes(note));
+  const noteless = template.replace(`${note}\n`, '').replace('Highlights:', 'What I like about it:') + '\nHappy to set up a time for you to see it.';
+  const r = await generateDescription({ ...base, settings: on, fetchImpl: reply(200, { ok: true, text: noteless }) });
+  assert.equal(r.source, 'template');
+  assert.match(r.note, /Doesn't include your dealership's price note/);
+  assert.ok(r.text.includes(note));
+  // with the note, the same draft is used
+  const kept = await generateDescription({ ...base, settings: on, fetchImpl: reply(200, { ok: true, text: template.replace('Highlights:', 'What I like about it:') }) });
+  assert.equal(kept.source, 'claude', kept.note);
+});
+
+test('nothing about the car\'s type leaves the browser, so the service lets a draft say certified only as the write-up or features do', () => {
+  for (const v of [vehicle('usedNormal'), vehicle('certified')]) {
+    const f = rewriteFacts({ vehicle: v });
+    for (const k of ['inventoryType', 'readableType', 'urlConditionWord', 'siteTitle', 'certified']) assert.ok(!(k in f), k);
+  }
+});
+
+test('a Claude draft that adds parts to the one the write-up names falls back to the template', async () => {
+  const example = { name: 'Example Motors', city: 'Springfield' };
+  const base = args({ dealer: example, priceNote: '' });
+  const template = (await generateDescription(base)).text;
+  const more = template.replace('\n', '\nLocal trade with new tires and new brakes, plus a new battery.\n');
+  assert.notEqual(more, template);
+  const r = await generateDescription({ ...base, settings: on, fetchImpl: reply(200, { ok: true, text: more }) });
+  assert.equal(r.source, 'template');
+  assert.match(r.note, /Says "new brakes"/);
+  assert.match(r.note, /Says "new battery"/);
+  assert.equal(r.text, template);
+});
+
+test('for a car the website lists at a store in another town, the template names its store and the service is not asked', async () => {
+  const group = { name: 'Sample Auto Group', city: 'Springfield', zip: '00000' };
+  let calls = 0;
+  const counting = async () => { calls += 1; return { ok: true, status: 200, json: async () => ({ ok: true, text: 'unused' }) }; };
+  const away = args({ vehicle: { ...args().vehicle, location: 'Sample Chevrolet Shelbyville' }, dealer: group, priceNote: '' });
+  for (const myStores of [[], ['Sample Ford Springfield', 'Sample Chevrolet Shelbyville']]) {
+    const r = await generateDescription({ ...away, settings: { ...on, myStores }, fetchImpl: counting });
+    assert.equal(r.source, 'template');
+    assert.match(r.text, /on the lot at Sample Chevrolet Shelbyville\./);
+    assert.doesNotMatch(r.text, /Springfield/);
+    assert.match(r.note, /lists this car at Sample Chevrolet Shelbyville, which may not be at your dealership's address/);
+    assert.ok(r.guardrails.ok, JSON.stringify(r.guardrails.problems));
+  }
+  assert.equal(calls, 0, 'nothing was sent');
+  // a store in the dealership's own town, or the one store ticked: the service is asked as before
+  const home = args({ vehicle: { ...args().vehicle, location: 'Sample Ford Springfield' }, dealer: group, priceNote: '' });
+  await generateDescription({ ...home, settings: { ...on, myStores: [] }, fetchImpl: counting });
+  await generateDescription({ ...away, settings: { ...on, myStores: ['Sample Chevrolet Shelbyville'] }, fetchImpl: counting });
+  assert.equal(calls, 2);
+});
+
+test('on a website whose cars are all at one store, the service is asked even when the store name does not name the town', async () => {
+  const site = { name: 'Smith Auto Sales', city: 'Springfield', zip: '00000' };
+  let calls = 0;
+  const counting = async () => { calls += 1; return { ok: true, status: 200, json: async () => ({ ok: false }) }; };
+  const car = args({ vehicle: { ...args().vehicle, location: 'Smith Motors' }, dealer: site, priceNote: '' });
+  const r = await generateDescription({ ...car, settings: { ...on, myStores: [] }, lot: ['Smith Motors'], fetchImpl: counting });
+  assert.equal(calls, 1, 'the one store is the dealership: the service was asked');
+  assert.doesNotMatch(r.note || '', /may not be at your dealership's address/);
+  // a second store on the website: the template, as for any car that may be elsewhere
+  const two = await generateDescription({ ...car, settings: { ...on, myStores: [] }, lot: ['Smith Motors', 'Jones Ford Shelbyville'], fetchImpl: counting });
+  assert.equal(calls, 1);
+  assert.match(two.note, /lists this car at Smith Motors, which may not be at your dealership's address/);
+});
+
+// README and help said a car's description names its store "never your
+// dealership's town"; on a website whose cars are all at one store the
+// service is asked, and it knows the dealership's name and town, not the
+// store's, so its draft can say the car is at the dealership in its town.
+test('the README and help say the template names a car\'s store, and when the rewrite service writes from the dealership\'s name and town instead', async () => {
+  const site = { name: 'Smith Auto Sales', city: 'Springfield', zip: '00000' };
+  const car = args({ vehicle: { ...args().vehicle, location: 'Smith Motors' }, dealer: site, priceNote: '' });
+  const template = (await generateDescription({ ...car, settings: { myStores: [] } })).text;
+  assert.match(template, /at Smith Motors\./);
+  assert.doesNotMatch(template, /Springfield/);
+  const draft = template.replace('at Smith Motors.', 'at Smith Auto Sales in Springfield.');
+  const r = await generateDescription({ ...car, settings: { ...on, myStores: [] }, lot: ['Smith Motors'], fetchImpl: reply(200, { ok: true, text: draft }) });
+  assert.equal(r.source, 'claude', JSON.stringify(r.guardrails.problems));
+  assert.match(r.text, /at Smith Auto Sales in Springfield\./, "the one store's car is described at the dealership in its town");
+  const said = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8').split(/(?<=[.;])\s/).filter((x) => /names the store the website lists/.test(x));
+  for (const rel of ['../README.md', '../docs/help.md']) {
+    const text = readFileSync(new URL(rel, import.meta.url), 'utf8');
+    assert.doesNotMatch(text, /never (?:your|this) dealership's town/, `${rel} says a description never names the dealership's town`);
+    assert.ok(said(rel).length, `${rel} says which description names the car's store`);
+    for (const x of said(rel)) assert.match(x, /the template's description/, `${rel}: ${x}`);
+    assert.match(text, /otherwise \(the store's name names your town, or every car on the website is at that one store\) the rewrite service, when it is on, writes the draft, and it knows your dealership's name and town, not the store's/i, `${rel} says when the rewrite service writes the draft`);
+  }
 });

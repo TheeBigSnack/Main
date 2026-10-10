@@ -84,18 +84,35 @@ export const net = {
 };
 export const NETWORK_ERROR = Symbol('network error');
 
+// A request's signal is honoured as the real fetch honours it: an answer
+// that has not come back when the signal aborts never does, the call is
+// marked `aborted`, and fetch rejects with the signal's reason. A route may
+// answer with a promise, to stand for a slow upstream.
+const stopped = (signal) => new Promise((_, reject) => {
+  if (!signal) return;
+  if (signal.aborted) reject(signal.reason);
+  else signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+});
+
 globalThis.fetch = async function fakeFetch(input, init = undefined) {
   const req = new Request(input, init);
   const url = new URL(req.url);
   const body = ['GET', 'HEAD'].includes(req.method) ? '' : await req.text();
-  const call = { url: req.url, host: url.host, path: url.pathname, query: url.searchParams, method: req.method, headers: Object.fromEntries(req.headers), body };
+  const call = { url: req.url, host: url.host, path: url.pathname, query: url.searchParams, method: req.method, headers: Object.fromEntries(req.headers), body, aborted: false };
   net.calls.push(call);
   const answer = routes.get(url.host);
   if (!answer) {
     net.unexpected.push(req.url);
     throw new TypeError(`fetch refused: the function tests never reach the network (${req.method} ${req.url})`);
   }
-  const out = await answer(call);
+  const signal = init && init.signal ? init.signal : null;
+  let out;
+  try {
+    out = await Promise.race([Promise.resolve(answer(call)), stopped(signal)]);
+  } catch (e) {
+    if (signal && signal.aborted) call.aborted = true;
+    throw e;
+  }
   if (out === NETWORK_ERROR) throw new TypeError('fetch failed');
   if (out instanceof Response) return out;
   return new Response(out.body === undefined ? '{}' : JSON.stringify(out.body), { status: out.status ?? 200, headers: { 'content-type': 'application/json', ...(out.headers || {}) } });
@@ -114,15 +131,16 @@ const quiet = { log: console.log, error: console.error, warn: console.warn };
  *   token:   sent as Authorization: Bearer <token>
  *   origin:  the Origin header (default: the extension's)
  *   body:    sent as JSON; `raw` sends that text exactly instead
+ *   signal:  the caller's own signal (aborting it is the caller going away)
  * @returns {{ status, headers, body, text }} body is the parsed JSON, or null
  */
-export async function invoke(handler, { method = 'POST', path = '', token = '', origin = EXTENSION_ORIGIN, body = undefined, raw = undefined, headers = {} } = {}) {
+export async function invoke(handler, { method = 'POST', path = '', token = '', origin = EXTENSION_ORIGIN, body = undefined, raw = undefined, headers = {}, signal = undefined } = {}) {
   const h = { ...(origin ? { Origin: origin } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}), apikey: ANON_KEY, ...headers };
   let payload;
   if (raw !== undefined) payload = raw;
   else if (body !== undefined) payload = JSON.stringify(body);
   if (payload !== undefined && !Object.keys(h).some((k) => k.toLowerCase() === 'content-type')) h['Content-Type'] = 'application/json';
-  const req = new Request(`${SUPABASE_URL}/functions/v1/${path}`, { method, headers: h, body: payload });
+  const req = new Request(`${SUPABASE_URL}/functions/v1/${path}`, { method, headers: h, body: payload, ...(signal ? { signal } : {}) });
   console.log = (...a) => logs.push(a.map(String).join(' '));
   console.error = console.log;
   console.warn = console.log;

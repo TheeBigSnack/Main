@@ -78,19 +78,20 @@
       <div class="wrap narrow">
         <h2 id="numbers-h">The numbers</h2>
         <ul class="plain">
-          <li><b>Salespeople</b>: for each person, posted this week (the last 7 days), all time, the median seconds per post (from the click on Post to "It's posted", their own review and Publish click included), listings up and taken down.</li>
-          <li><b>Sold cars still listed</b>: each car a rescan flagged as sold whose listing is still up, with how long it has been open, longest first. The salesperson sees the same item on their To do tab.</li>
+          <li><b>Salespeople</b>: for each person, posted this week (the last 7 days), all time, the median seconds per post (from the click on Post to "It's posted", their own review and Publish click included), listings up and taken down. A listing a salesperson marks posted as "Before today" (already on Facebook before they marked it) is no post: it is left out of this week and all time, counted under listings up or taken down, and counted apart in the CSV.</li>
+          <li><b>Sold cars still listed</b>: each car a rescan flagged as sold whose listing is still up, with how long it has been open, longest first. The salesperson sees the same item on their To do tab. The rescan that flags a car runs on the poster's own computer, so a salesperson whose Chrome stays closed is flagged when it next runs.</li>
           <li><b>Price changes not yet updated</b>: each listing whose price no longer matches the website, with the listing price next to the website price and how long it has been open.</li>
+          <li><b>Listed by people no longer on the team</b>: cars still marked listed by someone removed from the team. Nobody's rescans check them, so they are listed for you to chase.</li>
           <li><b>Download CSV</b>: the same numbers, with their definitions, for a spreadsheet.</li>
         </ul>
-        <p>They are the numbers the salespeople's own Numbers tab keeps: how long each post took, which form fields could not be filled, and how long sold cars and price changes stayed on a listing. Never buyers, messages, the description text or anything from a Facebook account beyond the person's own listings. The page says when the last scan ran; with automatic rescans allowed, they run every 3 hours while a salesperson's Chrome is open.</p>
+        <p>They come from the same records as the salespeople's own Numbers tab: how long each post took and how long sold cars and price changes stayed on a listing, each with the car's name and VIN and who posted it, and for a price change the website's old and new price; the CSV also lists each listing's price and the listing link the salesperson saved. Which form fields could not be filled is not synced: it stays in each salesperson's own browser, on their Numbers tab, so the manager view does not show it. Never buyers, messages, the description text or anything from a Facebook account beyond the person's own listings. The page says when the last scan Lot Current trusted ran: with automatic rescans allowed, they run every 3 hours while a salesperson's Chrome is open, and a rescan that looks like a website hiccup (most of the lot gone at once) is held back and never shown as the last scan: the page says how many later scans were held back beside the last trusted one.</p>
       </div>
     </section>
 
     <section aria-labelledby="start-h">
       <div class="wrap narrow">
         <h2 id="start-h">Getting started</h2>
-        <p>Four steps above the other cards, each marked Done or To do with one sentence: <b>Start the free pilot or subscribe</b>; <b>Invite your salespeople</b>; <b>First car posted and synced</b>; <b>Two salespeople posting</b> (two different salespeople posted in the past 7 days; a manager's own posts don't count). Once all four are done, the card shrinks to one line.</p>
+        <p>Four steps above the other cards, each marked Done or To do with one sentence: <b>Start the free pilot</b>, which asks for no card (once paying by card opens, the step reads <b>Start the free pilot or subscribe</b>, and only subscribing goes to Stripe's pages); <b>Invite your salespeople</b>; <b>First car posted and synced</b>; <b>Two salespeople posting</b> (two different salespeople of the dealership posted in the past 7 days; a manager's own posts don't count, nor do those of someone no longer in the dealership). Once all four are done, the card shrinks to one line.</p>
       </div>
     </section>
 
@@ -104,21 +105,21 @@
     <section aria-labelledby="team-h">
       <div class="wrap narrow">
         <h2 id="team-h">Team</h2>
-        <p>Everyone in the dealership's account. <b>Make manager</b> and <b>Make salesperson</b> change a role; <b>Remove</b> takes two clicks and stops that person's extension from syncing (the cars they posted stay in the numbers). A dealership always keeps at least one manager, so make someone else a manager before you step down or leave.</p>
+        <p>Everyone in the dealership's account. <b>Make manager</b> and <b>Make salesperson</b> change a role; <b>Remove</b> takes two clicks and stops that person's extension from syncing (the cars they posted stay in the numbers, and any they still have listed show under <b>Listed by people no longer on the team</b>). A dealership always keeps at least one manager, so make someone else a manager before you step down or leave.</p>
       </div>
     </section>
 
     <section aria-labelledby="billing-h">
       <div class="wrap narrow">
         <h2 id="billing-h">Billing</h2>
-        <p>Billing opens with the manager view; until then nobody is charged. It will show where the dealership's plan stands: no plan yet, the free pilot with the days left, subscribed with the seats paid for, or lapsed. <b>Start the free pilot</b>, <b>Subscribe</b> and <b>Manage billing</b> open Stripe's own pages for the card and the invoices, and Checkout shows the price before you pay. Each person with the salesperson role takes a seat; managers don't. Lot Current never adds seats or changes what you pay on its own. When a plan has lapsed, salespeople can still post by hand, but nothing syncs and the description writer is off until it is renewed. The planned prices are on the <a href="../pricing/">pricing page</a>.</p>
+        <p>Paying by card is not open yet, so nobody is charged; until it opens, a manager can still start the free pilot here, with no card. The card shows where the dealership's plan stands: no plan yet, the free pilot with the days left, subscribed with the seats paid for, cancelled with the day it ends, or lapsed. Once paying by card opens, <b>Subscribe</b> and <b>Manage billing</b> open Stripe's own pages for the card and the invoices, and Checkout shows the price before you pay. Each person with the salesperson role takes a seat; managers don't. Lot Current never adds seats or changes what you pay on its own. When a plan has lapsed, salespeople can still post by hand, but nothing syncs and the description writer is off until it is renewed. The planned prices are on the <a href="../pricing/">pricing page</a>.</p>
       </div>
     </section>
 
     <section aria-labelledby="cap-h">
       <div class="wrap narrow">
         <h2 id="cap-h">The daily cap</h2>
-        <p>Each salesperson may record a set number of posts a day, 10 unless your dealership changes it in the extension's Settings (Safety, Posts per day, per salesperson). At the cap the Post buttons go away until tomorrow. It is a safety setting, not a guarantee of anything from Facebook; Meta does not publish its limits.</p>
+        <p>Each salesperson may record a set number of posts a day, 10 unless changed. Your dealership chooses the number, and each salesperson enters it in their own extension's Settings (Safety, Posts per day, per salesperson), up to 100; the manager view does not set or lock it. At the cap the Post buttons go away until tomorrow. It is a safety setting, not a guarantee of anything from Facebook; Meta does not publish its limits.</p>
       </div>
     </section>
 

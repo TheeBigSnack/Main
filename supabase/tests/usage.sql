@@ -14,6 +14,10 @@
 --   C           none    nobody and nothing: the row of zeros
 --   D           lapsed  d_mgr manager, a closed to-do item and an old scan
 --
+-- A also holds a scan stamped a month ahead (a machine whose clock ran
+-- ahead, stored before /sync refused such scans): last_synced_scan_at
+-- leaves out a scan more than 5 minutes ahead of the database's clock.
+--
 -- now() is the same all through one transaction, so "exactly 7 days ago"
 -- here is exactly what the report's default since is.
 --
@@ -23,7 +27,11 @@
 -- window includes since and excludes a microsecond before it, for posts
 -- and rewrite calls alike, and a null since counts everything; the plan
 -- matches subscription_state(); the rows come busiest first, then by name;
--- a dealership with no activity has its row, with zeros; public, anon,
+-- a dealership with no activity has its row, with zeros; a scan stamped
+-- more than 5 minutes ahead of the database's clock is never
+-- last_synced_scan_at, while a scan held back as a likely website hiccup
+-- is; a listing marked as made by hand before that day
+-- (listed_before) is no post and makes no one active; public, anon,
 -- authenticated and service_role cannot execute it, and it runs as its
 -- caller with an empty search_path.
 
@@ -130,6 +138,8 @@ insert into public.todo_items (dealership_id, vin, kind, name, flagged_at, done_
 insert into public.scan_summaries (dealership_id, website_origin, taken_at, cars, ready, take_down_count, price_update_count) values
   (:'dealer_a', 'https://www.usage-a.test', now() - interval '2 days',   40, 30, 0, 0),
   (:'dealer_a', 'https://www.usage-a.test', now() - interval '3 hours',  41, 31, 1, 2),
+  -- stored from a machine whose clock ran a month ahead: it must not pin A's last scan
+  (:'dealer_a', 'https://www.usage-a.test', now() + interval '30 days',  41, 31, 0, 0),
   (:'dealer_b', 'https://www.usage-b.test', now() - interval '20 minutes', 90, 70, 0, 1),
   (:'dealer_d', 'https://www.usage-d.test', now() - interval '40 days',  12, 9, 0, 0);
 
@@ -177,7 +187,7 @@ $$;
 -- manager, a_gone is no longer a member, x_both posted only in B); 5 posts
 -- (a_s1's two, a_s3's, a_mgr's, a_gone's); 3 cars up (A1 twice, A2, A4);
 -- one sold car still listed, two price changes, the oldest open 30 hours;
--- its newest scan 3 hours ago; 2 rewrite calls (the one at the window's
+-- its newest scan 3 hours ago (not the one a month ahead); 2 rewrite calls (the one at the window's
 -- start, the one an hour ago; not the one a microsecond early, not the
 -- color call). B: b_s1, b_s2 and x_both; 4 posts in the window.
 -- ---------------------------------------------------------------------------
@@ -283,6 +293,91 @@ begin
     raise exception 'a dealership with no activity has a time or a plan: %', to_jsonb(r);
   end if;
   raise notice 'ok: the plan is subscription_state()''s, the dates are the subscription''s, and a quiet dealership reads zeros';
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- last_synced_scan_at and the clock: a scan more than 5 minutes ahead of the
+-- database's clock is left out, one within 5 minutes (ordinary drift) counts
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  c uuid := '00000000-0000-4000-8000-0000000000d3';
+  r record;
+begin
+  insert into public.scan_summaries (dealership_id, website_origin, taken_at, cars, ready, take_down_count, price_update_count)
+    values (c, 'https://www.usage-c.test', now() + interval '5 minutes' + interval '1 microsecond', 5, 4, 0, 0);
+  select * into r from public.usage_report() u where u.dealership_id = c;
+  if r.last_synced_scan_at is not null then
+    raise exception 'a scan stamped just over 5 minutes ahead is the last synced scan: %', r.last_synced_scan_at;
+  end if;
+  insert into public.scan_summaries (dealership_id, website_origin, taken_at, cars, ready, take_down_count, price_update_count)
+    values (c, 'https://www.usage-c.test', now() + interval '5 minutes', 5, 4, 0, 0);
+  select * into r from public.usage_report() u where u.dealership_id = c;
+  if r.last_synced_scan_at is distinct from now() + interval '5 minutes' then
+    raise exception 'a scan stamped 5 minutes ahead (ordinary drift) is not the last synced scan: %', r.last_synced_scan_at;
+  end if;
+  raise notice 'ok: last_synced_scan_at leaves out a scan more than 5 minutes ahead of the database''s clock';
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- A scan held back as a likely website hiccup (withheld,
+-- 0016_r-scan_scan_withheld.sql) is still a scan the extension synced: it
+-- counts in last_synced_scan_at, which says whether anyone's extension still
+-- runs and syncs. The manager's Last scan, which skips it, asks something
+-- else: when the lot was last read in a way the extension trusted. C's scans
+-- so far go; a trusted scan an hour ago and a held-back one ten minutes ago
+-- go in, and the held-back one is the last synced scan.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  c uuid := '00000000-0000-4000-8000-0000000000d3';
+  r record;
+begin
+  delete from public.scan_summaries where dealership_id = c;
+  insert into public.scan_summaries (dealership_id, website_origin, taken_at, cars, ready, take_down_count, price_update_count, withheld)
+    values (c, 'https://www.usage-c.test', now() - interval '1 hour', 40, 30, 0, 0, false),
+           (c, 'https://www.usage-c.test', now() - interval '10 minutes', 4, 3, 0, 0, true);
+  select * into r from public.usage_report() u where u.dealership_id = c;
+  if r.last_synced_scan_at is distinct from now() - interval '10 minutes' then
+    raise exception 'a held-back scan is not the last synced scan: %', r.last_synced_scan_at;
+  end if;
+  raise notice 'ok: a scan held back as a likely website hiccup counts as the last synced scan';
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- A listing marked as made by hand before that day (listed_before,
+-- 0012_posting_listed_before.sql) is not a post: it adds nothing to posts
+-- and makes no one an active salesperson, but the car is listed now. a_s2
+-- (not active in the window) marks two such listings an hour ago, a_s1 one
+-- (already active); B's b_s1 marks one. Then the rows go.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  a uuid := '00000000-0000-4000-8000-0000000000d1';
+  b uuid := '00000000-0000-4000-8000-0000000000d2';
+  a_s1 uuid := '00000000-0000-4000-8000-0000000000a1';
+  a_s2 uuid := '00000000-0000-4000-8000-0000000000a3';
+  b_s1 uuid := '00000000-0000-4000-8000-0000000000b1';
+  r record;
+begin
+  insert into public.listings (dealership_id, user_id, vin, name, price, posted_at, salesperson, status, taken_down_at, listed_before) values
+    (a, a_s2, 'TESTVINA00000011', 'Car A11', 25000, now() - interval '1 hour', 'Casey', 'listed', null, true),
+    (a, a_s2, 'TESTVINA00000012', 'Car A12', 26000, now() - interval '1 hour', 'Casey', 'listed', null, true),
+    (a, a_s1, 'TESTVINA00000013', 'Car A13', 27000, now() - interval '1 hour', 'Alex',  'taken_down', now() - interval '5 minutes', true),
+    (b, b_s1, 'TESTVINB00000011', 'Car B11', 35000, now() - interval '1 hour', 'Robin', 'listed', null, true);
+  select * into r from public.usage_report() u where u.dealership_id = a;
+  if (r.active_salespeople, r.posts, r.cars_listed_now) is distinct from (2, 5, 5) then
+    raise exception 'listings marked as made before that day count as posts: A reads % active, % posts, % cars listed (want 2, 5, 5)', r.active_salespeople, r.posts, r.cars_listed_now;
+  end if;
+  select * into r from public.usage_report(null) u where u.dealership_id = b;
+  if (r.active_salespeople, r.posts, r.cars_listed_now) is distinct from (3, 5, 5) then
+    raise exception 'listings marked as made before that day count as posts: B reads % active, % posts, % cars listed (want 3, 5, 5)', r.active_salespeople, r.posts, r.cars_listed_now;
+  end if;
+  delete from public.listings l where l.listed_before;
+  raise notice 'ok: a listing marked as made before that day is no post and makes no one active; its car is listed';
 end;
 $$;
 

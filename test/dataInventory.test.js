@@ -26,6 +26,7 @@ import { noteFlags } from '../extension/src/pilot.js';
 import { neededPatterns } from '../extension/src/photoHosts.js';
 import schemaOrg from '../extension/adapters/schemaOrg.js';
 import { SITE } from '../site/config.js';
+import { stripComments as stripAllComments } from './helpers.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 // The website's own host once siteUrl is set: the pages name it in their
@@ -38,9 +39,9 @@ const storeTexts = read('legal/chrome-web-store-privacy.md');
 const questions = read('legal/questions-for-attorney.md');
 const sorted = (xs) => [...new Set(xs)].sort();
 
-// The same comment stripper as test/anyDealer.test.js: whole-line and
+// The same comment stripper as test/anyDealer.test.js (test/helpers.js): whole-line and
 // trailing // comments (never the // of an address) and block comments.
-const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/([^:'"`])\/\/[^\n]*$/gm, '$1');
+const stripComments = (src) => stripAllComments(src, { trailing: true });
 const stripHtmlComments = (src) => src.replace(/<!--[\s\S]*?-->/g, '');
 
 function walk(dir, out = []) {
@@ -54,9 +55,17 @@ function walk(dir, out = []) {
 
 // The code that ships: the extension, the manager view, the website and the
 // Edge Functions (backend/ talks to Anthropic through its SDK and names no host).
+// manager/vendor/ is left out: it is supabase-js's own build, served next to
+// the page instead of from a CDN, unchanged and pinned by its hash
+// (test/manager.test.js). Its text names hosts in error messages it never
+// contacts and storage of features the page does not use; what it does for
+// the page (the session in localStorage, the calls to the project) is in the
+// manager view's rows, as it was when a CDN served it.
+const VENDORED = /^manager\/vendor\//;
 const SHIPPED = [...walk('extension'), ...walk('manager'), ...walk('site'), ...walk('supabase/functions'), ...walk('backend')]
   .filter((f) => /\.(js|mjs|ts|html)$/.test(f) || f === 'extension/manifest.json')
-  .filter((f) => !/package(-lock)?\.json$/.test(f));
+  .filter((f) => !/package(-lock)?\.json$/.test(f))
+  .filter((f) => !VENDORED.test(f));
 const source = (f) => (/\.html$/.test(f) ? stripHtmlComments(read(f)) : /\.json$/.test(f) ? read(f) : stripComments(read(f)));
 
 // The text from a heading to the next heading of the same or a higher level.
@@ -303,7 +312,7 @@ test('the rewrite service gets exactly the fields "Exactly what reaches Anthropi
   // the self-hosted backend/ takes the same body, so it must drop origin too
   const server = stripComments(read('backend/server.js'));
   const strip = server.indexOf('delete facts.origin;');
-  assert.ok(strip > 0 && strip < server.indexOf('await rewrite(facts)'), 'backend/server.js no longer removes origin before the facts reach Anthropic: update the inventory and the privacy policy');
+  assert.ok(strip > 0 && strip < server.indexOf('await rewrite(facts, clock)'), 'backend/server.js no longer removes origin before the facts reach Anthropic: update the inventory and the privacy policy');
   const t = tables(section(inventory, '## What leaves the browser'))[0];
   const row = t.rows.find((r) => r[0].startsWith('Description writer'));
   assert.ok(row && row[column(t, 'What is sent')].includes('`origin`'), 'the Description writer row does not name origin');
@@ -319,6 +328,16 @@ test('the rewrite service gets exactly the fields "Exactly what reaches Anthropi
   assert.ok(bullets.length >= 4);
   const listed = bullets.flatMap((l) => [...l.matchAll(/`([^`]+)`/g)].map((m) => m[1]));
   assert.deepEqual(sorted(listed), sorted(sent), 'the fields the extension sends are not the fields docs/data-inventory.md lists');
+});
+
+test('the rewrite services\' READMEs and the facts code say the write-up goes as the website wrote it, and never that no VIN can reach the service', () => {
+  // the facts carry no VIN or price field, but the website's own write-up goes as written and can hold either
+  for (const rel of ['backend/README.md', 'supabase/README.md', 'extension/src/rewriter.js']) {
+    const text = read(rel).replace(/\n\/\/ /g, ' ');
+    assert.doesNotMatch(text, /\bno VIN\b(?! or price field)/i, `${rel} says no VIN reaches the service; a VIN in the website's write-up does`);
+    assert.match(text, /`narrative` is the website description's own sentences as the website wrote them, so a VIN, a price or a phone number the dealership wrote there/, `${rel} does not say the write-up goes as written`);
+  }
+  assert.match(inventory, /`narrative` is the website's own wording, so whatever the dealership wrote in a car's description goes as it wrote it\./);
 });
 
 test('a colour guess sends the photo addresses, the colour words and the origin, nothing else; Anthropic gets the first two', async () => {
@@ -348,6 +367,20 @@ test('a colour guess sends the photo addresses, the colour words and the origin,
   assert.match(help, /for a colour guess, up to four photo addresses and the list of colour words, sent to the rewrite service with your dealership website's address/, 'docs/help.md: what leaves the browser for a draft or a colour guess');
 });
 
+// A guessed colour reaches the published listing's colour field (never its
+// description), so the attorney is asked about it, as the guess works today.
+test('the attorney is asked about the colour guessed from the photos, as the side panel uses it', () => {
+  const ai = questions.slice(questions.indexOf('## 5. AI-written descriptions'), questions.indexOf('## 6.'));
+  const asked = ai.split('\n').find((l) => /^- Colours guessed from photos\./.test(l));
+  assert.ok(asked, 'questions-for-attorney.md section 5 does not ask about the colour guessed from the photos');
+  assert.match(asked, /up to four of the car's photos/);
+  assert.match(asked, /in the form's colour fields only, never in the description/);
+  assert.match(asked, /with the model's confidence/);
+  assert.match(asked, /\?/);
+  const readme = read('README.md');
+  assert.match(readme, /used on the form's color field only, never in the description/, 'README no longer says where the colour guess goes');
+});
+
 test('the sync row names every part of the sync payload', () => {
   const body = syncPayload({ origin: 'https://www.example-motors.test', posted: {}, pilot: null, scan: null, since: null, userId: 'u' });
   const t = tables(section(inventory, '## What leaves the browser'))[0];
@@ -357,15 +390,33 @@ test('the sync row names every part of the sync payload', () => {
   for (const k of Object.keys(body)) assert.ok(sent.includes('`' + k + '`'), `the sync payload carries ${k}, and the Sync row does not name it`);
 });
 
-test('the privacy texts say the take-downs and price changes on the person\'s own listings leave the browser as to-do items, with both prices', () => {
-  const [MINE, REPRICED, THEIRS] = ['1C4RJFBG5KC000001', '1C4RJFBG5KC000002', '1C4RJFBG5KC000003'];
+// The side panel stamps each post it records with postedWith, a fixed string
+// that names no version, and the popup's Mark posted stamps none; the sync
+// payload leaves it out. The posted row says that, not "which build posted it".
+test('the posted row calls postedWith a fixed marker the side panel sets and the sync leaves out, not a build', () => {
+  const panel = read('extension/sidepanel.js');
+  const stamp = panel.match(/const extra = \{ postedWith: ([^,}]+)/);
+  assert.ok(stamp, 'the side panel no longer stamps postedWith: update the posted row and this test');
+  assert.match(stamp[1], /^'[a-z]+'$/, 'postedWith now carries something other than a fixed word (a version?): say what in the posted row');
+  assert.doesNotMatch(read('extension/popup.js'), /postedWith/, 'the popup now stamps postedWith: update the posted row and this test');
+  const body = syncPayload({ origin: 'https://www.example-motors.test', posted: { '1C4RJFBG5KC000001': { name: 'A', price: 1, postedAt: '2026-01-01T00:00:00.000Z', postedWith: 'x' } }, pilot: null, scan: null, since: null, userId: 'u' });
+  assert.ok(!('postedWith' in body.posted['1C4RJFBG5KC000001']), 'the sync now sends postedWith: update the posted row and this test');
+  const row = inventory.split('\n').find((l) => l.startsWith('| `posted:<origin>` |'));
+  assert.ok(row, 'the inventory has no posted:<origin> row');
+  assert.doesNotMatch(row, /which build posted it/, 'the posted row says postedWith records the build, while it is a fixed word');
+  assert.match(row, /a fixed marker \(`postedWith`\) that the side panel recorded the post \(the popup's Mark posted sets none; it stays in this browser and is never synced\)/);
+  assert.doesNotMatch(read('extension/src/sync.js'), /postedWith \(which build posted it\)/, 'sync.js still calls postedWith the build that posted');
+});
+
+test('the privacy texts say the take-downs and price changes on the person\'s own listings leave the browser as to-do items, with both prices, and a take-down of a car the website retyped new does not', () => {
+  const [MINE, REPRICED, THEIRS, RETYPED] = ['1C4RJFBG5KC000001', '1C4RJFBG5KC000002', '1C4RJFBG5KC000003', '1C4RJFBG5KC000004'];
   const diff = {
-    takeDown: [{ vin: MINE, name: '2019 Jeep Grand Cherokee', why: 'sold', yours: true }, { vin: THEIRS, name: '2020 Ram 1500', why: 'sold', yours: false }],
+    takeDown: [{ vin: MINE, name: '2019 Jeep Grand Cherokee', why: 'gone', yours: true }, { vin: THEIRS, name: '2020 Ram 1500', why: 'gone', yours: false }, { vin: RETYPED, name: '2025 Jeep Compass', why: 'not-pre-owned', yours: true }],
     priceUpdates: [{ vin: REPRICED, name: '2018 Jeep Wrangler', from: 25990, to: 24990, yours: true }],
   };
   const pilot = noteFlags(null, diff, { at: '2026-09-01T12:00:00.000Z' });
   const up = syncPayload({ origin: 'https://www.example-motors.test', posted: {}, pilot, scan: null, since: null, userId: 'u' }).pilot.flags;
-  assert.deepEqual(up.map((f) => f.vin).sort(), [MINE, REPRICED].sort(), 'the person\'s own take-downs and price changes go up, a colleague\'s do not');
+  assert.deepEqual(up.map((f) => f.vin).sort(), [MINE, REPRICED].sort(), 'the person\'s own take-downs and price changes go up, a colleague\'s do not, nor one of a car the website now calls new');
   const price = up.find((f) => f.kind === 'price');
   assert.deepEqual([price.name, price.from, price.to], ['2018 Jeep Wrangler', 25990, 24990], 'a price change goes up with the car\'s name and both prices');
   const todo = schema().todo_items;
@@ -373,7 +424,7 @@ test('the privacy texts say the take-downs and price changes on the person\'s ow
   const t = tables(section(policy, '## What we collect and why'))[0];
   const row = (label) => t.rows.find((r) => r[0].startsWith(label));
   const scans = row('Scan results')[1];
-  assert.match(scans, /except the cars to take down and the price changes on the User's own listings, which become to-do items/, 'the policy says the lists of changes all stay in the browser');
+  assert.match(scans, /except, on the User's own listings, the cars to take down because they are gone from the website or marked sold or sale-pending, and the price changes, which become to-do items \(see Usage numbers\); a car to take down because the website now calls it new, demo or loaner stays in the browser\./, 'the policy says which changes leave the browser and which stay');
   assert.doesNotMatch(scans, /gets only/);
   assert.match(row('Usage numbers')[0], /to-do items \([^)]*VIN and name[^)]*old and new price\)/, 'the policy\'s Usage numbers row does not say the to-do items carry the VIN, the name and both prices');
   const usage = onlyTable(section(storeTexts, '## Usage numbers (mirrors the Privacy Policy)'), 'the Web Store usage section');
@@ -490,6 +541,79 @@ test('every recipient is named in the texts the inventory says, and the privacy 
   for (const b of bullets) assert.ok(all.some((r) => r.processor && r.name === b), `the privacy policy lists ${b} as a processor, and docs/data-inventory.md does not`);
 });
 
+// docs/production-setup.md chooses the services that see sign-in email and manager traffic; the website's host is
+// the Pages workflow. Each chosen one is a processor of its own, row and Processors line, never a shared bracket:
+// one name for two jobs ("sends the sign-in emails ... and holds our inbox") would leave the other company unlisted.
+test('the services production setup chooses, and the website\'s host, are each a processor in the inventory and the privacy policy', () => {
+  const setup = read('docs/production-setup.md');
+  const choices = section(setup, '## The choices, and why');
+  const chosen = [...choices.matchAll(/^\| [^|]+ \| \*\*([A-Z][A-Za-z0-9]+)/gm)].map((m) => m[1]);
+  assert.deepEqual(chosen, ['Supabase', 'Resend', 'Cloudflare'], 'the choices table changed: name the new service in both texts');
+  const hosts = read('.github/workflows/pages.yml').includes('actions/deploy-pages') ? ['GitHub'] : [];
+  const inbox = /GoDaddy mailbox|GoDaddy's Microsoft 365 mailbox/.test(setup) ? ['GoDaddy'] : [];
+  const processors = recipients().filter((r) => r.processor).map((r) => r.name);
+  const bullets = [...section(policy, '## Processors').matchAll(/^- \*\*([^*]+)\*\*/gm)].map((m) => m[1]);
+  for (const name of [...chosen, ...hosts, ...inbox]) {
+    assert.ok(processors.includes(name), `docs/data-inventory.md has no processor row for ${name}`);
+    assert.ok(bullets.includes(name), `the privacy policy's Processors section has no "- **${name}**" line`);
+  }
+  for (const text of [inventory, policy]) assert.doesNotMatch(text, /\[(hosting|email) provider\]/, 'a bracket standing for services already chosen');
+  assert.doesNotMatch(inventory, /not decided yet/, 'the manager view\'s host is decided (docs/production-setup.md)');
+  // one company per job, as production-setup.md chose them
+  assert.match(setup, /\| Sign-in email sender \| \*\*Resend\*\*/, 'production-setup.md changed the sign-in sender: update the inventory and this test');
+  assert.match(setup, /\| Manager view host \| \*\*Cloudflare Pages\*\*/, 'production-setup.md changed the manager view host: update the inventory and this test');
+  assert.match(setup, /Keep the mailbox for people writing to you/, 'production-setup.md no longer keeps a separate inbox: update the inventory and this test');
+  for (const [n, says] of [...section(policy, '## Processors').matchAll(/^- \*\*([^*]+)\*\*: (.*)$/gm)].map((m) => [m[1], m[2]])) {
+    assert.ok(!(/sends the sign-in emails/.test(says) && /inbox/.test(says)), `${n} both sends the sign-in emails and holds the inbox`);
+    assert.ok(!(/our website/.test(says) && /manager view/.test(says)), `${n} serves both the website and the manager view`);
+  }
+  const list = onlyTable(section(inventory, '## Who receives data'), 'the recipients section');
+  const cells = (name) => (list.rows.find((r) => r[0] === name) || []).join(' | ');
+  assert.match(cells('GitHub'), /website/);
+  assert.match(cells('Cloudflare'), /manager view/);
+  assert.match(cells('Resend'), /Sign-in emails/);
+  assert.match(cells('GoDaddy'), /inbox/);
+});
+
+// review: the Web Store answers named only Supabase for the sign-in code, while the extension's sign-in
+// email goes out through Resend; and the merge of the two processor lists dropped the note that which
+// company runs the inbox (GoDaddy, or Microsoft behind its Microsoft 365 mailbox) is for the owner to confirm.
+test('the Web Store answers name every company the extension\'s sign-in email passes, and the inbox line asks the owner which company holds the mail', () => {
+  // the extension's sign-in row in the inventory, and the companies it names
+  const signIn = inventory.split('\n').find((l) => l.startsWith('| Sign in (`src/account.js`'));
+  assert.ok(signIn, 'docs/data-inventory.md has no Sign in row for the extension');
+  const cells = signIn.split('|').map((c) => c.trim());
+  const named = cells[cells.length - 3].split(',').map((n) => n.trim()).filter(Boolean);
+  assert.ok(named.includes('Resend'), 'the inventory no longer names Resend for the sign-in email: update this test');
+  const row = section(storeTexts, '## What the extension sends, and to whom (mirrors `docs/data-inventory.md`)').split('\n').find((l) => /sign-in code/.test(l));
+  assert.ok(row, 'the Web Store answers have no sign-in row');
+  for (const n of named) assert.ok(row.includes(n), `the Web Store answers' sign-in row does not name ${n}`);
+  const resend = recipients().find((r) => r.name === 'Resend');
+  assert.ok(resend.namedIn.includes('legal/chrome-web-store-privacy.md'), 'the inventory does not hold the Web Store answers to naming Resend');
+  // a mailbox on Microsoft 365, with no Microsoft processor line: the owner has not said who holds the mail
+  const godaddy = section(policy, '## Processors').split('\n').find((l) => l.startsWith('- **GoDaddy**'));
+  const microsoftListed = /^- \*\*Microsoft\*\*/m.test(section(policy, '## Processors'));
+  if (/Microsoft 365/.test(godaddy) && !microsoftListed) {
+    assert.match(godaddy, /\[Owner: confirm which company runs this mailbox/, 'the privacy policy names a Microsoft 365 mailbox as GoDaddy\'s and does not ask the owner which company holds the mail');
+    const row2 = recipients().find((r) => r.name === 'GoDaddy');
+    assert.ok(row2, 'no GoDaddy row');
+    assert.match(inventory.split('\n').find((l) => l.startsWith('| GoDaddy |')), /\[Owner: confirm which company runs this mailbox/, 'the inventory\'s GoDaddy row does not ask the owner which company holds the mail');
+  }
+});
+
+// review: the privacy policy said Cloudflare "serves the manager view" before the manager view is deployed there;
+// the inventory's row says it applies once production setup step 6 has run.
+test('while the inventory says the manager view goes to Cloudflare only once step 6 has run, the privacy policy says it in the future tense', () => {
+  const row = inventory.split('\n').find((l) => l.startsWith('| Cloudflare |'));
+  assert.ok(row, 'no Cloudflare row');
+  const line = section(policy, '## Processors').split('\n').find((l) => l.startsWith('- **Cloudflare**'));
+  assert.ok(line, 'no Cloudflare line in the privacy policy');
+  if (/once `docs\/production-setup\.md` step 6 has run/.test(row)) {
+    assert.doesNotMatch(line, /^- \*\*Cloudflare\*\*: serves the manager view/, 'the privacy policy says Cloudflare serves the manager view, which is not deployed there yet');
+    assert.match(line, /will serve the manager view \(Cloudflare Pages\) once it is deployed there/);
+  }
+});
+
 test('every Recipient cell names a recipient of the list, and every recipient receives something', () => {
   const names = new Set(recipients().map((r) => r.name));
   const used = new Set();
@@ -535,4 +659,25 @@ test('the privacy texts stay templates for any dealership', () => {
     const hit = read(f).match(PILOT);
     assert.equal(hit, null, `${f} contains the pilot value "${hit && hit[0]}"`);
   }
+});
+
+// Who reads the synced post attempts (the person and the dealership's
+// managers, 0011_ui_post_attempts_read.sql) is test/postAttemptsRead.test.js;
+// the to-do items stay readable by every member.
+test('the texts that say where synced to-do items go say that every member reads them, as the policies allow', () => {
+  const rls = read('supabase/migrations/0002_rls.sql');
+  assert.match(rls, /on public\.todo_items for select to authenticated\s+using \(public\.is_member\(dealership_id\)\);/, 'todo_items: every member reads every row of the dealership; if that changed, change the texts below with it');
+  for (const f of MIGRATIONS.filter((m) => m.slice(0, 4) > '0002')) {
+    assert.doesNotMatch(read('supabase/migrations/' + f).replace(/--[^\n]*/g, ''), /policy[^;]*on public\.todo_items\s+for select/, `${f} changes who reads the to-do items: change the texts below with it`);
+  }
+  const item = questions.split('\n').find((l) => l.startsWith('- **8.4**'));
+  assert.match(item, /and the to-do items by every member of the dealership\./, 'the attorney is told every member reads the to-do items');
+  assert.doesNotMatch(item, /where its managers see them/);
+  const usageRow = (text) => text.split('\n').find((l) => l.startsWith('| Usage numbers'));
+  for (const [name, text] of [['the privacy policy', policy], ['the Chrome Web Store answers', storeTexts]]) {
+    assert.match(usageRow(text), /and the to-do items by every member of the dealership/i, name);
+  }
+  const faq = read('site-src/pages/faq.html');
+  assert.doesNotMatch(faq, /where your manager sees them/);
+  assert.match(faq, /where everyone signed in at your dealership sees your posted list, to-do items and scan counts/);
 });

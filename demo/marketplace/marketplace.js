@@ -3,13 +3,17 @@
 // pages share it, and it empties when the tab closes). Nothing here is
 // Facebook, and nothing here is reached by the extension except through the
 // page's own form controls: only a person clicks Publish, Update, Mark as
-// sold or Delete, and this file counts those clicks so the sandbox can prove
-// it (see demo/drive.mjs).
+// sold or Delete. Each of those four buttons counts its own clicks here
+// (create.html's Publish, edit.html's Update, item.html's Mark as sold and
+// Delete), and demo/drive.mjs checks each count is still 0 before its own
+// click as the person and exactly what it clicked after.
 
 (function (root) {
   'use strict';
   const KEY = 'lotSyncSandbox.listings';
-  const CLICKS = 'lotSyncSandbox.publishClicks';
+  // one count per button, each under its own key: lotSyncSandbox.publishClicks and so on
+  const KINDS = ['publish', 'update', 'markSold', 'delete'];
+  const clicksKey = (kind) => `lotSyncSandbox.${kind}Clicks`;
   let memory = {}; // fallback when sessionStorage is not available
 
   function store() {
@@ -45,20 +49,22 @@
       write(all);
       return all[String(id)];
     },
-    notePublishClick() {
+    // A person clicked one of the four buttons: 'publish', 'update', 'markSold' or 'delete'.
+    noteClick(kind) {
+      if (!KINDS.includes(kind)) throw new Error('unknown button: ' + kind);
       const s = store();
-      const n = api.publishClicks() + 1;
-      if (s) s.setItem(CLICKS, String(n));
-      else memory.__clicks = n;
+      const n = api.clicks(kind) + 1;
+      if (s) s.setItem(clicksKey(kind), String(n));
+      else memory['__' + kind] = n;
       return n;
     },
-    publishClicks() {
+    clicks(kind) {
       const s = store();
-      return Number((s ? s.getItem(CLICKS) : memory.__clicks) || 0);
+      return Number((s ? s.getItem(clicksKey(kind)) : memory['__' + kind]) || 0);
     },
     reset() {
       const s = store();
-      if (s) { s.removeItem(KEY); s.removeItem(CLICKS); }
+      if (s) { s.removeItem(KEY); for (const kind of KINDS) s.removeItem(clicksKey(kind)); }
       memory = {};
     },
     money: (n) => '$' + Number(n || 0).toLocaleString('en-US'),

@@ -173,7 +173,7 @@
       // Only a person clicks this. The extension has no code path to it.
       $('publish').addEventListener('click', () => {
         const mp = window.SandboxMarketplace;
-        mp.notePublishClick();
+        mp.noteClick('publish');
         const v = (id) => $(id).value;
         const title = [$('year').dataset.value, v('make'), v('model')].filter(Boolean).join(' ') || 'Vehicle';
         const id = mp.create({

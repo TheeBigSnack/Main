@@ -14,8 +14,8 @@ import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { loadFunction, invoke, fake, net, logs, hermetic, functionsFetch, uuid, keysOf, NETWORK_ERROR, SUPABASE_URL, ANON_KEY, SERVICE_KEY, EXTENSION_ORIGIN } from './functions/harness.mjs';
 import { pgTime } from './functions/fake-supabase.mjs';
-import { PRICING, OPEN_SUBSCRIPTION_MESSAGE, OPEN_SUBSCRIPTION_CODE } from '../supabase/functions/_shared/billing.mjs';
-import { billingCard, billingBody, SEATS_NOT_ADDED } from '../manager/data.js';
+import { PRICING, OPEN_SUBSCRIPTION_MESSAGE, OPEN_SUBSCRIPTION_CODE, NO_BILLING_ACCOUNT_MESSAGE } from '../supabase/functions/_shared/billing.mjs';
+import { billingCard, billingBody, SEATS_NOT_ADDED, BILLING_TEST_MODE_NOTE } from '../manager/data.js';
 import { runChecks } from '../scripts/check-deploy.mjs';
 
 hermetic();
@@ -157,8 +157,8 @@ test('billing: status answers the documented shape for the dealership asked for,
   const handler = await load();
   const none = await status(handler, TOKEN.u2);
   assert.equal(none.status, 200);
-  assert.deepEqual(keysOf(none.body), ['canManageBilling', 'canStartPilot', 'canSubscribe', 'dealership', 'includedSalespeople', 'ok', 'pilotDays', 'role', 'salespeople', 'state', 'subscription']);
-  assert.deepEqual(none.body, { ok: true, dealership: { id: D1, name: 'Example Motors', websiteOrigin: ORIGIN }, role: 'manager', state: 'none', subscription: null, canStartPilot: true, canSubscribe: true, canManageBilling: false, pilotDays: PRICING.pilotDays, includedSalespeople: PRICING.includedSalespeople, salespeople: 1 });
+  assert.deepEqual(keysOf(none.body), ['canManageBilling', 'canStartPilot', 'canSubscribe', 'dealership', 'includedSalespeople', 'ok', 'pilotDays', 'role', 'salespeople', 'state', 'subscription', 'testMode']);
+  assert.deepEqual(none.body, { ok: true, dealership: { id: D1, name: 'Example Motors', websiteOrigin: ORIGIN }, role: 'manager', state: 'none', subscription: null, canStartPilot: true, canSubscribe: true, canManageBilling: false, pilotDays: PRICING.pilotDays, includedSalespeople: PRICING.includedSalespeople, salespeople: 1, testMode: false });
   const card = billingCard(none.body);
   assert.deepEqual([card.label, card.buttons.map((b) => b.action)], ['No plan yet', ['pilot', 'subscribe']]);
 
@@ -273,6 +273,7 @@ test('billing: checkout for a store with no plan makes a Stripe customer carryin
     'line_items[0][price]': 'price_rooftop_test', 'line_items[0][quantity]': '1',
     success_url: `${MANAGER_PAGE}/?view=billing&billing=success`, cancel_url: `${MANAGER_PAGE}/?view=billing&billing=canceled`,
     allow_promotion_codes: 'true', 'subscription_data[metadata][dealership_id]': D1,
+    'subscription_data[metadata][included_salespeople]': String(PRICING.includedSalespeople),
   });
   assert.match(session.headers['idempotency-key'], /^[0-9a-f-]{36}$/);
   for (const w of fake.writes()) assert.equal(w.key, SERVICE_KEY);
@@ -380,11 +381,40 @@ test('billing: the portal is 404 until a customer exists, then a portal session 
   const early = await post(handler, 'portal', TOKEN.u2);
   assert.deepEqual([early.status, early.body], [404, { ok: false, error: 'this dealership has no billing account yet: subscribe first' }]);
   world({ subscriptions: [{ dealership_id: D1, status: 'past_due', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1' }] });
+  stripe({ customers: { cus_1: {} } });
   const r = await post(handler, 'portal', TOKEN.u2, { dealershipId: D1 });
   assert.deepEqual([r.status, r.body], [200, { ok: true, url: 'https://billing.stripe.com/p/session/bps_1' }]);
-  const [call] = stripeCalls();
+  const call = stripeCalls().find((c) => c.path === '/v1/billing_portal/sessions');
   assert.deepEqual([call.path, call.form], ['/v1/billing_portal/sessions', { customer: 'cus_1', return_url: RETURN_URL }]);
   assert.match(call.headers['idempotency-key'], /^[0-9a-f-]{36}$/);
+});
+
+test('billing: a customer Stripe no longer has (left from test mode after the switch to live, or deleted) gets a sentence saying whom to ask, not Stripe\'s error, and no portal session', async () => {
+  for (const customers of [{}, { cus_1: { deleted: true } }]) {
+    world({ subscriptions: [{ dealership_id: D1, status: 'active', stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1' }] });
+    stripe({ customers });
+    net.calls = [];
+    const handler = await load();
+    const r = await post(handler, 'portal', TOKEN.u2, { dealershipId: D1 });
+    assert.deepEqual([r.status, r.body], [404, { ok: false, error: NO_BILLING_ACCOUNT_MESSAGE }], JSON.stringify(customers));
+    assert.deepEqual(stripeCalls().map((c) => `${c.method} ${c.path}`), ['GET /v1/customers/cus_1'], 'no portal session for a customer that is gone');
+    assert.equal(fake.writes('subscriptions').length, 0, 'the row is left as it is: the live switch in docs/stripe-setup.md resets it');
+  }
+  assert.match(NO_BILLING_ACCOUNT_MESSAGE, /test mode/);
+  assert.match(NO_BILLING_ACCOUNT_MESSAGE, /ask your Lot Current contact$/);
+});
+
+test('billing: the status says test mode while the function\'s Stripe key is a test-mode one, and the manager page\'s Billing card says so', async () => {
+  world();
+  for (const [key, testMode] of [['sk_test_abc123', true], ['rk_test_abc123', true], ['sk_live_abc123', false], ['rk_live_abc123', false], [SECRET_KEY, false]]) {
+    const handler = await load({ STRIPE_SECRET_KEY: key });
+    const r = await status(handler, TOKEN.u2);
+    assert.deepEqual([r.status, r.body.testMode], [200, testMode], key.slice(0, 8));
+    const c = billingCard(r.body);
+    assert.equal(c.modeNote, testMode ? BILLING_TEST_MODE_NOTE : '', key.slice(0, 8));
+    // a salesperson's answer carries it too: nothing to press, but the plan is not a real one
+    assert.equal((await status(handler, TOKEN.u1)).body.testMode, testMode);
+  }
 });
 
 test('billing: with STRIPE_PORTAL_CONFIGURATION the portal session names that configuration; with STRIPE_AUTOMATIC_TAX=true Checkout adds tax and asks for the address, and anything else leaves tax off', async () => {
@@ -392,7 +422,7 @@ test('billing: with STRIPE_PORTAL_CONFIGURATION the portal session names that co
   stripe({ customers: { cus_1: {} } });
   const handler = await load({ STRIPE_PORTAL_CONFIGURATION: 'bpc_test_1', STRIPE_AUTOMATIC_TAX: 'TRUE' });
   assert.equal((await post(handler, 'portal', TOKEN.u2, { dealershipId: D1 })).status, 200);
-  assert.deepEqual(stripeCalls()[0].form, { customer: 'cus_1', return_url: RETURN_URL, configuration: 'bpc_test_1' });
+  assert.deepEqual(stripeCalls().find((c) => c.path === '/v1/billing_portal/sessions').form, { customer: 'cus_1', return_url: RETURN_URL, configuration: 'bpc_test_1' });
 
   world();
   stripe();
@@ -452,29 +482,101 @@ test('billing: an event signed over its raw body is applied to the dealership\'s
   assert.equal(fake.rows('billing_events').length, 1);
 });
 
+// The portal cancels at the period's end, so Stripe keeps the subscription
+// active until then: the row keeps the date it ends, and the manager card
+// says that date instead of a renewal.
+test('billing: a cancellation Stripe sends with its cancel_at date reaches the row and the card says when it ends; undoing it brings the renewal back', async () => {
+  // a period that ends 30 days from now (a passed end reads "ended")
+  const periodEnd = Math.floor(Date.now() / 1000) + 30 * 86400;
+  world({ subscriptions: [{ dealership_id: D1, stripe_customer_id: 'cus_1', stripe_subscription_id: 'sub_1', status: 'active', current_period_end: iso(periodEnd * 1000), seats: 7, updated_at: iso(Date.now() - DAY) }] });
+  const handler = await load();
+  const now = Math.floor(Date.now() / 1000);
+  // the items carry the same period end as the row
+  const items = { data: [{ price: { id: 'price_rooftop_test' }, quantity: 1, current_period_end: periodEnd }, { price: { id: 'price_seat_test' }, quantity: 2, current_period_end: periodEnd }] };
+  const cancel = subscriptionEvent({ id: 'evt_cancel', type: 'customer.subscription.updated', created: now }, { status: 'active', items, cancel_at_period_end: true, cancel_at: periodEnd });
+  const r = await deliver(handler, JSON.stringify(cancel));
+  assert.deepEqual([r.status, r.body.applied], [200, true]);
+  const [row] = fake.rows('subscriptions');
+  assert.deepEqual([row.status, row.cancel_at], ['active', pgTime(iso(periodEnd * 1000))]);
+  const answer = (await status(handler, TOKEN.u2)).body;
+  assert.equal(answer.state, 'active', 'still paid up until the date it ends');
+  const card = billingCard(answer, { timeZone: 'UTC' });
+  assert.equal(card.line, `Cancelled: 7 seats, ends ${iso(periodEnd * 1000).slice(0, 10)} and does not renew.`);
+  assert.equal(card.label, 'Cancelled');
+  assert.equal(card.tone, 'warn');
+  assert.doesNotMatch(card.line, /renews|first charge/);
+
+  const undo = subscriptionEvent({ id: 'evt_undo', type: 'customer.subscription.updated', created: now + 1 }, { status: 'active', items, cancel_at_period_end: false, cancel_at: null });
+  assert.equal((await deliver(handler, JSON.stringify(undo))).status, 200);
+  assert.equal(fake.rows('subscriptions')[0].cancel_at, null);
+  assert.equal(billingCard((await status(handler, TOKEN.u2)).body, { timeZone: 'UTC' }).line, `Subscribed: 7 seats, renews ${iso(periodEnd * 1000).slice(0, 10)}.`);
+});
+
+test('billing: a cancellation in the portal reaches the row and the card says when it ends, not that it renews; renewing puts it back', async () => {
+  world({ subscriptions: [{ dealership_id: D1, stripe_customer_id: 'cus_1' }] });
+  const handler = await load();
+  const t0 = Math.floor(Date.now() / 1000);
+  const send = async (id, type, created, object) => {
+    const r = await deliver(handler, JSON.stringify(subscriptionEvent({ id, type, created }, object)));
+    assert.deepEqual([r.status, r.body.ok, r.body.applied], [200, true, true], id);
+  };
+  const cardNow = async () => billingCard((await status(handler, TOKEN.u2)).body, { now: iso(Date.now()) });
+  // the trial ends 20 days from now, as it would when the portal is opened (the card words a passed end as "ended")
+  const end = t0 + 20 * 86400;
+  const items = { data: [{ price: { id: 'price_rooftop_test' }, quantity: 1, current_period_end: end }, { price: { id: 'price_seat_test' }, quantity: 2, current_period_end: end }] };
+  await send('evt_a', 'customer.subscription.created', t0 - 120, { items, cancel_at_period_end: false, cancel_at: null });
+  assert.match((await cardNow()).line, /^Subscribed: 7 seats, first charge /);
+
+  // the portal cancels at the end of the period: Stripe keeps the trial running and says only cancel_at_period_end;
+  // the row records the period's end (from the items, as newer API versions carry it) as the date it ends
+  await send('evt_b', 'customer.subscription.updated', t0 - 60, { items, cancel_at_period_end: true, cancel_at: null, canceled_at: t0 - 60 });
+  const [row] = fake.rows('subscriptions');
+  assert.deepEqual([row.status, row.cancel_at], ['trialing', pgTime(iso(end * 1000))]);
+  assert.ok(!('cancel_at_period_end' in row), 'the row has one cancellation column, cancel_at (0009_cancel_at.sql)');
+  const cancelled = await cardNow();
+  assert.equal(cancelled.label, 'Cancelled');
+  assert.match(cancelled.line, /^Cancelled: 7 seats, ends \d{4}-\d{2}-\d{2} before the first charge\.$/);
+  assert.doesNotMatch(cancelled.line, /renews|first charge \d/);
+
+  // renewed in the portal before the end
+  await send('evt_c', 'customer.subscription.updated', t0, { items, cancel_at_period_end: false, cancel_at: null });
+  const [renewedRow] = fake.rows('subscriptions');
+  assert.equal(renewedRow.cancel_at, null);
+  assert.match((await cardNow()).line, /^Subscribed: 7 seats, first charge /);
+});
+
 test('billing: a missing, malformed, altered, stale or wrongly keyed signature is 400 and nothing is read; a rolled secret\'s second v1 is accepted', async () => {
   world({ subscriptions: [{ dealership_id: D1, stripe_customer_id: 'cus_1' }] });
   const handler = await load();
   const raw = JSON.stringify(subscriptionEvent());
   const now = Math.floor(Date.now() / 1000);
-  const cases = [
-    [null, 'the Stripe-Signature header is missing or malformed'],
-    ['t=abc,v1=xyz', 'the Stripe-Signature header is missing or malformed'],
-    [sign(raw, { secret: 'another-secret' }), 'the signature does not match (a different secret, or an altered body)'],
-    [sign(raw, { t: now - 301 }), 'the event timestamp is outside the tolerance (a replay, or a clock that is off)'],
-    [sign(raw, { t: now + 301 }), 'the event timestamp is outside the tolerance (a replay, or a clock that is off)'],
-  ];
-  for (const [signature, error] of cases) {
-    const r = await deliver(handler, raw, signature);
-    assert.deepEqual([r.status, r.body], [400, { ok: false, error }], String(signature));
+  // the handler reads the clock as each request arrives. Held at `now` (late in its second) for the rest of
+  // this test, 301 seconds either side of it is outside the 300-second tolerance however long a delivery
+  // takes: a free-running clock let `now + 301` become 300 when a second boundary passed, and it was accepted
+  const clock = Date.now;
+  Date.now = () => now * 1000 + 999;
+  try {
+    const cases = [
+      [null, 'the Stripe-Signature header is missing or malformed'],
+      ['t=abc,v1=xyz', 'the Stripe-Signature header is missing or malformed'],
+      [sign(raw, { secret: 'another-secret' }), 'the signature does not match (a different secret, or an altered body)'],
+      [sign(raw, { t: now - 301 }), 'the event timestamp is outside the tolerance (a replay, or a clock that is off)'],
+      [sign(raw, { t: now + 301 }), 'the event timestamp is outside the tolerance (a replay, or a clock that is off)'],
+    ];
+    for (const [signature, error] of cases) {
+      const r = await deliver(handler, raw, signature);
+      assert.deepEqual([r.status, r.body], [400, { ok: false, error }], String(signature));
+    }
+    // the same event, re-serialised after it was signed
+    const altered = await deliver(handler, JSON.stringify(JSON.parse(raw), null, 1), sign(raw));
+    assert.deepEqual([altered.status, altered.body.error], [400, 'the signature does not match (a different secret, or an altered body)']);
+    assert.equal(fake.calls.length, 0, 'nothing read before the signature holds');
+    const good = sign(raw);
+    const rolled = `t=${now},v1=${'0'.repeat(64)},${good.split(',')[1]}`;
+    assert.equal((await deliver(handler, raw, rolled)).status, 200);
+  } finally {
+    Date.now = clock;
   }
-  // the same event, re-serialised after it was signed
-  const altered = await deliver(handler, JSON.stringify(JSON.parse(raw), null, 1), sign(raw));
-  assert.deepEqual([altered.status, altered.body.error], [400, 'the signature does not match (a different secret, or an altered body)']);
-  assert.equal(fake.calls.length, 0, 'nothing read before the signature holds');
-  const good = sign(raw);
-  const rolled = `t=${now},v1=${'0'.repeat(64)},${good.split(',')[1]}`;
-  assert.equal((await deliver(handler, raw, rolled)).status, 200);
 });
 
 test('billing: the webhook without its secret is 500 naming it; a body over 1 MiB is 413 by its declared length or its real one', async () => {
@@ -531,6 +633,30 @@ test('billing: which row an event lands on: the customer\'s, the subscription\'s
   assert.deepEqual([fake.queries('subscriptions').length, fake.rows('billing_events').length], [0, 1]);
 });
 
+test('billing: when Stripe cannot answer the customer lookup, the event is not recorded and answers 500, so Stripe delivers it again; a customer Stripe does not know is recorded, not applied', async () => {
+  const handler = await load();
+  const event = JSON.stringify(subscriptionEvent({ id: 'evt_flaky' }, { customer: 'cus_7' }));
+  for (const [status, body] of [[503, { error: { message: 'Stripe is busy' } }], [429, { error: { message: 'Too many requests', code: 'rate_limit' } }], [500, null]]) {
+    world();
+    stripe({ fail: () => ({ status, body }) });
+    const r = await deliver(handler, event);
+    assert.equal(r.status, 500, `a ${status} from Stripe is not taken as "not a Lot Current customer"`);
+    assert.equal(r.body.ok, false);
+    assert.deepEqual([fake.rows('billing_events'), fake.rows('subscriptions')], [[], []], 'nothing recorded, so the redelivery is not skipped as a duplicate');
+  }
+  // Stripe recovers and redelivers the same event: it lands on the customer's dealership
+  stripe({ customers: { cus_7: { metadata: { dealership_id: D2 } } } });
+  const again = await deliver(handler, event);
+  assert.deepEqual([again.status, again.body], [200, { ok: true, applied: true, attached: true }]);
+  assert.equal(fake.rows('subscriptions')[0].dealership_id, D2);
+  // a customer Stripe answers 404 for is no Lot Current customer: recorded once, not applied
+  world();
+  stripe({ customers: {} });
+  const unknown = await deliver(handler, JSON.stringify(subscriptionEvent({ id: 'evt_unknown' }, { customer: 'cus_gone' })));
+  assert.deepEqual([unknown.status, unknown.body], [200, { ok: true, applied: false, attached: false }]);
+  assert.deepEqual(fake.rows('billing_events').map((e) => e.stripe_event_id), ['evt_unknown']);
+});
+
 test('billing: an event older than the row\'s last change is stored and not applied; an invoice about another subscription is ignored', async () => {
   const handler = await load();
   const recent = Math.floor(Date.now() / 1000);
@@ -546,11 +672,81 @@ test('billing: an event older than the row\'s last change is stored and not appl
   assert.deepEqual([r.body.applied, fake.rows('subscriptions')[0].status], [true, 'past_due']);
 });
 
+// One paid Checkout without a trial: Stripe makes the subscription
+// incomplete, takes the first payment and makes it active, all in the same
+// second, and delivers the events in any order, some of them at once.
+const checkoutEvents = (created = Math.floor(Date.now() / 1000)) => ({
+  created: subscriptionEvent({ id: 'evt_created', type: 'customer.subscription.created', created }, { status: 'incomplete' }),
+  updated: subscriptionEvent({ id: 'evt_updated', type: 'customer.subscription.updated', created }, { status: 'active' }),
+  paid: { id: 'evt_paid', object: 'event', type: 'invoice.paid', created, data: { object: { id: 'in_1', object: 'invoice', customer: 'cus_1', subscription: 'sub_1', lines: { data: [{ period: { start: created, end: 1790000000 } }] } } } },
+});
+
+test('billing: a paid Checkout\'s events from one second, the first one delivered last, leave the store active and served', async () => {
+  world({ subscriptions: [{ dealership_id: D1, stripe_customer_id: 'cus_1' }] });
+  const handler = await load();
+  const e = checkoutEvents();
+  for (const event of [e.updated, e.paid, e.created]) {
+    const r = await deliver(handler, JSON.stringify(event));
+    assert.equal(r.status, 200, event.id);
+  }
+  const [row] = fake.rows('subscriptions');
+  assert.deepEqual([row.stripe_subscription_id, row.status], ['sub_1', 'active'], 'the late created(incomplete) is older than what the row holds');
+  // Stripe redelivers the first event hours later (after a failed delivery) with its first stamp: still active
+  const again = await deliver(handler, JSON.stringify({ ...e.created, id: 'evt_created_retry' }));
+  assert.deepEqual(again.body, { ok: true, applied: false, attached: true });
+  assert.equal(fake.rows('subscriptions')[0].status, 'active');
+});
+
+test('billing: two deliveries at once do not write over each other: the one decided on a row that changed meanwhile decides again', async () => {
+  world({ subscriptions: [{ dealership_id: D1, stripe_customer_id: 'cus_1' }] });
+  const handler = await load();
+  const e = checkoutEvents();
+  // created(incomplete) reads the row with no subscription and is about to write it...
+  const held = fake.hold((c) => c.table === 'subscriptions' && c.op !== 'select' && c.payload && c.payload.status === 'incomplete');
+  const slow = deliver(handler, JSON.stringify(e.created));
+  await held.arrived;
+  // ...when updated(active) is delivered, read and written in full
+  const fast = await deliver(handler, JSON.stringify(e.updated));
+  assert.deepEqual(fast.body, { ok: true, applied: true, attached: true });
+  held.commit();
+  const late = await slow;
+  assert.equal(late.status, 200);
+  assert.deepEqual([fake.rows('subscriptions')[0].status, late.body.applied], ['active', false], 'the slower delivery read the row again and found itself older');
+  // a row that keeps changing is not written over: 500, so Stripe delivers the event again
+  world({ subscriptions: [{ dealership_id: D1, stripe_customer_id: 'cus_1' }] });
+  fake.script = (c) => (c.table === 'subscriptions' && c.op === 'update' ? { data: [], error: null, status: 200 } : undefined);
+  const busy = await deliver(handler, JSON.stringify(subscriptionEvent({ id: 'evt_busy' })));
+  fake.script = null;
+  assert.equal(busy.status, 500);
+  assert.match(busy.body.error, /kept changing/);
+  assert.deepEqual(fake.rows('billing_events'), [], 'not recorded, so the redelivery applies it');
+});
+
+test('billing: a write counts as landed only when the database hands back the row it changed, never on a missing row count', async () => {
+  world({ subscriptions: [{ dealership_id: D1, stripe_customer_id: 'cus_1' }] });
+  const handler = await load();
+  // the conditional write asks for the changed row back, as the manager view's own writes do
+  const ok = await deliver(handler, JSON.stringify(subscriptionEvent({ id: 'evt_ok' })));
+  assert.deepEqual(ok.body, { ok: true, applied: true, attached: true });
+  const [write] = fake.queries('subscriptions').filter((c) => c.op === 'update');
+  assert.equal(write.columns, 'dealership_id', 'update(...).select(\'dealership_id\')');
+  // an answer that carries neither rows nor a count (a lost race on an API
+  // that leaves the count out) is not taken as written: no event is recorded as applied
+  world({ subscriptions: [{ dealership_id: D1, stripe_customer_id: 'cus_1' }] });
+  fake.script = (c) => (c.table === 'subscriptions' && c.op === 'update' ? { data: null, error: null, count: null } : undefined);
+  const silent = await deliver(handler, JSON.stringify(subscriptionEvent({ id: 'evt_silent' })));
+  fake.script = null;
+  assert.equal(silent.status, 500);
+  assert.match(silent.body.error, /kept changing/);
+  assert.deepEqual(fake.rows('billing_events'), [], 'not recorded as applied');
+  assert.equal(fake.rows('subscriptions')[0].status ?? null, null, 'and the row was not written');
+});
+
 test('billing: a database failure answers 500 so Stripe retries, and the event is not recorded, so the retry applies it', async () => {
   world({ subscriptions: [{ dealership_id: D1, stripe_customer_id: 'cus_1' }] });
   const handler = await load();
   const raw = JSON.stringify(subscriptionEvent());
-  fake.script = (c) => (c.table === 'subscriptions' && c.op === 'upsert' ? { error: { message: 'deadlock detected', code: '40P01' } } : undefined);
+  fake.script = (c) => (c.table === 'subscriptions' && c.op !== 'select' ? { error: { message: 'deadlock detected', code: '40P01' } } : undefined);
   const failed = await deliver(handler, raw);
   assert.deepEqual([failed.status, failed.body], [500, { ok: false, error: 'could not write subscriptions: deadlock detected' }]);
   assert.deepEqual(fake.rows('billing_events'), []);
@@ -563,11 +759,22 @@ test('billing: a database failure answers 500 so Stripe retries, and the event i
 test('billing: scripts/check-deploy.mjs reads its billing lines as ok against the real handler, and the webhook line as a note until the secret is set', async () => {
   world();
   let billing = await load();
-  let findings = (await runChecks({ fetchImpl: functionsFetch({ billing }), url: SUPABASE_URL, anonKey: ANON_KEY })).filter((f) => f.check.startsWith('billing:'));
-  assert.deepEqual(findings.map((f) => f.check), ['billing: answers the extension\'s CORS preflight', 'billing: refuses a call with no user token', 'billing: the webhook refuses an unsigned event']);
+  let findings = (await runChecks({ fetchImpl: functionsFetch({ billing }), url: SUPABASE_URL, anonKey: ANON_KEY, managerOrigin: `${MANAGER_PAGE}/` })).filter((f) => f.check.startsWith('billing:'));
+  assert.deepEqual(findings.map((f) => f.check), ['billing: answers the extension\'s CORS preflight', 'billing: refuses a call with no user token', 'billing: the webhook refuses an unsigned event', 'billing: answers the manager view\'s CORS preflight']);
   for (const f of findings) assert.equal(f.ok, true, `${f.check}: ${f.detail}`);
+  // the manager view's origin left out of ALLOWED_ORIGINS: the handler sends no allow-origin, and the line fails
+  billing = await load({ ALLOWED_ORIGINS: undefined });
+  findings = (await runChecks({ fetchImpl: functionsFetch({ billing }), url: SUPABASE_URL, anonKey: ANON_KEY, managerOrigin: MANAGER_PAGE })).filter((f) => f.check.startsWith('billing:'));
+  assert.deepEqual(findings.map((f) => [f.check, f.ok, Boolean(f.warnOnly)]).slice(-1), [['billing: answers the manager view\'s CORS preflight', false, false]]);
+  assert.ok(findings.slice(0, 3).every((f) => f.ok), 'the extension\'s own lines still pass: only the page is blocked');
+  assert.match(findings.at(-1).detail, /allow-origin none .*ALLOWED_ORIGINS/);
   billing = await load({ STRIPE_WEBHOOK_SECRET: undefined });
   findings = (await runChecks({ fetchImpl: functionsFetch({ billing }), url: SUPABASE_URL, anonKey: ANON_KEY })).filter((f) => f.check === 'billing: the webhook refuses an unsigned event');
   assert.deepEqual(findings.map((f) => [f.ok, f.warnOnly]), [[false, true]]);
   assert.match(findings[0].detail, /STRIPE_WEBHOOK_SECRET is not set yet/);
+  // the manager view's own origin: ok while ALLOWED_ORIGINS names it, a failure when it does not
+  const fromPage = async (vars) => (await runChecks({ fetchImpl: functionsFetch({ billing: await load(vars) }), url: SUPABASE_URL, anonKey: ANON_KEY, managerOrigin: MANAGER_PAGE })).find((f) => f.check === 'billing: answers the manager view\'s CORS preflight');
+  assert.equal((await fromPage({})).ok, true);
+  const refused = await fromPage({ ALLOWED_ORIGINS: undefined });
+  assert.deepEqual([refused.ok, refused.warnOnly], [false, undefined], refused.detail);
 });

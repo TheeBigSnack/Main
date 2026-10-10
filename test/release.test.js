@@ -5,11 +5,17 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, cpSync, mkdtempSync, rmSync, mkdirSync, existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join, basename } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
-  COMMANDS, VERSION_FILES, parseVersion, compareVersions, bump, setVersionText, changelogHasVersion, newestChangelogVersion,
+  COMMANDS, VERSION_FILES, parseVersion, compareVersions, bump, setVersionText, changelogHasVersion, newestChangelogVersion, changelogProblems,
   readmeTitle, readmeTitleFits, dirtyPaths, submitSteps, zipPath, changedLines, nextSteps, parseArgs, release, runCommand,
+  accountUrlIn, ACCOUNT_GATE,
 } from '../scripts/release.mjs';
+import { ACCOUNT, accountsConfigured } from '../extension/src/accountConfig.js';
 
 const read = (rel) => readFileSync(new URL('../' + rel, import.meta.url), 'utf8');
 const REAL = Object.fromEntries([...VERSION_FILES, 'CHANGELOG.md', 'README.md', 'store/listing.md'].map((f) => [f, read(f)]));
@@ -151,7 +157,8 @@ test('parseArgs: one version, --dry-run, nothing unknown', () => {
 // A repository in memory: the real texts, a git status, and npm answers.
 function world({ status = '', changelogEntry = null, readme = REAL['README.md'], testCode = 0, packCode = 0, packWrites = true } = {}) {
   const files = { ...REAL, 'README.md': readme };
-  if (changelogEntry) files['CHANGELOG.md'] = REAL['CHANGELOG.md'].replace('# Changelog\n\n', `# Changelog\n\n## ${changelogEntry} (2026-10-01, a test entry)\n\nChanged\n- Nothing.\n\n`);
+  // the release step: "## Unreleased" becomes the version's heading, a new empty one goes above it
+  if (changelogEntry) files['CHANGELOG.md'] = REAL['CHANGELOG.md'].replace(/^## Unreleased\n/m, '').replace('# Changelog\n\n', `# Changelog\n\n## Unreleased\n\n## ${changelogEntry} (2026-10-01, a test entry)\n\nChanged\n- Nothing.\n\n`);
   const runs = [];
   const writes = [];
   const out = [];
@@ -208,6 +215,114 @@ test('a version without its CHANGELOG entry is refused, and so is one that is no
   assert.match(same.err(), /not greater than the current version/);
   assert.deepEqual(same.writes, []);
   assert.deepEqual(same.runs, [], 'refused before git status');
+});
+
+// The changes since the last version wait under "## Unreleased". A release
+// files them under its own heading and leaves an empty "## Unreleased" on top;
+// a short new heading above or below a full Unreleased section would ship
+// those changes while the CHANGELOG still calls them unreleased.
+test('a release refuses a CHANGELOG whose Unreleased section still holds entries, is below the new heading or is gone', () => {
+  const next = bump(CURRENT, 'patch');
+  const entry = `## ${next} (2026-10-01, a test entry)\n\nChanged\n- One line.\n\n`;
+  const base = '# Changelog\n\n## Unreleased\n\nAdded\n- Billing.\n- Accounts.\n\n## 0.5.0 (2026-09-28, the last one)\n\n- Shipped.\n';
+  const ready = `# Changelog\n\n## Unreleased\n\n## ${next} (2026-10-01, a test entry)\n\nAdded\n- Billing.\n- Accounts.\n\n## 0.5.0 (2026-09-28, the last one)\n\n- Shipped.\n`;
+  assert.deepEqual(changelogProblems(ready, next), []);
+  assert.deepEqual(changelogProblems(ready.replace('## Unreleased\n', '## Unreleased   \n'), next), [], 'trailing spaces on the heading');
+  // the new heading above a full Unreleased section, as the old message said ("above 0.5.0")
+  const above = base.replace('## Unreleased', `${entry}## Unreleased`);
+  assert.match(changelogProblems(above, next).join('\n'), /"## Unreleased" still holds entries, which ship in/);
+  // a short new heading below a full Unreleased section
+  const below = base.replace('## 0.5.0', `${entry}## 0.5.0`);
+  assert.match(changelogProblems(below, next).join('\n'), /"## Unreleased" still holds entries/);
+  // an empty Unreleased left below the new heading
+  const emptyBelow = `# Changelog\n\n${entry}## Unreleased\n\n## 0.5.0 (2026-09-28, the last one)\n`;
+  assert.match(changelogProblems(emptyBelow, next).join('\n'), /sits below "## /);
+  // Unreleased renamed with no new one above it (test/brandName.test.js reads it)
+  assert.match(changelogProblems(ready.replace('## Unreleased\n\n', ''), next).join('\n'), /no "## Unreleased" heading/);
+  // no heading for the version: the message says to rename Unreleased, not to write above the last version
+  const none = changelogProblems(base, next).join('\n');
+  assert.match(none, /Rename "## Unreleased" to "## [\d.]+ \(<date>, <what it is>\)", then put a new, empty "## Unreleased" above it/);
+  assert.doesNotMatch(none, /above 0\.5\.0/);
+  // the run refuses before writing or running anything
+  for (const log of [above, below, emptyBelow]) {
+    const w = world();
+    w.files['CHANGELOG.md'] = log;
+    assert.equal(release(['patch'], w.io), 1);
+    assert.deepEqual(w.writes, []);
+    assert.deepEqual(w.runs, [COMMANDS.status]);
+  }
+  // the checklist says the same
+  const doc = read('docs/release.md');
+  assert.match(doc, /Rename that heading to the usual format, `## 0\.6\.0 \(/);
+  assert.match(doc, /put a new, empty `## Unreleased` above it/);
+  assert.match(doc, /`## Unreleased` is missing, below it or still holds entries/);
+});
+
+// world() fakes npm test, so the tests above cannot see a unit test that reads
+// CHANGELOG.md by place (the first "## " section as the Unreleased notes) and
+// fails once a release empties "## Unreleased": the release would roll back
+// every time. Here a copy of the repository gets what docs/release.md step 1
+// and the script do (the heading renamed, an empty "## Unreleased" above it,
+// the README title, the three version stamps), and every other unit test file
+// that reads CHANGELOG.md runs there for real.
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
+const NOT_COPIED = new Set(['.git', 'node_modules', 'dist', 'survey-out', 'test-results']);
+// Nor what a working copy keeps private, so it never lands in the temporary
+// folder: a .env file anywhere (backend/.env holds the rewrite service's
+// Anthropic key; .env.example is a template and is copied) and the pilot's
+// CSVs, which name a dealer's salespeople (.gitignore).
+const PRIVATE = /^\.env(\..+)?$|^lot-current-(pilot|manager)-.*\.csv$/;
+const copied = (src) => {
+  const name = basename(src);
+  return !NOT_COPIED.has(name) && (name === '.env.example' || !PRIVATE.test(name));
+};
+const copyRepo = (from, to) => cpSync(from, to, { recursive: true, filter: copied });
+
+test('the release test\'s copy of the repository leaves every .env file and the pilot CSVs behind', () => {
+  const from = mkdtempSync(join(tmpdir(), 'lot-current-release-from-'));
+  const to = mkdtempSync(join(tmpdir(), 'lot-current-release-to-'));
+  try {
+    const files = ['README.md', 'backend/.env', 'backend/.env.example', 'backend/server.js', 'supabase/functions/.env', 'supabase/functions/.env.local', '.env.production', 'lot-current-pilot-2026-10-05.csv', 'lot-current-manager-example-2026-10-05.csv'];
+    for (const f of files) {
+      mkdirSync(join(from, f, '..'), { recursive: true });
+      writeFileSync(join(from, f), 'x');
+    }
+    copyRepo(from, to);
+    const there = files.filter((f) => existsSync(join(to, f)));
+    assert.deepEqual(there, ['README.md', 'backend/.env.example', 'backend/server.js']);
+  } finally {
+    rmSync(from, { recursive: true, force: true });
+    rmSync(to, { recursive: true, force: true });
+  }
+});
+
+test('the unit tests that read CHANGELOG.md pass on the layout a release leaves', () => {
+  const next = bump(CURRENT, 'minor');
+  const dir = mkdtempSync(join(tmpdir(), 'lot-current-release-'));
+  try {
+    copyRepo(ROOT, dir);
+    const at = (rel) => join(dir, rel);
+    const unreleased = /^## Unreleased[ \t]*$/m;
+    assert.match(REAL['CHANGELOG.md'], unreleased);
+    const log = REAL['CHANGELOG.md'].replace(unreleased, `## Unreleased\n\n## ${next} (2026-10-12, a release test)`);
+    const readme = REAL['README.md'].replace(readmeTitle(CURRENT), readmeTitle(next));
+    assert.deepEqual(changelogProblems(log, next), [], 'the layout the release asks for');
+    assert.ok(readmeTitleFits(readme, next));
+    writeFileSync(at('CHANGELOG.md'), log);
+    writeFileSync(at('README.md'), readme);
+    for (const f of VERSION_FILES) writeFileSync(at(f), setVersionText(REAL[f], next));
+    const files = readdirSync(at('test')).filter((f) => f.endsWith('.test.js') && f !== basename(fileURLToPath(import.meta.url)) && readFileSync(at(join('test', f)), 'utf8').includes('CHANGELOG'));
+    for (const f of ['docs.test.js', 'brandName.test.js']) assert.ok(files.includes(f), `${f} reads CHANGELOG.md`);
+    // a test runner started from inside a test file runs nothing unless it is told it is not a child
+    const env = { ...process.env };
+    delete env.NODE_TEST_CONTEXT;
+    const r = spawnSync(process.execPath, ['--test', '--test-reporter=tap', ...files.map((f) => join('test', f))], { cwd: dir, encoding: 'utf8', env });
+    const failed = (r.stdout || '').split('\n').filter((l) => /^\s*not ok /.test(l));
+    assert.equal(r.status, 0, `at ${next} with the CHANGELOG renamed, ${files.join(', ')} fail:\n${failed.join('\n') || r.stderr}`);
+    assert.match(r.stdout, /^# pass [1-9]/m, 'the tests ran');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('a new minor without the README title is refused; with it, the release goes through', () => {
@@ -295,4 +410,32 @@ test('the script never commits, tags, pushes or reaches the network: three comma
   const runs = [...code.matchAll(/\brun\(([^)]*)\)/g)].map((m) => m[1]);
   assert.ok(runs.length >= 3);
   for (const arg of runs) assert.match(arg, /^(COMMANDS\.(status|test|pack)|cmd)$/, `run(${arg})`);
+});
+
+// A build whose extension/src/accountConfig.js names a project offers sign-in
+// in the wizard and Settings, which works only once that project's database,
+// functions and sign-in email are set up. The release says so before the
+// upload and the testers' copy, and says nothing while the config is empty.
+test('the next steps say when a build names the account project, and what it waits for', () => {
+  assert.equal(accountUrlIn(read('extension/src/accountConfig.js')), ACCOUNT.url, 'the url the extension uses');
+  assert.equal(accountUrlIn("export const ACCOUNT = Object.freeze({\n  url: '',\n  anonKey: '',\n});"), '');
+  const url = 'https://abcdefghijklmnopqrst.supabase.co';
+  const named = nextSteps({ version: '0.6.0', listing: '', accountUrl: url }).join('\n');
+  assert.ok(named.includes(`names the account project ${url} (extension/src/accountConfig.js)`));
+  assert.ok(named.includes(ACCOUNT_GATE));
+  assert.ok(named.indexOf(ACCOUNT_GATE) < named.indexOf('3. Upload') && named.indexOf(ACCOUNT_GATE) < named.indexOf('4. Testers'), 'before the upload and the testers');
+  assert.doesNotMatch(nextSteps({ version: '0.6.0', listing: '' }).join('\n'), /account project/);
+  // the run reads the real config: today it names the production project
+  const next = bump(CURRENT, 'patch');
+  const w = world({ changelogEntry: next });
+  w.files['extension/src/accountConfig.js'] = read('extension/src/accountConfig.js');
+  assert.equal(release(['patch', '--dry-run'], w.io), 0, w.err());
+  assert.equal(w.out().includes(ACCOUNT_GATE), accountsConfigured());
+  // the release checklist and the config's own header say the same
+  assert.ok(read('docs/release.md').includes(`before \`docs/production-setup.md\` steps 3 to 5 are done and \`npm run check-deploy\` shows no FAIL`));
+  const header = read('extension/src/accountConfig.js').split('export const')[0];
+  assert.match(header, /With url and anonKey filled, accountsConfigured\(\) is true: the\n\/\/ first-run wizard has its optional Account step/);
+  assert.match(header, /steps 3 to 5/);
+  assert.doesNotMatch(header, /until then every value is empty/, 'the header no longer says the shipped values are empty');
+  assert.doesNotMatch(read('extension/src/wizardSteps.js'), /the shipped empty config/);
 });

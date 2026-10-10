@@ -23,7 +23,9 @@
 //
 // legal/legal-status.json says whether the texts are still drafts. While
 // "draft" is true, every page opens with a banner: a draft under attorney
-// review, not in effect, and its title says (draft). The owner sets it to
+// review, not in effect (the posting rules' banner says instead that the
+// wording may change and the extension already asks salespeople to follow
+// them: RULES_DRAFT_BANNER), and its title says (draft). The owner sets it to
 // false once the attorney has approved the texts and their approved wording
 // is in legal/, then runs this again. It refuses to write a page as final
 // while its Markdown still has the DRAFT line or a blank in [brackets], so a
@@ -62,6 +64,13 @@ export const CSP = NO_SCRIPT_CSP;
 export const REDIRECT_CSP = "default-src 'none'; base-uri 'none'; form-action 'none'";
 
 export const DRAFT_BANNER = '<strong>Draft under attorney review.</strong> Not in effect: nothing on this page applies to anyone yet, and the text may change before it does.';
+// The posting rules are a draft too, but the extension already shows them at
+// set-up and before a salesperson's first post and asks each salesperson to
+// tick that they will follow them (wizard.js, sidepanel.js), so their page
+// never says they apply to no one. It claims no legal effect either: only
+// that the wording may change and what the extension does with it.
+export const RULES_DRAFT_BANNER = '<strong>Draft under attorney review.</strong> The wording may change. Lot Current already shows these rules at set-up and before a salesperson\'s first post, and asks every salesperson to follow them.';
+export const bannerFor = (entry) => (entry && entry.source === 'legal/posting-rules.md' ? RULES_DRAFT_BANNER : DRAFT_BANNER);
 
 // A link target the page may carry: http(s), mailto, a relative address or a
 // #anchor. Anything with a space, a control character or a backslash is
@@ -310,7 +319,7 @@ export function renderPage(entry, markdown, status, ctx) {
   if (h1s !== 1) throw new Error(`${entry.source} has ${h1s} "# " headings; exactly one`);
   const body = [
     '    <div class="wrap narrow legal">',
-    ...(status.draft ? [`      <p class="draft">${DRAFT_BANNER}</p>`] : []),
+    ...(status.draft ? [`      <p class="draft">${bannerFor(entry)}</p>`] : []),
     ...doc.html.split('\n').map((l) => `      ${l}`),
     '    </div>',
   ].join('\n');
@@ -391,7 +400,9 @@ export const USAGE = [
   ...REDIRECTS.map((r) => `  (the old address)            -> ${r.file}  (sends on to ${r.target})`),
   '',
   `${STATUS_FILE} says whether the texts are drafts. While "draft" is true,`,
-  'every page opens with a banner: a draft under attorney review, not in effect.',
+  'every page opens with a banner: a draft under attorney review, not in effect',
+  '(the posting rules: a draft whose wording may change, which the extension',
+  'already asks every salesperson to follow).',
   'Once the attorney approves the texts, put the approved wording in the three',
   'Markdown files (no DRAFT line, every [bracket] filled in), set "draft" to',
   'false and run this again; it refuses while a file still reads as a draft.',

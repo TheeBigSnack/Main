@@ -8,6 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { SITE } from '../site/config.js';
 import {
   validateLead, clean, parseOrigins, originAllowed, clientAddress, addressKey, addressBrake, hourlyCapReached,
   LEAD_LIMITS, HONEYPOT, PER_ADDRESS_PER_HOUR, PER_HOUR_TOTAL, HOUR_MS, BRAKE_MAX_KEYS,
@@ -62,11 +63,11 @@ test('clean: control characters go, lengths are capped at the table\'s limits', 
 });
 
 test('origins: only the landing page\'s own origins, compared exactly', () => {
-  const allowed = parseOrigins(' https://lotsync.example , https://www.lotsync.example/, not a url, ftp://x.test ');
-  assert.deepEqual(allowed, ['https://lotsync.example', 'https://www.lotsync.example']);
-  assert.equal(originAllowed('https://lotsync.example', allowed), true);
+  const allowed = parseOrigins(' https://lotcurrent.example , https://www.lotcurrent.example/, not a url, ftp://x.test ');
+  assert.deepEqual(allowed, ['https://lotcurrent.example', 'https://www.lotcurrent.example']);
+  assert.equal(originAllowed('https://lotcurrent.example', allowed), true);
   assert.equal(originAllowed('https://evil.test', allowed), false);
-  assert.equal(originAllowed('https://lotsync.example.evil.test', allowed), false);
+  assert.equal(originAllowed('https://lotcurrent.example.evil.test', allowed), false);
   assert.equal(originAllowed('', allowed), false);
   assert.deepEqual(parseOrigins(''), []);
 });
@@ -222,14 +223,14 @@ test('the landing page: a honeypot people never reach, and the request goes to t
 });
 
 // site.js run against a stand-in page and endpoint: what the visitor reads for each answer the function can give.
-async function standInForm() {
+async function standInForm(site = { demoEndpoint: 'https://lead.test/functions/v1/lead', demoMailto: 'mailto:demo@lotcurrent.example' }) {
   const src = read('../site/site.js');
   const configImport = "import { SITE } from './config.js';";
   assert.ok(src.includes(configImport), 'site.js takes its addresses from config.js');
-  const code = src.replace(configImport, "const SITE = { demoEndpoint: 'https://lead.test/functions/v1/lead', demoMailto: 'mailto:demo@lotsync.example' };") + '\n//# sourceURL=site.js (stand-in)\n';
+  const code = src.replace(configImport, `const SITE = ${JSON.stringify(site)};`) + '\n//# sourceURL=site.js (stand-in)\n';
   const status = { textContent: '', className: '' };
   const button = { disabled: false };
-  const page = { submit: null, focused: [], resets: 0, sent: [], reply: () => ({ ok: false, status: 404 }) };
+  const page = { submit: null, focused: [], resets: 0, sent: [], location: { href: '' }, reply: () => ({ ok: false, status: 404 }) };
   const form = {
     addEventListener: (type, fn) => { if (type === 'submit') page.submit = fn; },
     reportValidity: () => true,
@@ -238,6 +239,7 @@ async function standInForm() {
     reset: () => { page.resets++; },
   };
   const stubs = {
+    window: { location: page.location },
     document: { getElementById: (id) => ({ 'demo-form': form, 'demo-status': status })[id] || null },
     FormData: class { entries() { return Object.entries(good)[Symbol.iterator](); } },
     fetch: async (url, init) => {
@@ -273,9 +275,25 @@ async function standInForm() {
 
 const reply = (status, body) => () => ({ ok: status >= 200 && status < 300, status, json: async () => (typeof body === 'string' ? JSON.parse(body) : body) });
 
+test('with an inbox and no endpoint, as site/config.js may be deployed, a request opens the visitor\'s mail app with the fields and sends nothing', async () => {
+  // The committed inbox when there is one, so this runs the state that ships; a stand-in otherwise.
+  const mailto = SITE.demoMailto || 'mailto:demo@lotcurrent.example';
+  const inbox = mailto.replace(/^mailto:/, '').replace(/\?.*$/, '');
+  const page = await standInForm({ demoEndpoint: '', demoMailto: mailto });
+  const said = await page.send(() => { throw new Error('the mail path must not call any endpoint'); });
+  assert.equal(page.sent.length, 0, 'nothing is sent from the page');
+  assert.deepEqual(said, { text: `Your email app should open with the request filled in. If it did not, email ${inbox}.`, kind: 'status ok' });
+  const href = page.location.href;
+  assert.ok(href.startsWith(`${mailto}${mailto.includes('?') ? '&' : '?'}subject=`), `the page goes to the inbox's mailto address: ${href.slice(0, 80)}`);
+  const query = new URLSearchParams(href.slice(href.indexOf('?') + 1));
+  assert.equal(query.get('subject'), 'Lot Current demo request');
+  assert.deepEqual(query.get('body').split('\r\n'), Object.entries(good).map(([k, v]) => `${k}: ${v}`), 'every field as typed, one per line, in the form\'s order');
+  assert.equal(page.resets, 0, 'the form keeps what was typed, in case the mail app did not open');
+});
+
 test('the landing page tells the visitor a request did not send, unless the function answered 200; only 400 and 429 use its own sentence', async () => {
   const page = await standInForm();
-  const failed = { text: 'That did not send. Please try again, or email demo@lotsync.example.', kind: 'status error' };
+  const failed = { text: 'That did not send. Please try again, or email demo@lotcurrent.example.', kind: 'status error' };
   // the function's own failures and anything in front of it: the visitor is told it did not send
   assert.deepEqual(await page.send(reply(500, { ok: false, error: 'the request could not be saved; please email us instead' })), failed, '500');
   assert.deepEqual(await page.send(reply(403, { ok: false, error: 'demo requests come from the Lot Current website only' })), failed, '403');
@@ -285,10 +303,10 @@ test('the landing page tells the visitor a request did not send, unless the func
   assert.equal(page.resets, 0, 'the form keeps what was typed');
   // 400 and 429: the function's sentence, and the field to fix
   assert.deepEqual(await page.send(reply(400, { ok: false, error: 'that email address does not look right', field: 'email' })),
-    { text: 'That email address does not look right. You can also email demo@lotsync.example.', kind: 'status error' });
+    { text: 'That email address does not look right. You can also email demo@lotcurrent.example.', kind: 'status error' });
   assert.deepEqual(page.focused, ['email']);
   assert.deepEqual(await page.send(reply(429, { ok: false, error: 'too many requests from here; please try again in an hour or email us' })),
-    { text: 'Too many requests from here; please try again in an hour or email us. You can also email demo@lotsync.example.', kind: 'status error' });
+    { text: 'Too many requests from here; please try again in an hour or email us. You can also email demo@lotcurrent.example.', kind: 'status error' });
   // 200: the thank-you, and the form is cleared
   assert.deepEqual(await page.send(reply(200, { ok: true })), { text: 'Thank you. We have your request and will reply by email.', kind: 'status ok' });
   assert.equal(page.resets, 1);

@@ -37,11 +37,14 @@ export async function run(s) {
   const still = await s.rest('GET', row(boss), { token: boss.token });
   s.check('they are still the manager afterwards', Array.isArray(still.body) && still.body.length === 1 && still.body[0].role === 'manager', `HTTP ${still.status} ${s.brief(still.body)}`);
 
-  // The manager page: onTeam throws error.message, and the Team card shows it after "Couldn't change the team: ".
+  // The manager page: onTeam throws error.message, and the Team card shows it after "Couldn't change the team: "
+  // (manager.js builds that sentence as `said`, and says it in the status line instead when another dealership was picked meanwhile).
   const page = readFileSync(join(s.root, 'manager/manager.js'), 'utf8');
   const start = page.indexOf('async function onTeam(');
   const onTeam = start < 0 ? '' : page.slice(start, page.indexOf('\n}\n', start));
-  const readsMessage = onTeam.includes('if (error) throw new Error(error.message);') && onTeam.includes("state.teamError = `Couldn't change the team: ${(e && e.message) || e}`;");
+  const readsMessage = onTeam.includes('if (error) throw new Error(error.message);')
+    && onTeam.includes("const said = `Couldn't change the team: ${(e && e.message) || e}`;")
+    && onTeam.includes('state.teamError = said;');
   s.check("manager.js's onTeam shows the database's error.message in the Team card", readsMessage, readsMessage ? '' : 'onTeam no longer reads error.message the way this check expects: look at manager/manager.js');
   const line = typeof said.message === 'string' ? `Couldn't change the team: ${said.message}` : 'no message in the answer';
   s.check("the Team card's line would say why", line.includes('make someone else a manager first'), line);

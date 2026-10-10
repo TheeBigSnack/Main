@@ -227,9 +227,16 @@ const REMOTE_CODE = [
   { re: /\bimport\s*\(\s*[^"'`\s)]/, why: 'a dynamic import of a computed address' },
   { re: /\bimportScripts\s*\(/, why: 'importScripts' },
   { re: /(?:(?<![\w.$])|\b(?:window|globalThis|self)\.)eval\s*\(/, why: 'eval' },
+  // eval handed on as a value (`.then(eval)`, `(0, eval)(s)`, `window['eval']`).
+  // The hyphen keeps a CSP's 'unsafe-eval' text out of it.
+  { re: /(?:(?<![\w.$-])|\b(?:window|globalThis|self)\.)eval\b(?!\s*\()|\[\s*["'`]eval["'`]\s*\]/, why: 'eval used as a value' },
   { re: /(?<![\w.$])(?:new\s+)?Function\s*\(/, why: 'new Function' },
   { re: /\bset(?:Timeout|Interval)\s*\(\s*["'`]/, why: 'a timer given a string of code' },
   { re: /\.(?:innerHTML|outerHTML)\s*=[^;\n]*<script/i, why: 'a script written into the page' },
+  // The extension never builds a <script> element in code: one made by a
+  // function injected into a page would load whatever its src names.
+  { re: /\bcreateElement(?:NS)?\s*\([^)]*["'`]script["'`]\s*\)/i, why: 'a <script> element built in code' },
+  { re: /\bnew\s+(?:Shared)?Worker\s*\(\s*["'`](?:https?:)?\/\//, why: 'a worker from another host' },
 ];
 
 // A match on a comment line (// or a /* */ block's * line) is prose, not code.
@@ -359,8 +366,18 @@ export function placeholders(text) {
   return out;
 }
 
+// The support inbox the website names (supportEmail in site/config.js), or ''.
+// That file is the one place the owner records the inbox, so an address
+// there is the one he confirmed; whether it receives mail stays a box on the
+// listing's "Before submitting" list, which no script can tick.
+export function configuredSupportEmail(configText) {
+  const m = String(configText || '').match(/^\s*supportEmail:\s*'([^']*)'/m);
+  return m ? m[1].trim() : '';
+}
+
 // What stands between the listing and a submission. Returns { failures, conditions }.
-export function checkListing({ listing, privacy, manifest, legalLinks = '', legalStatus = null }) {
+// supportEmail: the inbox site/config.js names, accepted on the listing like a support@ address.
+export function checkListing({ listing, privacy, manifest, legalLinks = '', legalStatus = null, supportEmail = '' }) {
   const failures = [];
   const conditions = [];
   const name = section(listing, 'Item name');
@@ -384,7 +401,7 @@ export function checkListing({ listing, privacy, manifest, legalLinks = '', lega
   const support = section(listing, 'Support and homepage') || '';
   for (const p of placeholders(support)) conditions.push(`Support and homepage still says ${p}`);
   for (const addr of new Set(support.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g) || [])) {
-    if (!/^support@/i.test(addr)) conditions.push(`Support and homepage names ${addr}, not a support inbox: confirm it receives mail before submitting, or put the support inbox there`);
+    if (!/^support@/i.test(addr) && addr.toLowerCase() !== String(supportEmail).toLowerCase()) conditions.push(`Support and homepage names ${addr}, not a support inbox: put the inbox site/config.js names (supportEmail) or a support@ address there`);
   }
   if (/\.example\b/.test(support)) conditions.push('Support and homepage still names .example addresses');
   if (/\.example\b/.test(legalLinks)) conditions.push('extension/src/legalLinks.js still points at .example addresses');
@@ -470,6 +487,7 @@ export function runChecks(root, { zip = true } = {}) {
     manifest,
     legalLinks: existsSync(join(root, 'extension/src/legalLinks.js')) ? read('extension/src/legalLinks.js') : '',
     legalStatus: existsSync(legalStatusPath) ? JSON.parse(read('legal/legal-status.json')) : null,
+    supportEmail: existsSync(join(root, 'site/config.js')) ? configuredSupportEmail(read('site/config.js')) : '',
   });
   failures.push(...l.failures);
   conditions.push(...l.conditions);

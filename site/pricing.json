@@ -5,17 +5,8 @@
   "perRooftopMonthly": 149,
   "includedSalespeople": 5,
   "extraSalespersonMonthly": 20,
-  "annualMonthsCharged": 10,
   "pilotDays": 30,
   "foundingDealerMonthly": 99,
   "foundingDealerMonths": 12,
-  "foundingDealerCount": 5,
-  "why": "Per rooftop per month is how dealers already buy website and inventory tools, and it matches the pilot agreement. $149 sits well under the auto-posting tools most dealers compare against, and about where a store stops asking the general manager. Five salespeople covers a typical used-car desk; the seat price keeps a 12-person store from being free. The founding rate is for the first design-partner stores that put up with the rough edges.",
-  "wouldChangeIt": [
-    "Pilot feedback that the used car manager values the sold-car flag more than posting speed: price the manager view, not the posting.",
-    "A store posting far more than 10 cars per salesperson per day: a usage tier.",
-    "Attorney advice on Meta exposure that changes what can be promised: lower the price and the promise together.",
-    "Sister stores signing as a group: a per-group rate."
-  ],
-  "notes": "Numbers to test in pilot conversations, not a price list. The sales sheet and positioning quote this file; test/marketing.test.js keeps them equal. Billing itself is Milestone 5 (PLAN.md)."
+  "foundingDealerCount": 5
 }

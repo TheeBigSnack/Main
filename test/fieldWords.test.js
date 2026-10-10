@@ -157,6 +157,12 @@ test('a trailer, RV, powersport vehicle or boat never reaches the car form', () 
   }
   // a make that builds only RVs, with no body style
   assert.match(assessVehicle(vehicle('usedNormal', { make: 'Winnebago', body_details: { type: '' } }), {}).reason, /make "Winnebago" makes it an RV or camper/);
+  // a van body from a maker of RVs is a camper van, and stays off the car form; a van from a car maker is a car
+  const camper = vehicle('usedNormal', { make: 'Winnebago', model: 'Travato', body_details: { type: 'Van' } });
+  assert.equal(assessVehicle(camper, {}).decision, DECISION.REVIEW);
+  assert.match(assessVehicle(camper, {}).reason, /make "Winnebago" with body style "Van" makes it an RV or camper/);
+  assert.equal(buildListingData(camper).fields.vehicleType, '');
+  assert.equal(buildListingData(vehicle('usedNormal', { body_details: { type: 'Van' } })).fields.vehicleType, 'car_truck');
   // a new one is still skipped as new
   assert.equal(assessVehicle(vehicle('newNormal', { body_details: { type: 'Trailer' } }), {}).decision, DECISION.SKIP);
   // cars and trucks are untouched
@@ -202,7 +208,8 @@ test('the queue holds a car at review when anything besides the dealership defau
   const body = src.slice(start, src.indexOf('\n}\n', start) + 2);
   const make = new Function('state', 'currentListing', 'dailyCap', 'photoPatterns', 'refusedPhotoServers', `${body}\nreturn canAutoOpen;`);
   const opens = (listing) => make({ guardrails: { ok: true }, vinCheck: { local: { ok: true } } }, () => listing, () => ({ reached: false }), () => [], new Set())();
-  const options = { dealer: { zip: '45505' }, description: 'Written from the facts.', price: 20000, photos: ['https://img.example/1.jpg'] };
+  // the salesperson ticked their store, the one the website lists the pilot's Ram at
+  const options = { dealer: { zip: '45505' }, description: 'Written from the facts.', price: 20000, photos: ['https://img.example/1.jpg'], stores: [vehicle('usedNormal').location] };
   // the pilot's Ram: only the dealership defaults are assumed, so it opens
   assert.equal(opens(buildListingData(vehicle('usedNormal'), options)), true);
   // each of these used to be blank (and so held at review); now filled, it must still stop there
@@ -210,6 +217,7 @@ test('the queue holds a car at review when anything besides the dealership defau
     'body style from the page address': vehicle('usedNormal', { body_details: { type: 'Cars' } }),
     'a shade name (Sepia)': vehicle('usedNormal', { styles: { interior_color: 'Sepia' } }),
     'a shade name (Pewter Metallic)': vehicle('usedNormal', { styles: { exterior_color: 'Pewter Metallic' } }),
+    'two colors run together (Black Forest Green)': vehicle('usedNormal', { styles: { exterior_color: 'Black Forest Green' } }),
     "an electric car's single speed": vehicle('usedNormal', { mechanical: { fuel_type: 'Electric', transmission: '1-Speed' } }),
     'a mild hybrid': vehicle('certified'),
   };
@@ -225,4 +233,10 @@ test('the queue holds a car at review when anything besides the dealership defau
   const guessed = buildListingData(vehicle('usedNormal', { styles: { exterior_color: '' } }), { ...options, guesses: { exterior: 'Blue', confidence: 'high' } });
   assert.deepEqual(guessed.missing, []);
   assert.equal(opens(guessed), false, 'a photo guess waits at review');
+  // a branded title in the website's own words: the title is left for the person, so the car waits at review
+  const branded = buildListingData(vehicle('usedNormal', { description: 'Salvaged title, sold as is.' }), options);
+  assert.equal(branded.branded, 'Salvaged');
+  assert.deepEqual(branded.missing, ['titleStatus'], 'only the title is blank');
+  assert.equal(branded.fields.cleanTitle, 'no');
+  assert.equal(opens(branded), false, 'a branded title waits at review');
 });

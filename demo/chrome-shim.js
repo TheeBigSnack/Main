@@ -20,6 +20,8 @@
 //                                              work as in Chrome; rejects when nothing listens (as Chrome does)
 //   chrome.runtime.getManifest / getURL / id   the real manifest.json, read once by the sandbox page
 //   chrome.runtime.onInstalled / onStartup     fired once by the sandbox page after the service worker frame loads
+//   chrome.runtime.getContexts                 the one window's side panel, always docked (STUB: no other window,
+//                                              popup or worker context is listed)
 //   chrome.scripting.executeScript             runs `func` INSIDE the browser-pane tab's window (same origin):
 //                                              document, window and location in it are that page's; the result
 //                                              comes back structured-cloned; files: [] is not supported
@@ -35,6 +37,11 @@
 //                                              when everything is granted already, and otherwise answers
 //                                              hub.permissionAnswer (true unless a test sets it) without showing
 //                                              Chrome's prompt (STUB); hub.permissionRequests lists what was asked
+//   fetch to the account server                answered in the frame, never sent (STUB): the extension's
+//                                              src/accountConfig.js names the production Supabase project, and
+//                                              a sign-in or a sync from the sandbox would create a real account
+//                                              or write real rows there; the answer says the test drive does not
+//                                              sign in, and the Account section shows that sentence
 //   chrome.alarms                              remembered, never fired (STUB: the sandbox has a button that
 //                                              sends the rescan message the alarm would)
 //   chrome.notifications.create                shown as a toast on the sandbox page
@@ -42,9 +49,14 @@
 //                                              shown on the sandbox page's Lot Current toolbar icon
 //   chrome.sidePanel.open / setPanelBehavior   the panel is always docked in the sandbox; open() only flashes it (STUB)
 //   chrome.storage.managed                     always empty (STUB)
-// Nothing here can reach the Publish, Update, Delete or Mark as sold buttons
-// on the sandbox's Marketplace pages: the shim has no page-clicking API at
-// all, only what the extension itself calls.
+// The shim adds no way onto a page of its own. executeScript runs whatever
+// function the extension passes, in the page's window, as Chrome does; what
+// the extension may pass (its fill functions and site probes, none of which
+// clicks Publish, Update, Delete or Mark as sold) is held by
+// test/posting.test.js. There is deliberately no registerContentScripts or
+// unregisterContentScripts: extension code that called one would fail
+// test/demo.test.js ("the shim defines every chrome.* member ...") instead
+// of passing silently here.
 
 (function (root) {
   'use strict';
@@ -165,7 +177,7 @@
 
     const hub = {
       manifest: options.manifest || { name: 'Lot Current', version: '' },
-      extensionId: options.extensionId || 'lot-sync-sandbox',
+      extensionId: options.extensionId || 'lot-current-sandbox',
       extensionBase: options.extensionBase || '',
       tabs: options.tabs || null,
       alarms,
@@ -326,6 +338,12 @@
           for (const a of args) if (typeof a === 'function') cb = a;
           return promised(() => hub.sendMessage(frame, message), cb);
         },
+        // The sandbox has one window (id 1), and its side panel is always docked.
+        getContexts: (filter, cb) => promised(() => {
+          const f = filter || {};
+          const all = [{ contextType: 'SIDE_PANEL', contextId: 'sandbox-side-panel', tabId: -1, windowId: 1, frameId: -1, documentId: 'sandbox-side-panel', documentUrl: hub.extensionBase ? new URL('sidepanel.html', hub.extensionBase).href : 'sidepanel.html', documentOrigin: '', incognito: false }];
+          return all.filter((c) => (!Array.isArray(f.contextTypes) || f.contextTypes.includes(c.contextType)) && (!Array.isArray(f.windowIds) || f.windowIds.includes(c.windowId)));
+        }, typeof filter === 'function' ? filter : cb),
         onMessage: event('runtime.onMessage'),
         onInstalled: event('runtime.onInstalled'),
         onStartup: event('runtime.onStartup'),
@@ -349,8 +367,6 @@
           const result = await fn(...args);
           return [{ frameId: 0, documentId: 'sandbox', result: result === undefined ? undefined : clone(result) }];
         },
-        registerContentScripts: () => Promise.resolve(),
-        unregisterContentScripts: () => Promise.resolve(),
       },
 
       tabs: {
@@ -448,7 +464,30 @@
     return chrome;
   }
 
-  root.LotSyncShim = { createHub, createChrome, AREAS };
+  // The account server is never reached from the sandbox (see the list
+  // above): any request to a Supabase project, sign-in, sync or rewrite, is
+  // answered here with a 503 whose message src/account.js errorText shows.
+  const SANDBOX_NO_ACCOUNTS = 'The test drive does not sign in or sync: accounts work in the installed extension only';
+  function isAccountServer(address) {
+    try {
+      return /(^|\.)supabase\.(co|in)$/i.test(new URL(String(address)).hostname);
+    } catch (e) {
+      return false;
+    }
+  }
+  function guardFetch(win) {
+    if (!win || typeof win.fetch !== 'function') return;
+    const real = win.fetch.bind(win);
+    win.fetch = function (input, init) {
+      const address = typeof input === 'string' ? input : (input && (input.url || input.href)) || '';
+      if (isAccountServer(address)) {
+        return Promise.resolve(new win.Response(JSON.stringify({ msg: SANDBOX_NO_ACCOUNTS }), { status: 503, headers: { 'content-type': 'application/json' } }));
+      }
+      return real(input, init);
+    };
+  }
+
+  root.LotSyncShim = { createHub, createChrome, AREAS, isAccountServer, SANDBOX_NO_ACCOUNTS };
 
   // Inside a sandbox frame: the hub is on the sandbox page; install chrome now,
   // before the extension's module script runs.
@@ -457,5 +496,8 @@
     if (root.__lotSyncHub) hub = root.__lotSyncHub;
     else if (root.parent && root.parent !== root && root.parent.__lotSyncHub) hub = root.parent.__lotSyncHub;
   } catch (e) { hub = null; }
-  if (hub) root.chrome = createChrome(hub, root);
+  if (hub) {
+    root.chrome = createChrome(hub, root);
+    guardFetch(root);
+  }
 })(typeof window !== 'undefined' ? window : globalThis);

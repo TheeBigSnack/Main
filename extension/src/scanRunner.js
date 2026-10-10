@@ -5,12 +5,12 @@
 
 import { ADAPTERS, detectAdapter, unsupportedSiteMessage } from '../adapters/index.js';
 import { assessVehicle } from './classify.js';
-import { makeSnapshot, diffScans } from './rescan.js';
-import { findBoilerplate } from './description.js';
+import { makeSnapshot, diffScans, withSeenBasis } from './rescan.js';
+import { findBoilerplate, MIN_BOILERPLATE_COUNT } from './description.js';
 import { withDefaults } from './settings.js';
 import { storeNames, shortLocation, matchStore } from './normalize.js';
 import { probeSiteInPage } from './scan.js';
-import { SITES_KEY } from './storageKeys.js';
+import { SITES_KEY, siteKeys } from './storageKeys.js';
 import { updateKey } from './storage.js';
 
 /**
@@ -59,7 +59,7 @@ export function siteForSnapshot(site) {
  */
 export async function scanWithSearch({ adapter, search, site, settings, prevSnapshot = null, posted = {}, options = null, boilerplate: savedBoilerplate = [] }) {
   const last = (prevSnapshot && prevSnapshot.vehicles) || {};
-  const confirmVins = [...new Set([...Object.keys(last), ...Object.keys(posted || {})])];
+  const confirmVins = confirmOrder([...new Set([...Object.keys(last), ...Object.keys(posted || {})])], prevSnapshot && prevSnapshot.unchecked);
   // Where each car was last seen, for an adapter that checks a missing car
   // at its own page; the last read and the posted list, for one that reads
   // only what may have changed. An adapter that needs none of it ignores it.
@@ -82,17 +82,52 @@ export async function scanWithSearch({ adapter, search, site, settings, prevSnap
   diff.takenAt = res.fetchedAt;
   diff.requests = res.requests;
   // Text that repeats across the lot (disclaimers, legal lines) is kept so the
-  // description writer can strip it. A descriptionRaw of null is a car whose
-  // description this scan did not read (an adapter that re-reads only what
-  // may have changed): the lines found before are kept next to what the
-  // descriptions read this time show.
-  const read = vehicles.map((v) => v.descriptionRaw).filter((d) => d !== null);
-  const found = findBoilerplate(read);
-  const boilerplate = read.length < vehicles.length ? [...new Set([...(Array.isArray(savedBoilerplate) ? savedBoilerplate : []), ...found])] : [...found];
+  // description writer can strip it. A scan that read every car's
+  // description works the lines out again from scratch. Any other scan keeps
+  // the lines saved from the last one and adds a line only when it is on the
+  // share of the whole lot, not of the pages it happened to read:
+  //  - a car whose description this scan did not read (res.descriptionsUnread,
+  //    an adapter that re-reads only what may have changed, or res.unread, a
+  //    car kept from the last snapshot) counts in the lot, so three new
+  //    arrivals sharing a sentence never make it a lot-wide line; a car that
+  //    simply has no description (a descriptionRaw of null that is not
+  //    listed there, such as a list card without dealer comments) is not a
+  //    description and counts in neither;
+  //  - a scan that did not get the whole list (res.complete false) keeps
+  //    the saved lines too, and one whose snapshot is not saved
+  //    (diff.unreliable, a website hiccup) is measured against the lot as
+  //    last saved, so an empty or near-empty answer never wipes them;
+  //  - fewer descriptions than MIN_BOILERPLATE_COUNT can show no line at
+  //    all, so the saved ones stay.
+  const notRead = new Set(Array.isArray(res.descriptionsUnread) ? res.descriptionsUnread : []);
+  const skipped = vehicles.filter((v) => notRead.has(v.vin)).length + (Array.isArray(res.unread) ? res.unread.length : 0);
+  const read = vehicles.filter((v) => !notRead.has(v.vin)).map((v) => v.descriptionRaw).filter((d) => d !== null && d !== undefined);
+  const saved = Array.isArray(savedBoilerplate) ? savedBoilerplate : [];
+  const whole = skipped === 0 && read.length >= MIN_BOILERPLATE_COUNT && res.complete && !diff.unreliable;
+  const lot = diff.unreliable ? Math.max(read.length + skipped, (diff.counts && diff.counts.previous) || 0) : read.length + skipped;
+  const boilerplate = whole ? [...findBoilerplate(read)] : [...new Set([...saved, ...findBoilerplate(read, undefined, undefined, lot)])];
   // Where this lot's photos are hosted: recorded here; the side panel asks
   // Chrome for a car's photo servers from the salesperson's click (src/photoHosts.js).
   const photoOrigins = typeof adapter.photoOrigins === 'function' ? adapter.photoOrigins(res.records) : [];
   return { ok: true, res, vehicles, assessments, snapshot, diff, boilerplate, photoOrigins, carry };
+}
+
+// The cars a scan checks when they are missing, in the order it is to try
+// them: those the last scan's check left unchecked (`unchecked`, the last
+// snapshot's: their own page failed, or the check stopped before them after
+// pages failed in a row) go last, so a few pages that keep failing never hold
+// back the other cars' sold check scan after scan, whatever the adapter;
+// among those, the reverse of the order the last scan gave them, so the
+// ones it never got to come before the pages that failed.
+export function confirmOrder(vins, unchecked) {
+  const list = Array.isArray(vins) ? vins : [];
+  const left = unchecked && typeof unchecked === 'object' ? Object.keys(unchecked).map((v) => v.toUpperCase()) : [];
+  if (!left.length) return list;
+  const rank = new Map(left.map((vin, n) => [vin, n]));
+  const at = (vin) => rank.get(String(vin || '').toUpperCase());
+  const first = list.filter((vin) => at(vin) === undefined);
+  const last = list.filter((vin) => at(vin) !== undefined).sort((a, b) => at(b) - at(a));
+  return [...first, ...last];
 }
 
 // The snapshot a scan leaves for the next one. Four things come over from
@@ -112,7 +147,9 @@ export async function scanWithSearch({ adapter, search, site, settings, prevSnap
 // car at its own page can check a posted car again next time, even after
 // the car has left the lot's list; with it, when Lot Current first saw that
 // car (missingSeen), so a car that comes straight back is not called a
-// first sighting (rescan.js firstSeenAt).
+// first sighting (rescan.js firstSeenAt). It also keeps the cars this scan's
+// check left unchecked, with why (unchecked), so the next scan checks them
+// last (confirmOrder).
 function snapshotOf({ site, res, vehicles, assessments, carry }) {
   const snapshot = makeSnapshot({ site, takenAt: res.fetchedAt, complete: res.complete, vehicles, assessments, previous: carry.previous || null });
   const readNow = new Set(Array.isArray(res.pagesRead) ? res.pagesRead : []);
@@ -135,6 +172,10 @@ function snapshotOf({ site, res, vehicles, assessments, carry }) {
   }
   if (Object.keys(missingPages).length) snapshot.missingPages = missingPages;
   if (Object.keys(missingSeen).length) snapshot.missingSeen = missingSeen;
+  const unchecked = res.confirm && res.confirm.unchecked && typeof res.confirm.unchecked === 'object' ? res.confirm.unchecked : {};
+  const left = {};
+  for (const [vin, why] of Object.entries(unchecked)) if (!snapshot.vehicles[vin]) left[vin] = typeof why === 'string' ? why.slice(0, 200) : '';
+  if (Object.keys(left).length) snapshot.unchecked = left;
   return snapshot;
 }
 
@@ -149,7 +190,7 @@ export function incompleteWarning(res) {
   const found = res.records.length + kept;
   const left = Number(res.leftForLater) || 0;
   const c = res.confirm;
-  const doubleChecked = c && !c.error && Array.isArray(c.checked) && c.checked.length ? ' Missing cars were double-checked one by one.' : '';
+  const doubleChecked = c && !c.error && Array.isArray(c.checked) && c.checked.length ? ' Missing cars were looked up again on the website.' : '';
   if (left) {
     const those = left === 1 ? "one car's page was" : `${left} cars' pages were`;
     const shows = kept ? ' A car whose page was not read this time shows what the last scan read.' : '';
@@ -171,10 +212,11 @@ const defaultStores = (site, stores) => { const mine = matchStore(site, stores);
 
 /**
  * A full scan from a dealer tab: probe, detect the adapter, read the lot,
- * settle the settings (first scan: defaults from the site; from the synced
- * profile: keep only store names this website has), assess, diff, remember
- * the site for background rescans. Used by the popup's Scan button and the
- * set-up wizard.
+ * settle the settings (the website's first scan: defaults from the site, the
+ * store named after it ticked even over settings saved before the scan; from
+ * the synced profile: keep only store names this website has), assess,
+ * diff, remember the site for background rescans. Used by the popup's Scan
+ * button and the set-up wizard.
  */
 export async function performScan({ tabId, origin, settings = null, settingsFromProfile = false, snapshot = null, posted = {}, boilerplate = [] }) {
   const probe = await probeTab(tabId);
@@ -187,13 +229,26 @@ export async function performScan({ tabId, origin, settings = null, settingsFrom
   const out = await scanWithSearch({ adapter, search, site, settings: s || withDefaults({}, site), prevSnapshot: snapshot, posted, options: adapter.scanOptions(service), boilerplate });
   if (!out.ok) return { ok: false, message: out.message || "Couldn't read this page." };
   let result = out;
-  if (!s || settingsFromProfile) {
+  // The website's first scan (no snapshot yet) settles the stores, whatever
+  // settings came before it: Settings lists no store until a scan, so
+  // settings saved before one (a Save, a sign-in) never chose any. A choice
+  // a person made with the stores in view (storesChosen: Settings after a
+  // scan, set-up's store step, or the profile saved from either) stands,
+  // every store (none ticked) included.
+  if (!s || settingsFromProfile || !snapshot) {
     const stores = storeNames(out.vehicles);
-    if (s && settingsFromProfile) {
-      // (whether the profile's dealership part applies here was decided by
-      // settingsFromProfile from the website it was saved on)
+    if (s) {
+      // From the synced profile (whether its dealership part applies here was
+      // decided by settingsFromProfile from the website it was saved on), or
+      // saved before this first scan: only store names this website has.
       const kept = s.myStores.filter((st) => stores.includes(st));
-      s = withDefaults({ ...s, myStores: kept.length ? kept : defaultStores(site, stores) }, site);
+      const everyStore = s.storesChosen && !s.myStores.length;
+      // An earlier build stored the website's address as the dealership's
+      // name when Settings was saved before the first scan; the name the
+      // website gives replaces it.
+      const dealer = !snapshot && site.host && s.dealer.name === site.host ? { ...s.dealer, name: '' } : s.dealer;
+      const chosen = kept.length > 0 || everyStore;
+      s = withDefaults({ ...s, dealer, myStores: chosen ? kept : defaultStores(site, stores), storesChosen: chosen && s.storesChosen }, site);
     } else {
       s = withDefaults({ myStores: defaultStores(site, stores) }, site);
     }
@@ -208,6 +263,21 @@ export async function performScan({ tabId, origin, settings = null, settingsFrom
   }
   await rememberSite(origin, { name: site.name, adapter: adapter.PLATFORM.id, service, site: out.snapshot.site, photoOrigins: out.photoOrigins, lastScan: result.res.fetchedAt, lastError: null, auto: Boolean(s.autoRescan) });
   return { ok: true, settings: s, site, service, adapterId: adapter.PLATFORM.id, snapshot: result.snapshot, diff: result.diff, boilerplate: result.boilerplate, vehicles: result.vehicles, res: result.res, photoOrigins: out.photoOrigins };
+}
+
+// After a scan is saved: each posted entry without a price basis (brought by
+// a sync, or kept from before the basis was recorded) gets the one the scan
+// read its price on, the last scan's or this one's (src/rescan.js
+// withSeenBasis), so the reading still stands once the website moves the
+// price. Written under the posted list's lock; nothing when nothing is read.
+// `diff` is the scan's saved diff: only a read it trusts (unreliable: false)
+// records anything. A read judged a website hiccup is held back (withWithheld)
+// and records nothing: the basis goes up with the next sync and becomes every
+// computer's, and the next trusted scan reads it again from the same saved
+// snapshot. A missing diff records nothing either.
+export async function keepSeenBasis(origin, previous, snapshot, diff, storage) {
+  if (!diff || typeof diff !== 'object' || diff.unreliable !== false) return undefined;
+  return updateKey(siteKeys(origin).posted, (posted) => withSeenBasis(posted, previous, snapshot), storage);
 }
 
 // Sites the extension knows, for background rescans:

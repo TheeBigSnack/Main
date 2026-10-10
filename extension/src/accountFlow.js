@@ -7,7 +7,7 @@
 //   signInStart(email, deps)          -> the auth server emails a code
 //   signInFinish(email, code, deps)   -> the code becomes a stored session
 //   currentSession(deps)              -> the stored session, refreshed when due
-//   signOutAll(deps)                  -> the token is revoked and forgotten
+//   signOutAll(deps)                  -> the token is revoked and forgotten, with every website's sync state
 //   syncOnce({ origin, scan, deps })  -> POST .../sync, merge the answer
 //   rewriteEndpointFor(config)        -> the rewrite function's address
 //   rewriteKeyFor({ rewrite, session, config }) -> what goes in Authorization
@@ -19,10 +19,11 @@
 //
 // What a sync writes, all under the key's lock (src/storage.js): the merged
 // registry to posted:<origin> (colleagues' entries marked `mine: false`, so
-// the cap and the rescan flags stay the salesperson's own), closed flags to
-// pilot:<origin>, and the state for the next call (since, the keys of the
-// salesperson's own posts it sent or received, dealership, role, the plan,
-// the server's count of today's posts) to sync:<origin>. The access token is
+// the cap and the rescan flags stay the salesperson's own), the flags
+// closed (or dropped, mergeFlags) to pilot:<origin>, and the state for the
+// next call (since, this machine's clock when the sync began, the keys of
+// the salesperson's own posts it sent or received, dealership, role, the
+// plan, the server's count of today's posts) to sync:<origin>. The access token is
 // only ever read from the session in chrome.storage.local; it is never
 // copied into the settings or the synced profile.
 
@@ -30,7 +31,7 @@ import { ACCOUNT, accountsConfigured } from './accountConfig.js';
 import { signInWithMagicLink, verifyOtp, ensureFreshSession, loadSession, storeSession, clearSession, signOut, authHeaders, errorText, DEFAULT_OTP_TYPE } from './account.js';
 import { syncPayload, mergeRegistry, mergeFlags, nextSyncState, scanSummary, SYNC_VERSION } from './sync.js';
 import { withPilotDefaults } from './pilot.js';
-import { siteKeys } from './storageKeys.js';
+import { siteKeys, originOfSiteKey, SITES_KEY } from './storageKeys.js';
 import { updateKey, storageErrorText, withLock } from './storage.js';
 import { DECISION } from './classify.js';
 
@@ -44,7 +45,7 @@ export const NOT_SIGNED_IN = 'not signed in';
 // repeated here so the side panel can tell that answer from any other
 // failure of the rewrite service, and so Settings can say it after a sync.
 export const LAPSED_CODE = 'lapsed';
-export const LAPSED_MESSAGE = "the dealership's Lot Current subscription has lapsed: a manager can renew it in the manager view";
+export const LAPSED_MESSAGE = "the dealership's Lot Current subscription has lapsed: a manager can renew it, and the manager view's Billing card says how";
 export const LAPSED_SENTENCE = LAPSED_MESSAGE[0].toUpperCase() + LAPSED_MESSAGE.slice(1);
 
 const trimSlash = (u) => String(u || '').trim().replace(/\/+$/, '');
@@ -93,7 +94,9 @@ const unreachable = (e) => `couldn't reach the account server (${(e && e.message
 /**
  * Asks the auth server to email a sign-in code to this address. No
  * redirect is asked for, so the email's code is the way in (the template
- * carries {{ .Token }}, supabase/README.md step 3).
+ * carries {{ .Token }}, supabase/README.md step 3), and the request carries
+ * a PKCE challenge nobody can answer, so the email's link brings no token
+ * to the manager view it lands on (account.js unanswerableChallenge).
  * @returns {{ ok: true, email, message } | { ok: false, error, notConfigured? }}
  */
 export async function signInStart(email, deps = {}) {
@@ -145,16 +148,39 @@ export async function currentSession(deps = {}) {
   }
 }
 
+// Every key the storage area holds: getKeys() where Chrome has it, else
+// everything read once (a sign-out is rare enough for that).
+async function storedKeys(storage) {
+  if (typeof storage.getKeys === 'function') return storage.getKeys();
+  return Object.keys((await storage.get(null)) || {});
+}
+
 /**
  * Revokes the token (best effort) and forgets the session. The sync state of
- * the websites named in deps.origins goes too, so the next sign-in starts
- * with a first sync, which takes nothing down.
+ * every website on this computer goes too (each sync:<origin> stored, plus
+ * the websites named in deps.origins), not only the website open, so the
+ * next sign-in, whoever it is, starts each website with a first sync, which
+ * takes nothing down, and no website keeps showing the last account's
+ * dealership, role, plan or count of today's posts. Each website's registry
+ * entry forgets the last account's sync record too (SYNC_RECORD), so
+ * Settings never shows its time or its error to the next account.
  */
 export async function signOutAll(deps = {}) {
   const { config, fetchImpl, storage } = withDeps(deps);
   const session = await loadSession(storage);
   await signOut(session, { url: config.url, anonKey: config.anonKey, fetchImpl, storage });
-  const keys = (Array.isArray(deps.origins) ? deps.origins : []).filter(Boolean).map((o) => siteKeys(o).sync);
+  const origins = new Set((Array.isArray(deps.origins) ? deps.origins : []).filter(Boolean));
+  if (storage) {
+    try {
+      for (const key of await storedKeys(storage)) {
+        const origin = originOfSiteKey('sync', key);
+        if (origin) origins.add(origin);
+      }
+    } catch {
+      /* the keys could not be listed: the websites named still go */
+    }
+  }
+  const keys = [...origins].map((o) => siteKeys(o).sync);
   if (keys.length && storage) {
     try {
       await storage.remove(keys);
@@ -162,7 +188,34 @@ export async function signOutAll(deps = {}) {
       /* the session is gone; a stale sync state only makes the next sync a full one */
     }
   }
+  if (storage) {
+    try {
+      await updateKey(SITES_KEY, withoutSyncRecord, storage);
+    } catch {
+      /* the session is gone; Settings may show the last sync's time until the next one */
+    }
+  }
   return { ok: true };
+}
+
+// What the service worker records about a website's last sync on its
+// registry entry (background.js startSync).
+const SYNC_RECORD = ['lastSync', 'lastSyncAttempt', 'lastSyncError', 'lastSyncRetry'];
+
+// The registry without any sync record; undefined (nothing written) when it holds none.
+function withoutSyncRecord(sites) {
+  if (!sites || typeof sites !== 'object') return undefined;
+  let changed = false;
+  const next = {};
+  for (const [origin, entry] of Object.entries(sites)) {
+    if (entry && typeof entry === 'object' && SYNC_RECORD.some((f) => f in entry)) {
+      next[origin] = Object.fromEntries(Object.entries(entry).filter(([f]) => !SYNC_RECORD.includes(f)));
+      changed = true;
+    } else {
+      next[origin] = entry;
+    }
+  }
+  return changed ? next : undefined;
 }
 
 // ---------- the rewrite service ----------
@@ -188,10 +241,21 @@ export function rewriteKeyFor({ rewrite = {}, session = null, config = ACCOUNT }
 
 // This scan's counts from what a scan leaves behind (the snapshot and the
 // diff), for the sync function's scan summary; null when nothing was scanned.
+// A scan judged a website hiccup (diff.unreliable) goes up marked withheld,
+// with the counts of its own read, held back with the diff (diff.withheld,
+// src/rescan.js withWithheld): its snapshot is not saved, so its short car
+// count is not the lot's, and the manager's page shows it as held back, not
+// as the last scan (manager/data.js), so the manager sees that scans are
+// running and being held back. A diff from a build that kept no read sends
+// nothing. Once the salesperson accepts the read (acceptWithheld), the next
+// scan compares with it and goes up as a trusted scan.
 export function scanFromStored({ snapshot = null, diff = null } = {}) {
-  const takenAt = (diff && diff.takenAt) || (snapshot && snapshot.takenAt) || null;
+  const held = diff && diff.unreliable;
+  const read = held ? diff.withheld && diff.withheld.snapshot : snapshot;
+  if (held && !(read && read.vehicles && typeof read.vehicles === 'object')) return null;
+  const takenAt = (diff && diff.takenAt) || (read && read.takenAt) || null;
   if (!takenAt) return null;
-  const vehicles = snapshot && snapshot.vehicles && typeof snapshot.vehicles === 'object' ? Object.values(snapshot.vehicles) : [];
+  const vehicles = read && read.vehicles && typeof read.vehicles === 'object' ? Object.values(read.vehicles) : [];
   const count = (list) => (Array.isArray(list) ? list.length : 0);
   return scanSummary({
     takenAt,
@@ -199,6 +263,7 @@ export function scanFromStored({ snapshot = null, diff = null } = {}) {
     ready: vehicles.filter((v) => v && v.decision === DECISION.READY).length,
     takeDownCount: count(diff && diff.takeDown),
     priceUpdateCount: count(diff && diff.priceUpdates),
+    withheld: Boolean(held),
   });
 }
 
@@ -227,8 +292,9 @@ async function postJson(fetchImpl, url, body, headers, timeoutMs) {
 /**
  * One round of sync for one dealer website: the salesperson's registry and
  * the pilot's changes go up, the dealership's registry comes down and is
- * merged into posted:<origin>, closed flags into pilot:<origin>, and the
- * state for the next call into sync:<origin>.
+ * merged into posted:<origin>, the flags in pilot:<origin> follow the
+ * server's to-do items (mergeFlags), and the state for the next call goes
+ * into sync:<origin>.
  * @param {object} args
  *   origin: the dealer website's origin
  *   scan:   this scan's counts ({ takenAt, cars, ready, takeDownCount, priceUpdateCount }),
@@ -262,7 +328,11 @@ export async function syncOnce({ origin = '', scan = null, deps = {} } = {}) {
   }
   const since = state && state.since ? state.since : null;
   const userId = (session.user && session.user.id) || '';
-  const body = syncPayload({ origin: o, posted, known: state && state.known, pilot, scan: summary, since, userId, now: new Date(now) }); // `today` is built from this clock
+  // The pilot's attempts and flags go up by this machine's own clock (the
+  // last successful sync's start, `localSince`), never by the server's
+  // `since`: a clock running behind would otherwise keep them home for good.
+  const localSince = new Date(now).toISOString(); // taken before storage was read
+  const body = syncPayload({ origin: o, posted, known: state && state.known, pilot, scan: summary, since, localSince: state && state.localSince, userId, now: new Date(now) }); // `today` is built from this clock
   // A clear while the request is out (Clear everything for this website)
   // removes the sync state, and a sync state missing when the answer comes
   // back is how that clear is seen: nothing the request carried is then
@@ -338,15 +408,18 @@ export async function syncOnce({ origin = '', scan = null, deps = {} } = {}) {
       held = merged;
       return same(merged, current || {}) ? undefined : merged;
     }, storage);
+    // closed flags close here; an open item on one of the person's own
+    // listings that this machine does not hold (cleared here) is taken in
     await updateKey(k.pilot, (current) => {
       const before = withPilotDefaults(current);
-      const merged = mergeFlags(before, answer);
+      // with the registry just merged: a flag raised before this machine heard of a fix made elsewhere goes
+      const merged = mergeFlags(before, answer, { posted: held, userId });
       return same(merged, before) ? undefined : merged;
     }, storage);
     // A state gone by now means a clear landed after the merge: nothing is
     // written back, and the next sync is a first sync, which takes nothing
     // down and refills the registry from the server.
-    next = await updateKey(k.sync, (prev) => (prev ? nextSyncState(prev, answer, { today: body.today, sent: body.posted, userId, held }) : undefined), storage);
+    next = await updateKey(k.sync, (prev) => (prev ? nextSyncState(prev, answer, { today: body.today, sent: body.posted, userId, held, localSince }) : undefined), storage);
   } catch (e) {
     return { ok: false, error: storageErrorText(e) };
   }
@@ -372,12 +445,18 @@ export function describeSync(r) {
     const who = r.dealership && r.dealership.name ? ` with ${r.dealership.name}` : '';
     const role = r.role ? ` as ${r.role}` : '';
     const down = c.takenDown ? `, ${c.takenDown} taken down` : '';
-    return `Synced${who}${role}: ${r.listed} listing${r.listed === 1 ? '' : 's'} shared, ${sent} of yours sent${down}.`;
+    // posts the function would not put on the dealership's list (src/sync.js notSharedFrom says which, for My listings)
+    const posts = (n) => `${n} of your posts ${n === 1 ? 'was' : 'were'} not shared with your dealership`;
+    const colleague = c.conflicts > 0 ? ` ${posts(c.conflicts)}: a colleague already has ${c.conflicts === 1 ? 'that car' : 'those cars'} listed (My listings shows which).` : '';
+    const clock = c.rejected > 0 ? ` ${posts(c.rejected)}: ${c.rejected === 1 ? 'its' : 'their'} posting time is ahead of the server's clock, so check this computer's date and time.` : '';
+    return `Synced${who}${role}: ${r.listed} listing${r.listed === 1 ? '' : 's'} shared, ${sent} of yours sent${down}.${colleague}${clock}`;
   }
   if (r.notConfigured) return r.error || NOT_CONFIGURED;
   if (r.code === LAPSED_CODE || r.lapsed) return `Not synced: ${r.error || LAPSED_MESSAGE}.`;
   if (r.signedOut) return `Not synced: sign in first (${r.error || NOT_SIGNED_IN}).`;
-  return `Sync failed: ${r.error || 'unknown error'}`;
+  // the server asked to wait, and the service worker set a retry (background.js planRetry)
+  const retry = r.retryAt ? '. Lot Current tries again on its own in a minute.' : '';
+  return `Sync failed: ${r.error || 'unknown error'}${retry}`;
 }
 
 // One line about the dealership's plan for the Account section, from the

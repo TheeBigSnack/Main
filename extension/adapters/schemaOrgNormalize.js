@@ -18,7 +18,7 @@
 // shows as its label.
 
 import { toNumber, shortLocation, conditionFromSchemaOrg, conditionWordFromPath } from '../src/normalize.js';
-import { readCondition, titleConditionWords } from '../src/classify.js';
+import { readCondition, titleConditionWords, unitWordAfterYear } from '../src/classify.js';
 
 // 17 letters and digits, never I, O or Q: the format every VIN since 1981 has.
 const VIN = /^[A-HJ-NPR-Z0-9]{17}$/;
@@ -115,10 +115,31 @@ const saysCondition = (title) => readCondition(titleConditionWords(title)) !== '
 // page's title when the name is missing or only the page title starts with
 // a condition word, and only when that title is about this car (its model
 // year and model are in it), so a list page's title never lends its words
-// to the cars on it.
+// to the cars on it. A name that calls the car a demo or a loaner after the
+// model year ("2019 Honda Civic EX Demo") is always kept, so the gate reads
+// those words even when the page title says "Used". A demo, loaner or
+// courtesy word only the page title about this car has ("2019 Honda Civic EX
+// Demo | Sample Motors") is never dropped either: the page title is taken,
+// with the name's condition words put before it when only the name has them
+// ("Used" + "2019 Honda Civic EX Courtesy Vehicle for Sale | Sample Motors").
+// The page title's car words then stay in the title's part with the model
+// year, which the gate reads for every demo, loaner and courtesy word; put
+// after the name, they would be a later part, where a courtesy word counts
+// only when it ends that part (classify.js, unitWordAfterYear). A page title
+// about this car whose words before the model year read as a demo or loaner
+// ("Demo 2019 Honda Civic EX | Sample Motors", "Courtesy Vehicle - 2019
+// ...") is taken over a name that does not say demo, whatever condition
+// word the name has: the gate reads a demo word before any other, so a
+// "Used" name changes nothing, exactly as with a plain name.
+const saysDemo = (title) => readCondition(titleConditionWords(title)) === 'demo' || Boolean(unitWordAfterYear({ siteTitle: title }));
+
 function siteTitleOf(name, pageTitle, year, model) {
-  if (name && saysCondition(name)) return name;
   const about = Boolean(pageTitle && year && model) && pageTitle.includes(String(year)) && pageTitle.toLowerCase().includes(model.toLowerCase());
+  if (name && about && !unitWordAfterYear({ siteTitle: name }) && unitWordAfterYear({ siteTitle: pageTitle })) {
+    return saysCondition(name) && !saysCondition(pageTitle) ? `${titleConditionWords(name)} ${pageTitle.trim()}` : pageTitle;
+  }
+  if (about && readCondition(titleConditionWords(pageTitle)) === 'demo' && !(name && saysDemo(name))) return pageTitle;
+  if (name && (saysCondition(name) || unitWordAfterYear({ siteTitle: name }))) return name;
   if (about && (!name || saysCondition(pageTitle))) return pageTitle;
   return name || null;
 }
@@ -160,20 +181,30 @@ const AMOUNT = /(\bUSD?\s*\$|(?<![A-Za-z])\$|\bUSD\b)\s*(\d{1,3}(?:,\d{3}){1,2}|
 // Words right before an amount that make it a price other than the car's
 // current one: the old price ("Was $24,995", "Reg. $24,995", "Originally
 // $24,995"), the sticker or list price ("MSRP: $24,995", "Retail price
-// $24,995", "Compare at $24,995"), or the price a payment is worked out
-// from ("$389/mo based on a price of $24,995").
-const REFERENCE_CUE = /\b(?:was|msrp|m\.s\.r\.p|retail|list|compared? at|original(?:ly)?|reg(?:ular)?|previous(?:ly)?|based on)\b\.?(?:[\s:\-\u2013\u2014]*(?:price|pricing|of|a|the|at|for)\b)*[\s:\-\u2013\u2014]*$/i;
+// $24,995", "Compare at $24,995", "Window sticker $24,995"), the price a
+// payment is worked out from ("$389/mo based on a price of $24,995"), or a
+// value from a guide, an estimate or an offer ("KBB Fair Market Value
+// $24,995", "Kelley Blue Book® Fair Purchase Price", "Typical Listing
+// Price", "Book value", "Trade-in value", "Instant Cash Offer", "NADA
+// value", "J.D. Power value", "Black Book", "Edmunds", "Estimated value",
+// "Average market price"), the words inventoryJson.js also never takes for
+// the price. Always whole phrases: a bare "value" is no cue ("Value Price
+// $24,995" is a selling price).
+const REFERENCE_CUE = /\b(?:was|msrp|m\.s\.r\.p|retail|list|compared? at|original(?:ly)?|reg(?:ular)?|previous(?:ly)?|based on|market value|market price|fair market|fair purchase|typical listing|book value|trade[-\s]?in(?: value)?|kbb|kelley(?: blue book)?|blue book|black book|nada|j\.?\s?d\.?\s?power|cash offer|edmunds|estimated(?: value)?|window sticker|sticker)\b\.?(?:[\s:\-\u2013\u2014\u00ae\u2122]*(?:price|pricing|of|a|the|at|for|value)\b)*[\s:\-\u2013\u2014\u00ae\u2122]*$/i;
 
 // Every dollar amount the page shows: its value, whether it is written with
-// a dollar sign, and whether the words before it make it a reference price.
+// a dollar sign, and whether the words before it make it a reference price
+// (cue: those words, as the page writes them, else '').
 function shownPrices(pageText) {
   const t = String(pageText || '');
   const out = [];
   for (const m of t.matchAll(AMOUNT)) {
+    const cue = REFERENCE_CUE.exec(t.slice(Math.max(0, m.index - 48), m.index));
     out.push({
       value: Number(m[2].replace(/,/g, '') + (m[3] ? '.' + m[3] : '')),
       dollar: m[1].includes('$'),
-      reference: REFERENCE_CUE.test(t.slice(Math.max(0, m.index - 48), m.index)),
+      reference: Boolean(cue),
+      cue: cue ? cue[0].replace(/[\s:\-\u2013\u2014\u00ae\u2122]+$/, '').replace(/\s+/g, ' ') : '',
     });
   }
   return out;
@@ -232,8 +263,17 @@ export function priceFromOffers(node, facts) {
   if (new Set(priced.map((p) => p.value + ' ' + p.currency)).size > 1) return none('the page gives more than one price');
   const { value, currency } = priced[0];
   if (currency && currency !== 'USD') return none('the price is not in US dollars');
-  const current = shownPrices(facts && facts.text).filter((p) => p.value === value && !p.reference);
-  if (!current.length) return none('the page does not show this price');
+  const shown = shownPrices(facts && facts.text);
+  const current = shown.filter((p) => p.value === value && !p.reference);
+  if (!current.length) {
+    // The page's only price is this one, after words that make it a guide's,
+    // an old or a sticker price ("Market Price $24,995"). Some websites label
+    // their own selling price that way, so the reason quotes the label for a
+    // person to check; the price is still not taken.
+    const labelled = shown.find((p) => p.value === value && p.reference);
+    if (labelled && labelled.cue && shown.every((p) => p.reference)) return none(`the page labels its only price "${labelled.cue}", which Lot Current does not read as the selling price`);
+    return none('the page does not show this price');
+  }
   // no currency in the markup: US dollars only when the page shows this amount with a dollar sign
   if (!currency && !current.some((p) => p.dollar)) return none('the page does not say the price is in US dollars');
   return { value, label: 'Price', reason: '' };
@@ -401,7 +441,7 @@ export function normalizeVehicle(node, { url = null, facts = null } = {}) {
     readableType: null, // schema.org has no second condition field
     url: carUrl,
     urlConditionWord: conditionWordFromPath(carUrl),
-    isDemo: false, // schema.org has no demo or loaner flag; a "demo" in the address or title still counts
+    isDemo: false, // schema.org has no demo or loaner flag; a "demo" or "loaner" in the address or the car's name (kept as siteTitle when it has one), before or after the model year, still counts (classify.js)
     isLoaner: false,
     carfaxUrl: carfax || null, // only a Carfax link that names this car's VIN
     carfaxOneOwner: false, // never read from numberOfPreviousOwners: that is not a Carfax report

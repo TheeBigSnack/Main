@@ -47,8 +47,24 @@ export function platformNames() {
   return ADAPTERS.map((a) => a.PLATFORM.name);
 }
 
-// What the popup and the wizard say on a page no adapter recognises: what
-// Lot Current reads today, named by the adapters themselves.
+// Whether a reader has been checked on a real dealership website. Only an
+// adapter whose PLATFORM says checkedLive: true counts; one that says nothing
+// is a reader written from public sources and sample websites, not yet
+// confirmed by a survey run on a real site (README.md), and is named only with
+// that caveat.
+export function isCheckedLive(adapter) {
+  return Boolean(adapter && adapter.PLATFORM && adapter.PLATFORM.checkedLive === true);
+}
+
+// What the popup and the wizard say on a page no adapter recognises: the
+// readers, named by the adapters themselves, split into those checked on a
+// real dealership website and those Lot Current only tries.
 export function unsupportedSiteMessage() {
-  return `Lot Current can't read the cars on this page. What it reads today: ${platformNames().join('; ')}. Open your dealership's used inventory page and try again.`;
+  const checked = ADAPTERS.filter(isCheckedLive).map((a) => a.PLATFORM.name);
+  const tried = ADAPTERS.filter((a) => !isCheckedLive(a)).map((a) => a.PLATFORM.name);
+  const parts = ["Lot Current can't read the cars on this page."];
+  if (checked.length) parts.push(`Checked on a real dealership website: ${checked.join('; ')}.`);
+  if (tried.length) parts.push(`Also tries, not yet checked on a real dealership website: ${tried.join('; ')}.`);
+  parts.push("Open your dealership's used inventory page and try again.");
+  return parts.join(' ');
 }

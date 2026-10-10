@@ -50,6 +50,8 @@ test('permissionPattern: https://<host>/ with any path, no port, never http or F
   assert.equal(permissionPattern('https://www.facebook.com'), null);
   assert.equal(permissionPattern('https://facebook.com'), null);
   assert.equal(permissionPattern('https://static.xx.facebook.com'), null);
+  assert.equal(permissionPattern('https://www.messenger.com'), null, 'Messenger is Facebook\'s too');
+  assert.equal(isFacebookServer('https://www.messenger.com/t/1'), true);
   assert.equal(permissionPattern(''), null);
   assert.equal(permissionPattern('img.cdn.example'), null);
 });
@@ -171,23 +173,25 @@ function fnText(src, name) {
 
 test('the side panel asks Chrome for photo servers only from the click handler, first, and only for what neededPatterns names', () => {
   const src = stripComments(read('../extension/sidepanel.js'));
-  // the panel's three requests: the NHTSA decode (checkVinOnline), the photo
-  // servers (askForPhotos) and the website itself (askForSite, test below)
-  const requests = [...src.matchAll(/permissions\.request\(/g)].map((m) => m.index);
+  // the panel's three requests, each through askChrome (src/askChrome.js):
+  // the NHTSA decode (checkVinOnline), the photo servers (askForPhotos) and
+  // the website itself (askForSite, test below)
+  const requests = [...src.matchAll(/\baskChrome\(/g)].map((m) => m.index);
   assert.equal(requests.length, 3, 'sidepanel.js makes exactly three permission requests');
+  assert.doesNotMatch(src, /permissions\.request/, 'the side panel asks Chrome only through askChrome');
   const ask = fnText(src, 'askForPhotos');
   const vin = fnText(src, 'checkVinOnline');
-  assert.equal((ask.match(/permissions\.request\(/g) || []).length, 1);
-  assert.equal((vin.match(/permissions\.request\(/g) || []).length, 1);
-  assert.equal((fnText(src, 'askForSite').match(/permissions\.request\(/g) || []).length, 1);
-  assert.match(vin, /permissions\.request\(\{ origins: \[NHTSA_ORIGIN \+ '\/' \+ '\*'\] \}\)/);
+  assert.equal((ask.match(/\baskChrome\(/g) || []).length, 1);
+  assert.equal((vin.match(/\baskChrome\(/g) || []).length, 1);
+  assert.equal((fnText(src, 'askForSite').match(/\baskChrome\(/g) || []).length, 1);
+  assert.match(vin, /askChrome\(\[NHTSA_ORIGIN \+ '\/' \+ '\*'\]\)/);
 
   // the photo request: the patterns come straight from neededPatterns, and nothing is awaited first
-  assert.ok(ask.includes('await chrome.permissions.request('), 'the request is awaited where it is made');
-  const before = ask.slice(0, ask.indexOf('await chrome.permissions.request('));
+  assert.ok(ask.includes('await askChrome('), 'the request is awaited where it is made');
+  const before = ask.slice(0, ask.indexOf('await askChrome('));
   assert.match(before, /const patterns = neededPatterns\(urls, \{ manifestHosts: MANIFEST_HOSTS, granted: grantedOrigins \}\)/);
   assert.equal((ask.match(/\bpatterns\s*=[^=]/g) || []).length, 1, 'patterns is assigned once');
-  assert.match(ask, /permissions\.request\(\{ origins: patterns \}\)/);
+  assert.match(ask, /askChrome\(patterns\)/);
   assert.doesNotMatch(before, /\bawait\b/, 'nothing is awaited before Chrome is asked');
 
   // Nothing is awaited on the way into the click handler's branches: Chrome
@@ -219,10 +223,12 @@ test('the side panel asks Chrome for photo servers only from the click handler, 
       assert.doesNotMatch(branch, /\bawait\b/, `${name} is the first thing its click awaits: ${branch.trim().slice(0, 80)}`);
     }
   }
-  // the clicks that fill the form or download photos go through the same ask
-  for (const id of ['openForm', 'fillNow', 'fillAgain', 'downloadPhotos']) {
+  // the clicks that fill the form with its photos or download photos go through the same ask
+  for (const id of ['openForm', 'fillNow', 'attachAgain', 'downloadPhotos']) {
     assert.match(click, new RegExp(`case '${id}':\\s*await askForPhotos\\(\\);`), `${id} asks first`);
   }
+  // Fill again fills the fields only: no photos, so nothing to ask Chrome for
+  assert.match(click, /case 'fillAgain': return state\.step === 'publish' \? oneAtATime\(\(\) => runFill\(\{ photos: false \}\)\) : undefined;/);
   // the photo branches of the click handler come before anything the wizard or upkeep await
   assert.ok(click.indexOf('btn.dataset.allowPhotos') < click.indexOf('await handleWizardClick'), 'Allow photos asks before any other await');
 });
@@ -237,10 +243,10 @@ test('the side panel asks Chrome for the website only from a click, first, and o
   assert.match(ask, /^async function askForSite\(origins = siteMissing\(\)\)/, 'the default is what is missing of the website\'s patterns');
   assert.match(src, /const siteNeeds = \(\) => siteReadOrigins\(state\.origin, state\.siteInfo\);/);
   assert.match(src, /const siteMissing = \(\) => missingOrigins\(siteNeeds\(\), grantedOrigins\);/);
-  const before = ask.slice(0, ask.indexOf('await chrome.permissions.request('));
+  const before = ask.slice(0, ask.indexOf('await askChrome('));
   assert.ok(before.length > 0, 'askForSite awaits its request');
   assert.doesNotMatch(before, /\bawait\b/, 'nothing is awaited before Chrome is asked');
-  assert.match(ask, /permissions\.request\(\{ origins \}\)/);
+  assert.match(ask, /askChrome\(origins\)/);
 
   // called only as the first await of the four click actions
   const callers = ['postFromList', 'queueFromList', 'rescanFromList', 'allowSiteAndRetry'];
@@ -339,6 +345,8 @@ test('the side panel never sends a Facebook photo to the worker, and says it lef
     photoList: () => photos,
     hostList: (patterns) => patterns.map(patternHost).join(', '),
     sleep: async () => {},
+    flowRun: 0, // the post under way (sidepanel.js clearFlow); nothing drops it here
+    formTabShows: async () => true, // the form's tab still shows the form (tested in panelFlow.test.js)
     document: { createElement: () => ({ click() {}, remove() {} }), body: { appendChild() {} } },
     status: '',
   };
@@ -358,14 +366,21 @@ test('the side panel never sends a Facebook photo to the worker, and says it lef
   assert.match(panel.status, /2 are on Facebook's own servers, which Lot Current doesn't download from\./);
 });
 
+// Chrome is asked only inside askChrome (src/askChrome.js), which refuses
+// Facebook's servers and wildcard hosts, and askChrome is reached only from
+// the three pages people click in.
 test('nothing but a click in an extension page asks for a host: never the service worker, never an adapter', () => {
   const ext = new URL('../extension/', import.meta.url);
+  const requesters = [];
   const askers = [];
   for (const dir of ['', 'src/', 'facebook/', 'adapters/']) {
     for (const f of readdirSync(new URL(dir, ext)).filter((n) => n.endsWith('.js'))) {
-      if (/permissions\.request\(/.test(stripComments(read('../extension/' + dir + f)))) askers.push(dir + f);
+      const code = stripComments(read('../extension/' + dir + f));
+      if (/permissions\.request\b/.test(code)) requesters.push(dir + f);
+      if (dir + f !== 'src/askChrome.js' && /\baskChrome\b|askChrome\.js/.test(code)) askers.push(dir + f);
     }
   }
+  assert.deepEqual(requesters, ['src/askChrome.js'], 'only askChrome calls chrome.permissions.request');
   assert.deepEqual(askers.sort(), ['popup.js', 'sidepanel.js', 'wizard.js'], 'only the three pages people click in ask Chrome for anything');
-  assert.doesNotMatch(stripComments(read('../extension/background.js')), /permissions\.request/);
+  assert.doesNotMatch(stripComments(read('../extension/background.js')), /permissions\.request|askChrome/);
 });

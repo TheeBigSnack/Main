@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import vm from 'node:vm';
 import { normalizeVehicle } from '../extension/adapters/dealerInspireNormalize.js';
 import { assessVehicle } from '../extension/src/classify.js';
@@ -42,10 +42,11 @@ export function snapshot(items, settings = MY_STORE, takenAt = '2026-09-26T21:00
 // offers the functions chrome.scripting.executeScript copies into it:
 // window.SEARCH_SERVICE and IDPSearchServiceHelper backed by `records`, a
 // document with the og:site_name and a schema.org address, a location.
-// `withService: false` gives a page no adapter recognises. The result is a
-// vm sandbox for fakeChrome: injected functions run inside it, with nothing
-// else in scope, so one that reached outside its own body throws.
-export function fakeDealerPage({ records = [], origin = 'https://example-dealer.test', withService = true, name = 'Example Motors' } = {}) {
+// `withService: false` gives a page no adapter recognises; `withLd: false`
+// a page with no structured address, whose `bodyText` is all there is. The
+// result is a vm sandbox for fakeChrome: injected functions run inside it,
+// with nothing else in scope, so one that reached outside its own body throws.
+export function fakeDealerPage({ records = [], origin = 'https://example-dealer.test', withService = true, name = 'Example Motors', withLd = true, bodyText = 'USED AND CERTIFIED USED FOR SALE' } = {}) {
   const getListings = async (body) => {
     const f = body.filters || {};
     const list = records.filter((r) => (!f.type || f.type.includes(r.type)) && (!f.vin || f.vin.includes(r.vin)) && (!f.status || f.status.includes(r.status)));
@@ -61,9 +62,9 @@ export function fakeDealerPage({ records = [], origin = 'https://example-dealer.
   const ld = { '@context': 'https://schema.org', '@type': 'AutoDealer', name, telephone: '(555) 555-0100', address: { '@type': 'PostalAddress', streetAddress: '1 Example Way', addressLocality: 'Springfield', addressRegion: 'OH', postalCode: '43215' } };
   const document = {
     title: `Used Vehicles for Sale | ${name}`,
-    body: { innerText: 'USED AND CERTIFIED USED FOR SALE' },
+    body: { innerText: bodyText },
     querySelector: (sel) => (sel === 'meta[property="og:site_name"]' ? { content: name } : null),
-    querySelectorAll: (sel) => (sel === 'script[type="application/ld+json"]' ? [{ textContent: JSON.stringify(ld) }] : []),
+    querySelectorAll: (sel) => (sel === 'script[type="application/ld+json"]' && withLd ? [{ textContent: JSON.stringify(ld) }] : []),
   };
   const location = { origin, hostname: new URL(origin).hostname, href: origin + '/used-vehicles/' };
   return vm.createContext({ window, document, location, URL });
@@ -79,16 +80,21 @@ export async function runInPage(page, func, ...args) {
 }
 
 // chrome.scripting.executeScript and chrome.storage.local stand-ins for the
-// scan runner: injections run in the page sandbox, storage is `store`.
+// scan runner: injections run in the page sandbox, storage is `store`, and
+// chrome.tabs.get answers with the page's own address.
 export function fakeChrome(page, store = {}) {
   return {
     store,
+    tabs: {
+      get: async (id) => ({ id, url: page.location && page.location.href }),
+    },
     scripting: {
       executeScript: async ({ func, args = [] }) => [{ result: await runInPage(page, func, ...args) }],
     },
     storage: {
       local: {
         get: async (keys) => {
+          if (keys === null || keys === undefined) return { ...store }; // everything, as chrome.storage answers get(null)
           const out = {};
           for (const k of Array.isArray(keys) ? keys : [keys]) if (k in store) out[k] = store[k];
           return out;
@@ -156,12 +162,13 @@ ${carousel.length ? `<aside>${carousel.map((o) => `<a href="${escHtml(o.path)}">
 }
 
 // One page of the used list: the ItemList of its cars, a card per car that
-// shows its price, and rel=next when another page follows.
-export function standardListPage(cars, { origin = STANDARD_ORIGIN, next = null, numberOfItems = null, listData = true, noPrice = new Set() } = {}) {
+// shows its price, rel=next when another page follows and rel=prev when one
+// comes before.
+export function standardListPage(cars, { origin = STANDARD_ORIGIN, next = null, prev = null, numberOfItems = null, listData = true, noPrice = new Set() } = {}) {
   const list = { '@context': 'https://schema.org', '@type': 'ItemList', name: 'Used vehicles', itemListElement: cars.map((c, n) => ({ '@type': 'ListItem', position: n + 1, item: standardCarNode(c, origin, noPrice.has(c.vin) ? { price: undefined } : {}) })) };
   if (numberOfItems !== null) list.numberOfItems = numberOfItems;
   const cards = cars.map((c) => `<div class="card"><a href="${escHtml(c.path)}">Used ${c.year} ${c.make} ${c.model} ${c.trim}</a> <span>${noPrice.has(c.vin) ? 'Call for price' : money(c.price)}</span> <span>${c.miles.toLocaleString('en-US')} miles</span> <a href="https://www.carfax.com/VehicleHistory/p/Report.cfx?vin=${c.vin}">Carfax</a></div>`).join('\n');
-  return `<!doctype html><html><head><title>Used Vehicles for Sale | Sample Motors</title>${next ? `<link rel="next" href="${escHtml(next)}">` : ''}${ldScript(DEALER_NODE)}${listData ? ldScript(list) : ''}</head>
+  return `<!doctype html><html><head><title>Used Vehicles for Sale | Sample Motors</title>${prev ? `<link rel="prev" href="${escHtml(prev)}">` : ''}${next ? `<link rel="next" href="${escHtml(next)}">` : ''}${ldScript(DEALER_NODE)}${listData ? ldScript(list) : ''}</head>
 <body><h1>Used Vehicles for Sale</h1><nav><a href="/">Home</a> <a href="/new-vehicles/">New</a> <a href="/used-vehicles/">Used</a> <a href="/about/">About us</a></nav>
 ${cards}</body></html>`;
 }
@@ -182,7 +189,8 @@ export function standardSite({ cars = standardCars(6), perPage = 4, origin = STA
   for (let p = 1; p <= pages; p += 1) {
     const at = p === 1 ? origin + '/used-vehicles/' : `${origin}/used-vehicles/?page=${p}`;
     const next = p < pages ? `/used-vehicles/?page=${p + 1}` : null;
-    site.set(at, page(standardListPage(cars.slice((p - 1) * perPage, p * perPage), { origin, next, numberOfItems, listData, noPrice })));
+    const prev = p > 2 ? `/used-vehicles/?page=${p - 1}` : p === 2 ? '/used-vehicles/' : null;
+    site.set(at, page(standardListPage(cars.slice((p - 1) * perPage, p * perPage), { origin, next, prev, numberOfItems, listData, noPrice })));
   }
   for (const c of cars) site.set(origin + c.path, page(standardCarPage(c, { origin, price: noPrice.has(c.vin) ? null : c.price })));
   site.set(origin + '/', page(`<!doctype html><html><head><title>Sample Motors</title>${ldScript(DEALER_NODE)}</head><body><a href="/used-vehicles/">Shop used</a> <a href="/new-vehicles/">Shop new</a></body></html>`));
@@ -223,8 +231,12 @@ export function fakeSiteSearch(site, { delay = 0 } = {}) {
 // `path`, with the document calls the probes make (JSON-LD scripts,
 // itemtype elements, links with their absolute href and text) and a fetch
 // that answers from `site`. Like fakeDealerPage, a vm sandbox for
-// runInPage and fakeChrome.
-export function fakeStandardPage({ site = standardSite(), path = '/used-vehicles/', origin = STANDARD_ORIGIN, html = null } = {}) {
+// runInPage and fakeChrome. The answer's body streams its text in chunks
+// (`body.getReader()`), as Chrome's fetch does, so the injected search reads
+// it the way it does in the browser; `stream: false` gives an answer with
+// only `text()`. `fetchCalls` lists the requests, `cancelled` the bodies the
+// page stopped reading.
+export function fakeStandardPage({ site = standardSite(), path = '/used-vehicles/', origin = STANDARD_ORIGIN, html = null, stream = true, chunk = 65536 } = {}) {
   const url = new URL(path, origin).href;
   const source = html ?? (site.get(url) || {}).text ?? '';
   const scripts = [...source.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)].map((m) => ({ textContent: m[1] }));
@@ -232,10 +244,28 @@ export function fakeStandardPage({ site = standardSite(), path = '/used-vehicles
   const links = [...source.matchAll(/<a\b[^>]*\bhref="([^"]*)"[^>]*>([\s\S]*?)<\/a>/g)].map((m) => ({ href: new URL(m[1].replace(/&amp;/g, '&'), url).href, textContent: m[2].replace(/<[^>]*>/g, '') }));
   const title = (/<title>([\s\S]*?)<\/title>/.exec(source) || [])[1] || '';
   const fetchCalls = [];
+  const cancelled = [];
+  const bodyOf = (href, text) => {
+    const bytes = new TextEncoder().encode(text || '');
+    let at = 0;
+    return {
+      getReader: () => ({
+        read: async () => {
+          if (at >= bytes.length) return { done: true, value: undefined };
+          const value = bytes.slice(at, at + chunk);
+          at += chunk;
+          return { done: false, value };
+        },
+        cancel: async () => { cancelled.push(href); },
+      }),
+    };
+  };
   const fetch = async (href, init) => {
     fetchCalls.push({ url: String(href), init });
     const got = site.get(String(href)) || httpError(404, 'Not found');
-    return { ok: got.ok, status: got.status, url: got.finalUrl || String(href), redirected: Boolean(got.redirected), headers: { get: (n) => (n.toLowerCase() === 'content-type' ? got.contentType : null) }, text: async () => got.text };
+    const res = { ok: got.ok, status: got.status, url: got.finalUrl || String(href), redirected: Boolean(got.redirected), headers: { get: (n) => (n.toLowerCase() === 'content-type' ? got.contentType : null) }, text: async () => got.text };
+    if (stream) res.body = bodyOf(String(href), got.text);
+    return res;
   };
   const document = {
     URL: url,
@@ -247,5 +277,231 @@ export function fakeStandardPage({ site = standardSite(), path = '/used-vehicles
   const location = { origin, hostname: new URL(origin).hostname, href: url };
   const context = vm.createContext({ window: {}, document, location, URL, fetch, setTimeout, clearTimeout, AbortController, TextDecoder });
   context.fetchCalls = fetchCalls;
+  context.cancelled = cancelled;
   return context;
+}
+
+// ---------- reading source code the way the guard tests do ----------
+
+// The comment stripper the guard tests read source through (test/posting,
+// anyDealer, dataInventory and demo): block comments, whole-line // comments
+// and, with trailing, a // comment after code. A // right after ":", a quote
+// or a backslash is not cut: that is an address ("https://"), a string ('//')
+// or the end of a regex literal (/^https?:\/\//), with code after it.
+// It is a regex, so it trusts every "/*" to open a comment; the files it reads
+// are held to that by commentStripperBlindSpots below.
+export function stripComments(src, { trailing = false } = {}) {
+  const out = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  return trailing ? out.replace(/([^:'"`\\])\/\/[^\n]*$/gm, '$1') : out;
+}
+
+// Every place in a source file where stripComments would cut real code: a
+// "/*" inside a string or template literal, a "/*" inside a // comment that
+// is not closed on its line, and a block comment that runs past its line
+// after code on its first line (how a "/*" inside a regex literal shows up).
+// Each would make the stripper delete everything up to the next "*/", so a
+// guard test reading the file would not see that code. [] when the file is safe.
+export function commentStripperBlindSpots(src) {
+  const out = [];
+  let line = 1;
+  let state = 'code'; // code | line | block | ' | " | `
+  let codeOnLine = false;
+  let block = null;
+  const holes = []; // the ${ } of the template literals we are inside, innermost last
+  for (let k = 0; k < src.length; k++) {
+    const c = src[k];
+    const d = src[k + 1];
+    if (c === '\n') {
+      line += 1;
+      codeOnLine = false;
+      if (state === 'line' || state === "'" || state === '"') state = 'code';
+      continue;
+    }
+    if (state === 'code') {
+      if (c === '/' && d === '/') { state = 'line'; k += 1; continue; }
+      if (c === '/' && d === '*') { state = 'block'; block = { line, afterCode: codeOnLine }; k += 1; continue; }
+      if (!/\s/.test(c)) codeOnLine = true;
+      if (c === "'" || c === '"' || c === '`') state = c;
+      else if (c === '{' && holes.length) holes[holes.length - 1] += 1;
+      else if (c === '}' && holes.length) {
+        if (holes[holes.length - 1] === 0) { holes.pop(); state = '`'; } else holes[holes.length - 1] -= 1;
+      }
+    } else if (state === 'block') {
+      if (c === '*' && d === '/') {
+        if (block.afterCode && line > block.line) out.push(`line ${block.line}: a block comment that runs past its line starts after code`);
+        state = 'code';
+        codeOnLine = true;
+        k += 1;
+      }
+    } else if (state === 'line') {
+      if (c === '/' && d === '*') {
+        // the stripper cuts from here to the next "*/"; harmless only when that is on this line or nowhere
+        const eol = src.indexOf('\n', k);
+        const close = src.indexOf('*/', k + 2);
+        if (close >= 0 && eol >= 0 && close > eol) out.push(`line ${line}: "/*" inside a // comment`);
+      }
+    } else if (c === '\\') {
+      if (d === '\n') line += 1;
+      k += 1;
+    } else if (state === '`' && c === '$' && d === '{') {
+      holes.push(0);
+      state = 'code';
+      k += 1;
+    } else if (c === state) {
+      state = 'code';
+      codeOnLine = true;
+    } else if (c === '/' && d === '*') {
+      out.push(`line ${line}: "/*" inside a ${state === '`' ? 'template literal' : 'string'}`);
+    }
+  }
+  return out;
+}
+
+// The source files the guard tests read through stripComments: the extension,
+// the rewrite service, the manager view, the website, the Edge Functions and
+// the sandbox. Paths relative to the repository root.
+export function strippedSourceFiles() {
+  const root = new URL('../', import.meta.url);
+  const out = [];
+  const walk = (dir) => {
+    for (const d of readdirSync(new URL(dir, root), { withFileTypes: true })) {
+      if (d.name === 'node_modules') continue;
+      if (d.isDirectory()) walk(dir + d.name + '/');
+      else if (/\.(m?js|ts)$/.test(d.name)) out.push(dir + d.name);
+    }
+  };
+  for (const dir of ['extension/', 'backend/', 'manager/', 'site/', 'supabase/functions/', 'demo/']) walk(dir);
+  return out;
+}
+
+// ---------- reading code: the self-containment and fill-code guards ----------
+// test/adapters.test.js and test/posting.test.js check, with these, that a
+// function Chrome copies into a page reaches nothing declared around it
+// (moduleScopeNames, freeIdentifiers), and test/posting.test.js reads the
+// fill code's calls with callArguments. One copy, so the two guards cannot
+// drift apart.
+
+// Strings become "", except what a template literal interpolates: the code
+// inside each ${...} is kept (scanned the same way, so a string or template
+// inside it is handled too), since a name used there is reached like any other.
+export function stripStrings(src) {
+  const n = src.length;
+  const quoted = (q, j) => { // index after the closing quote (a quote string never spans lines)
+    for (j += 1; j < n && src[j] !== q && src[j] !== '\n'; j += 1) if (src[j] === '\\') j += 1;
+    return j + 1;
+  };
+  const code = (j, inInterpolation) => { // [code with strings stripped, index of the closing brace or the end]
+    let out = '';
+    let depth = 0;
+    while (j < n) {
+      const c = src[j];
+      if (c === "'" || c === '"') { out += '""'; j = quoted(c, j); continue; }
+      if (c === '`') {
+        out += '""';
+        for (j += 1; j < n && src[j] !== '`'; j += 1) {
+          if (src[j] === '\\') { j += 1; continue; }
+          if (src[j] === '$' && src[j + 1] === '{') { const [inner, end] = code(j + 2, true); out += ' (' + inner + ') '; j = end; }
+        }
+        j += 1;
+        continue;
+      }
+      if (c === '{') depth += 1;
+      if (c === '}') { if (inInterpolation && depth === 0) return [out, j]; depth -= 1; }
+      out += c;
+      j += 1;
+    }
+    return [out, j];
+  };
+  return code(0, false)[0];
+}
+export const JS_KEYWORDS = new Set('async await break case catch class const continue debugger default delete do else export extends finally for function if import in instanceof let new of return static super switch this throw try typeof var void while with yield true false null undefined'.split(' '));
+
+// Every name declared at the top level of a module file: what an injected
+// function must not reach for. The import lines give the imported names
+// (default, { named }, * as namespace). Every other top-level name is left to
+// the JavaScript parser itself, so a declaration of several names, a
+// destructured one, a function or a class is never missed: the file with its
+// import and export words taken out compiles as a strict script, and adding
+// `let NAME;` to it is a syntax error exactly when NAME is already declared
+// at the top. Nothing in the file runs.
+export function moduleScopeNames(src) {
+  const imported = new Set();
+  for (const m of src.matchAll(/^import\s+([^'"]*?)\s*from\s*['"]/gm)) {
+    const clause = m[1];
+    const named = clause.match(/\{([^}]*)\}/);
+    if (named) for (const part of named[1].split(',')) { const n = part.trim().split(/\s+as\s+/).pop(); if (n) imported.add(n); }
+    const rest = clause.replace(/\{[^}]*\}/, '');
+    const namespace = rest.match(/\*\s*as\s+([A-Za-z_$][\w$]*)/);
+    if (namespace) imported.add(namespace[1]);
+    const byDefault = rest.match(/^\s*([A-Za-z_$][\w$]*)/);
+    if (byDefault) imported.add(byDefault[1]);
+  }
+  const script = "'use strict';\n" + src
+    .replace(/^import\s[^'"]*['"][^'"\n]*['"]\s*;?/gm, '')
+    .replace(/^export\s*\{[^}]*\}(?:\s*from\s*['"][^'"\n]*['"])?\s*;?/gm, '')
+    .replace(/^export\s*\*[^'"\n]*['"][^'"\n]*['"]\s*;?/gm, '')
+    .replace(/^export\s+default\s+(?=(?:async\s+)?function\b\s*\*?\s*[A-Za-z_$]|class\s+(?!extends\b)[A-Za-z_$])/gm, '')
+    .replace(/^export\s+default\s+/gm, 'void ')
+    .replace(/^export\s+/gm, '');
+  try {
+    new vm.Script(script);
+  } catch (e) {
+    throw new Error(`the self-containment check cannot read this file's top-level names: ${e.message}`);
+  }
+  const seen = new Map();
+  const declared = (name) => {
+    if (!/^[A-Za-z_$][\w$]*$/.test(name)) return false;
+    if (!seen.has(name)) {
+      let clash = false;
+      try {
+        new vm.Script(`${script}\nlet ${name};`);
+      } catch (e) {
+        clash = e.name === 'SyntaxError' && /already been declared/.test(e.message);
+      }
+      seen.set(name, clash);
+    }
+    return seen.get(name);
+  };
+  return { has: (name) => imported.has(name) || declared(name) };
+}
+
+// Identifiers a function body uses that are not property names.
+export function freeIdentifiers(fnSrc, ownName) {
+  const code = stripStrings(stripComments(fnSrc, { trailing: true }));
+  const out = new Set();
+  for (const m of code.matchAll(/(?<![.\w$])[A-Za-z_$][\w$]*/g)) if (!JS_KEYWORDS.has(m[0]) && m[0] !== ownName) out.add(m[0]);
+  return out;
+}
+
+// The arguments of every call to `name(` in src (a free call or a method
+// call such as h.key(...), not a function of that name being defined), each call's list split at its
+// top-level commas, every argument trimmed. Parentheses, brackets, braces,
+// strings and template literals are balanced, so
+// key(control.closest('[role="button"]'), ' ') gives
+// ["control.closest('[role=\"button\"]')", "' '"].
+export function callArguments(src, name) {
+  const out = [];
+  for (const m of src.matchAll(new RegExp(`(?<![\\w$])(?<!\\bfunction\\s+)${name}\\s*\\(`, 'g'))) {
+    const args = [];
+    let depth = 0;
+    let from = m.index + m[0].length;
+    for (let i = from; i < src.length; i++) {
+      const c = src[i];
+      if (c === "'" || c === '"' || c === '`') {
+        for (i += 1; i < src.length && src[i] !== c; i++) if (src[i] === '\\') i += 1;
+        continue;
+      }
+      if (c === '(' || c === '[' || c === '{') depth += 1;
+      else if ((c === ')' || c === ']' || c === '}') && depth > 0) depth -= 1;
+      else if (c === ')') {
+        args.push(src.slice(from, i).trim());
+        out.push(args.length === 1 && args[0] === '' ? [] : args);
+        break;
+      } else if (c === ',' && depth === 0) {
+        args.push(src.slice(from, i).trim());
+        from = i + 1;
+      }
+    }
+  }
+  return out;
 }

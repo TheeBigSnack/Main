@@ -13,6 +13,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { lastDefinition } from './migrations.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const sql = read('../supabase/migrations/0007_signup.sql');
@@ -22,11 +23,15 @@ const readme = read('../supabase/README.md');
 const support = read('../docs/support.md');
 const fixture = JSON.parse(read('./fixtures/website-origins.json'));
 
+// a function as the database runs it: its last definition (0007_signup.sql,
+// or a later migration that replaced it), comments left out
 const body = (name) => {
-  const start = code.indexOf(`create or replace function public.${name}(`);
-  const end = code.indexOf(`comment on function public.${name}(`, start);
-  assert.ok(start >= 0 && end > start, `0007_signup.sql has no ${name}() with a comment after it`);
-  return code.slice(start, end);
+  const { file, sql: text } = lastDefinition(name);
+  const src = text.replace(/--.*$/gm, '');
+  const start = src.indexOf(`create or replace function public.${name}(`);
+  const end = src.indexOf(`comment on function public.${name}(`, start);
+  assert.ok(start >= 0 && end > start, `${file} has no ${name}() with a comment after it`);
+  return src.slice(start, end);
 };
 const section = (text, heading) => {
   const start = text.indexOf(heading);
@@ -112,6 +117,12 @@ test('create_dealership: the checks run in order a to g, and the throttle and th
   // the three fields, and the website through the one rule
   const origin = at('origin := public.website_origin_of(create_dealership.website);');
   assert.ok(d < origin && origin < lock, 'the website is checked with the fields, through website_origin_of');
+  // the errors promise no line breaks or control characters: the C0 and C1 controls, the line and
+  // paragraph separators, and the marks, embeddings, overrides and isolates that reorder text
+  const controls = fn.match(/controls constant text := '(\[[^']*\])';/);
+  assert.ok(controls, 'create_dealership names its controls class');
+  // (U+061C ARABIC LETTER MARK is one of those marks, Bidi_Control like U+200E and U+200F)
+  assert.equal(controls[1], '[\\u0001-\\u001f\\u007f-\\u009f\\u061c\\u200e\\u200f\\u2028\\u2029\\u202a-\\u202e\\u2066-\\u2069]');
   for (const [field, limit] of [['dealer_name', 120], ['person_name', 80]]) {
     assert.match(fn, new RegExp(`if length\\(${field}\\) not between 1 and ${limit} or ${field} ~ controls then\\s+raise exception '[^;]*' using errcode = '22023';`), `${field}: 1 to ${limit} characters, no control characters`);
   }
@@ -152,8 +163,8 @@ test('create_dealership: P0005 and P0009 are answered, not raised, and a taken w
 });
 
 test('the trim is JavaScript\'s trim(), in both functions, so the manager page\'s copy and the SQL agree', () => {
-  const classes = [...code.matchAll(/ws constant text := '(\[[^']*\]\+)';/g)].map((m) => m[1]);
-  assert.equal(classes.length, 2, 'website_origin_of and create_dealership each trim with the same class');
+  const classes = ['website_origin_of', 'create_dealership'].map((name) => body(name).match(/ws constant text := '(\[[^']*\]\+)';/)?.[1]);
+  assert.ok(classes.every(Boolean), 'website_origin_of and create_dealership each trim with a class of their own');
   assert.equal(classes[0], classes[1]);
   const ws = new RegExp(`^${classes[0]}$`);
   for (let cp = 0; cp <= 0xffff; cp += 1) {
@@ -254,4 +265,28 @@ test('docs/support.md: a taken website is settled by the store\'s own phone numb
   assert.match(s, /insert into public\.memberships \(user_id, dealership_id, role, name\)\s+values \('<their user id>', '<dealership id>', 'manager', '<their name>'\)\s+on conflict \(user_id, dealership_id\) do update set role = 'manager';/);
   assert.match(s, /select public\.delete_dealership\('<dealership id>', /, 'a squatted row is deleted, the owner\'s tool with its confirm');
   assert.match(s, /step 5 of `supabase\/README\.md`/);
+});
+
+// Self-serve sign-up starts a dealership, its free pilot and, through
+// Subscribe, a subscription with no agreement signed, and nothing records a
+// manager's acceptance of the Terms, the Privacy Policy or the Dealer
+// Subscription Agreement yet. Until the attorney says how (questions-for-
+// attorney.md question 9) and the manager view records it, the docs say not
+// to open it and both page switches stay off.
+test('self-serve sign-up stays closed until a manager\'s acceptance of the agreements is recorded', async () => {
+  const open = section(readme, '### Open it, close it, change the limits');
+  assert.match(open, /\*\*Before you open it:\*\* a dealership started here has signed nothing\./);
+  assert.ok(open.indexOf('Before you open it') < open.indexOf('set open = true'), 'the warning comes before the switch');
+  assert.match(open, /Keep sign-up closed until the attorney has answered `legal\/questions-for-attorney\.md` question 9 and the manager view records each manager's acceptance/);
+  assert.match(read('../docs/launch-checklist.md'), /^- \[ \] \*\*Self-serve sign-up stays closed until a manager's acceptance is recorded\.\*\* [^\n]*Done when: the attorney has answered `legal\/questions-for-attorney\.md` question 9/m);
+  const questions = read('../legal/questions-for-attorney.md');
+  const q9 = section(questions, '## 9. How a dealership accepts the agreements');
+  for (const words of ['neither the manager page nor Checkout shows or records acceptance', 'Dealer Subscription Agreement section 2', 'self-serve sign-up stays closed']) assert.ok(q9.includes(words), `question 9 does not say: ${words}`);
+  assert.doesNotMatch(questions, /the first-run wizard will require acceptance of both \(Milestone 5 in PLAN\.md\)\.\s*$/, 'acceptance is not only the salespeople\'s wizard');
+  // the page switches stay off meanwhile (the database switch defaults to off: open boolean not null default false)
+  assert.match(sql, /open boolean not null default false/);
+  const { CONFIG } = await import('../manager/config.js');
+  const { SITE } = await import('../site/config.js');
+  assert.equal(CONFIG.selfServeSignup, false, 'manager/config.js shows the sign-up form before acceptance is recorded');
+  assert.equal(SITE.signupUrl, '', 'site/config.js links to sign-up before acceptance is recorded');
 });

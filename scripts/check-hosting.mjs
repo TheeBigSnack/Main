@@ -9,10 +9,15 @@
 //
 // --app       the manager view's address: the page answers over HTTPS with
 //             manager/_headers' headers, serves the committed config.js (the
-//             same project as this checkout), and not the local demo server.
+//             same project as this checkout) and the supabase-js copy it
+//             names (manager/vendor/, the same bytes as this checkout's, as
+//             JavaScript), and not the local demo server.
 //             For an address that is not *.pages.dev it also checks the CNAME
-//             to <project>.pages.dev (--pages names the project; default
-//             lotcurrent-app).
+//             to the project's pages.dev address: --pages-host, the address
+//             Cloudflare shows for the project (the Manager view workflow
+//             reads it from Cloudflare), else <project>.pages.dev (--pages
+//             names the project; default lotcurrent-app). Cloudflare gives a
+//             project a suffixed address when its name is taken there.
 // --sender    the domain sign-in email is sent from: the records Resend asks
 //             for (an MX and an SPF TXT on send.<domain>, the DKIM TXT on
 //             resend._domainkey.<domain>), and a DMARC record on the sender or
@@ -38,6 +43,12 @@ export function expectedHeaders(text) {
 export function configUrl(text) {
   const m = String(text || '').match(/^ {2}supabaseUrl: '([^']*)',/m);
   return m ? m[1].replace(/\/+$/, '') : '';
+}
+
+// The supabaseJs a config.js names, or ''.
+export function configClient(text) {
+  const m = String(text || '').match(/^ {2}supabaseJs: '([^']*)',/m);
+  return m ? m[1] : '';
 }
 
 // lotcurrent.com for mail.lotcurrent.com: the last two labels. Good for a
@@ -67,9 +78,11 @@ const h = (headers, name) => (headers && typeof headers.get === 'function' ? hea
 
 /**
  * The manager view where it is hosted.
- * @param {object} deps { fetchImpl, appUrl, headersText, committedUrl }
+ * @param {object} deps { fetchImpl, appUrl, headersText, committedUrl, committedClient }
+ *   committedClient: { path, text }, manager/config.js's supabaseJs and that
+ *   file's text in this checkout
  */
-export async function checkPage({ fetchImpl = globalThis.fetch, appUrl, headersText, committedUrl }) {
+export async function checkPage({ fetchImpl = globalThis.fetch, appUrl, headersText, committedUrl, committedClient = {} }) {
   const out = [];
   let base;
   try {
@@ -93,11 +106,39 @@ export async function checkPage({ fetchImpl = globalThis.fetch, appUrl, headersT
   const live = configUrl(config.body);
   out.push({ check: 'its config.js names the same project as this checkout', ok: config.status === 200 && Boolean(live) && live === committedUrl, detail: config.status !== 200 ? String(config.status) : `${live || '(empty)'}${live === committedUrl ? '' : ` vs ${committedUrl || '(empty)'}: deploy again`}` });
 
+  // The signed-in page imports supabase-js before it shows anything, and the
+  // sample data never does, so this is the one look at the file every
+  // manager's browser loads: the copy the hosted config.js names, with a
+  // JavaScript type (a module of any other type is refused), byte for byte
+  // the committed one. Pages answers a missing file with the page itself.
+  out.push(await checkClient(fetchImpl, base, configClient(config.body), committedClient));
+
   // Pages answers an unknown path with the page itself, so "not served" means
   // the server's code is not in the answer, whatever the status.
   const server = await get(fetchImpl, new URL('serve.mjs', base).href);
   out.push({ check: 'the local demo server is not published', ok: !/createServer/.test(server.body), detail: /createServer/.test(server.body) ? 'serve.mjs is served: deploy the staged folder, not manager/' : '' });
   return out;
+}
+
+// A Windows checkout may hold the file with CRLF endings; the bytes are otherwise the same.
+const lf = (t) => String(t).replace(/\r\n/g, '\n');
+async function checkClient(fetchImpl, base, hostedPath, { path = '', text = '' } = {}) {
+  const check = 'it serves the supabase-js copy this checkout pins';
+  if (!path || !text) return { check, ok: false, detail: `this checkout's manager/config.js supabaseJs (${path || 'empty'}) is not a file in manager/` };
+  if (hostedPath !== path) return { check, ok: false, detail: `its config.js names ${hostedPath || '(none)'} vs ${path}: deploy again` };
+  let url;
+  try {
+    url = new URL(path, base);
+  } catch {
+    return { check, ok: false, detail: `${path} is not an address` };
+  }
+  if (url.origin !== base.origin) return { check, ok: false, detail: `${path} is not on the page's own origin, which its Content-Security-Policy requires` };
+  const client = await get(fetchImpl, url.href);
+  const type = String(h(client.headers, 'content-type') || '');
+  const problem = client.error || (client.status !== 200 ? `${url.pathname}: ${client.status}`
+    : !/^(?:application|text)\/javascript\b/i.test(type) ? `${url.pathname} comes as ${type || 'no content type'}, not JavaScript: is manager/vendor/ deployed with the page?`
+    : lf(client.body) !== lf(text) ? `${url.pathname} is not this checkout's copy: deploy again` : '');
+  return { check, ok: !problem, detail: problem };
 }
 
 const lookupError = (e) => (e && e.code ? e.code : String((e && e.message) || e));
@@ -110,8 +151,19 @@ async function lookup(fn, name) {
 }
 const txtValues = (records) => records.map((parts) => (Array.isArray(parts) ? parts.join('') : String(parts)));
 
-/** The app address's CNAME to Cloudflare Pages. A *.pages.dev address has nothing to check. */
-export async function checkAppDns({ resolver, appUrl, pagesProject = DEFAULT_PAGES_PROJECT }) {
+// A pages.dev address as Cloudflare gives one (lotcurrent-app.pages.dev, or
+// lotcurrent-app-4xk.pages.dev when the name was taken), lower-cased, or ''.
+export function pagesHostOf(value) {
+  const v = String(value || '').trim().toLowerCase().replace(/\.$/, '');
+  return /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.pages\.dev$/.test(v) ? v : '';
+}
+
+/**
+ * The app address's CNAME to Cloudflare Pages: to pagesHost, the address
+ * Cloudflare shows for the project, else to <pagesProject>.pages.dev. A
+ * *.pages.dev address has nothing to check.
+ */
+export async function checkAppDns({ resolver, appUrl, pagesProject = DEFAULT_PAGES_PROJECT, pagesHost = '' }) {
   let host;
   try {
     host = new URL(appUrl).hostname;
@@ -119,10 +171,11 @@ export async function checkAppDns({ resolver, appUrl, pagesProject = DEFAULT_PAG
     return [];
   }
   if (host.endsWith('.pages.dev')) return [];
-  const want = `${pagesProject}.pages.dev`;
+  const want = pagesHostOf(pagesHost) || `${pagesProject}.pages.dev`;
   const { records, error } = await lookup((n) => resolver.resolveCname(n), host);
-  const ok = records.some((r) => r.replace(/\.$/, '') === want);
-  return [{ check: `${host} points at ${want}`, ok, detail: ok ? '' : records.length ? `CNAME ${records.join(', ')}` : `no CNAME (${error || 'none'}): add it in the domain's DNS (step 6), after the custom domain in Cloudflare` }];
+  const ok = records.some((r) => r.replace(/\.$/, '').toLowerCase() === want);
+  const named = pagesHostOf(pagesHost) ? '' : `; if Cloudflare shows another .pages.dev address for the project, that one is right: give it with --pages-host`;
+  return [{ check: `${host} points at ${want}`, ok, detail: ok ? '' : records.length ? `CNAME ${records.join(', ')}${named}` : `no CNAME (${error || 'none'}): add it in the domain's DNS (step 6), after the custom domain in Cloudflare` }];
 }
 
 /** The sign-in sender's records, as Resend asks for them. */
@@ -166,15 +219,31 @@ export function report(findings) {
 }
 
 export function parseArgs(argv) {
-  const opts = { app: '', sender: '', pages: DEFAULT_PAGES_PROJECT };
+  const opts = { app: '', sender: '', pages: DEFAULT_PAGES_PROJECT, pagesHost: '' };
   for (let i = 0; i < argv.length; i += 1) {
-    const key = { '--app': 'app', '--sender': 'sender', '--pages': 'pages' }[argv[i]];
+    const key = { '--app': 'app', '--sender': 'sender', '--pages': 'pages', '--pages-host': 'pagesHost' }[argv[i]];
     if (!key || !argv[i + 1]) throw new Error(`unexpected ${argv[i]}`);
     opts[key] = argv[i + 1];
     i += 1;
   }
   if (!opts.app && !opts.sender) throw new Error('give --app, --sender or both');
+  if (opts.pagesHost) {
+    const host = pagesHostOf(opts.pagesHost);
+    if (!host) throw new Error(`--pages-host ${opts.pagesHost} is not a .pages.dev address`);
+    opts.pagesHost = host;
+  }
   return opts;
+}
+
+// manager/config.js's supabaseJs and that file's text here, or no text when
+// it names nothing in manager/ (the check then fails and says so).
+export function committedClient(path) {
+  const p = String(path || '');
+  try {
+    return { path: p, text: /^\.\/[\w./-]+$/.test(p) && !p.includes('..') ? readFileSync(new URL(`../manager/${p.slice(2)}`, import.meta.url), 'utf8') : '' };
+  } catch {
+    return { path: p, text: '' };
+  }
 }
 
 async function main(argv) {
@@ -182,7 +251,7 @@ async function main(argv) {
   try {
     opts = parseArgs(argv);
   } catch (e) {
-    console.log(`${e.message}\nusage: npm run check-hosting -- [--app https://app.<domain>/] [--sender mail.<domain>] [--pages <Pages project>]`);
+    console.log(`${e.message}\nusage: npm run check-hosting -- [--app https://app.<domain>/] [--sender mail.<domain>] [--pages <Pages project>] [--pages-host <the project's .pages.dev address>]`);
     process.exitCode = 2;
     return;
   }
@@ -193,8 +262,9 @@ async function main(argv) {
       appUrl: opts.app,
       headersText: readFileSync(new URL('../manager/_headers', import.meta.url), 'utf8'),
       committedUrl: String(CONFIG.supabaseUrl || '').replace(/\/+$/, ''),
+      committedClient: committedClient(CONFIG.supabaseJs),
     }));
-    findings.push(...await checkAppDns({ resolver: dnsPromises, appUrl: opts.app, pagesProject: opts.pages }));
+    findings.push(...await checkAppDns({ resolver: dnsPromises, appUrl: opts.app, pagesProject: opts.pages, pagesHost: opts.pagesHost }));
   }
   if (opts.sender) findings.push(...await checkSenderDns({ resolver: dnsPromises, sender: opts.sender }));
   const { text, failed } = report(findings);

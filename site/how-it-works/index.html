@@ -62,14 +62,14 @@
       <div class="wrap narrow">
         <h1 id="page-h">How Lot Current works</h1>
         <p class="lead">Lot Current reads your website's used inventory, fills in the Marketplace form for each pre-owned car, and rescans to show what sold or changed price.</p>
-        <p>It is a Chrome extension on the salesperson's own computer. Four steps, and a person is at the keyboard for every one of them.</p>
+        <p>It is a Chrome extension on the salesperson's own computer. Four steps. A person starts each post, or a queue of several, and clicks Publish, Update, Mark as sold or Delete themselves; Lot Current fills in the form. In a queue, once you publish a car and the panel confirms the new listing shows it, Lot Current opens and fills the next car's form without another click; when it cannot confirm the listing, it waits for you to click <b>It's posted, next car</b>. A car with a warning, or one whose photos sit on a server Chrome has not been asked about yet, stops for you first, and you still check and publish each one. The rescan of your website in step four can also run on its own, if you allow it, and it never touches Facebook.</p>
       </div>
     </section>
 
     <section aria-labelledby="reads-h">
       <div class="wrap narrow">
         <h2 id="reads-h">Reads your website</h2>
-        <p>Click <b>Scan website</b> on your dealership's used inventory page. Lot Current reads the cars the website lists, keeps the pre-owned ones at your store that have photos and a price, and shows them on its <b>Ready to post</b> tab. New, demo and loaner cars never get through; a car the check cannot confirm, or a trailer, RV, powersport vehicle or boat, goes to <b>Needs a look</b> instead. Cars at a sister store sit under <b>Other stores</b>.</p>
+        <p>Click <b>Scan website</b> on your dealership's used inventory page. Lot Current reads the cars the website lists, keeps the pre-owned ones that have photos and a price and are at the stores you ticked in Settings (any of the website's stores, when you tick none), and shows them on its <b>Ready to post</b> tab. Only cars the website marks as pre-owned get through; a car the check cannot confirm, or a trailer, RV, powersport vehicle or boat, goes to <b>Needs a look</b> instead. The check goes by the website's own labels as Lot Current reads them (below), so a car the website labels wrong can get through, and so can a demo or loaner whose label Lot Current misses: look over each car before you post it. Cars at a store you did not tick sit under <b>Other stores</b>.</p>
         <p>Nothing is posted by a scan. It only reads your own public website.</p>
       </div>
     </section>
@@ -77,7 +77,7 @@
     <section aria-labelledby="fills-h">
       <div class="wrap narrow">
         <h2 id="fills-h">Fills in the listing</h2>
-        <p>Click <b>Post</b> on a car. The side panel re-reads that car's own page on the website, runs the pre-owned check again on the fresh copy, and writes a description from the website's facts, every number checked against the website and your dealership named in it. You can edit the description before it goes in.</p>
+        <p>Click <b>Post</b> on a car. The side panel re-reads that car's own page on the website, runs the pre-owned check again on the fresh copy, and writes a description from the car's listed facts on the website (it does not copy the website's write-up), every number checked against the website and your dealership named in it. You can edit the description before it goes in.</p>
         <p>Then it opens the Marketplace form and fills in the year, make, model, mileage, price, VIN, colors, body style, fuel, transmission, location and the photos. Title status and condition come from your dealership's defaults. Several cars at once: tick them and Lot Current walks through them one after another, each one still getting your check and your click.</p>
         <figure class="shot">
           <img src="../screenshots/02-side-panel.png" alt="The side panel next to the sample dealership website: the 2020 Ford F-150 XLT re-checked at the website's price, the description written from the website's facts, and the line that all checks passed, every number matching the website and the dealership named." width="1280" height="800" loading="lazy">
@@ -101,7 +101,7 @@
     <section aria-labelledby="honest-h">
       <div class="wrap narrow">
         <h2 id="honest-h">Keeps listings honest</h2>
-        <p>With automatic rescans allowed, Lot Current re-reads your website every 3 hours while Chrome is open; it never touches Facebook then. A sold car shows on your <b>To do</b> tab under <b>Take down</b>, a price change under <b>Update price</b>, each with a button that opens the right listing. For a price change the website's new price goes into the Price box the moment the form shows it; you click <b>Update</b> yourself, and the panel ticks the item off when it sees the listing changed.</p>
+        <p>With automatic rescans allowed, Lot Current re-reads your website every 3 hours while Chrome is open, with nobody at the keyboard, and while you are signed in to a Lot Current account it also sends that rescan's results (your posted list, post timings, to-do items and the scan's counts) to your dealership's account; it never touches Facebook then. A sold car shows on your <b>To do</b> tab under <b>Take down</b>, a price change under <b>Update price</b>, each with a button that opens the right listing. For a price change Lot Current reads the car on your website once more as you open the listing, and the price the website shows then goes into the Price box the moment the form shows it (a car the website no longer lists, marks sold or no longer calls pre-owned stops there, and nothing is filled); you click <b>Update</b> yourself, and the panel ticks the item off when it sees the listing changed.</p>
         <p>Only cars marked as posted are watched. A car you listed by hand is covered once you click <b>Mark posted</b>. Price changes only mirror the website: no invented drops, no raise-then-drop, no delete-and-relist.</p>
       </div>
     </section>
@@ -111,7 +111,7 @@
         <h2 id="needs-h">What it needs</h2>
         <ul class="plain">
           <li>Google Chrome on the salesperson's computer.</li>
-          <li>A dealership website on Dealer Inspire, which is where Lot Current has been checked on a live site. Lot Current also tries any website that publishes standard vehicle data (schema.org) on its car pages; that reader has been tested only on sample websites, so no other platform is known to work until a real site has been scanned.</li>
+          <li>A dealership website on Dealer Inspire, which is where Lot Current has been checked on a live site. Lot Current also has readers for DealerOn and Dealer.com websites, and tries any website that publishes standard vehicle data (schema.org) on its car pages; those readers have been tested only on sample websites, so no other platform is known to work until a real site has been scanned.</li>
           <li>The salesperson's own Facebook account. Marketplace stopped taking vehicle listings from dealer Pages in 2023, which is why salespeople post from their own accounts. Lot Current never asks for the password, never reads cookies or tokens, and never runs extra or shared accounts.</li>
         </ul>
       </div>
@@ -120,13 +120,13 @@
     <section aria-labelledby="preowned-h">
       <div class="wrap narrow">
         <h2 id="preowned-h">How the pre-owned check works</h2>
-        <p>Three separate signs on the dealer website have to agree the car is pre-owned:</p>
+        <p>Lot Current compares three signs on the dealer website:</p>
         <ol>
           <li>the inventory type from the dealer's system (Used / Certified Used / New);</li>
           <li>the condition word in the car's web address;</li>
           <li>the condition word at the start of the listing title ("Pre-Owned 2019 ...").</li>
         </ol>
-        <p>A demo or loaner flag means "sold as new". Mileage is never used to call a car used. Anything that disagrees or looks off, like a used car showing 0 miles, goes to <b>Needs a look</b>. A pre-owned car is ready to post only if it has photos, a price, is on the lot, is not sale-pending and is at your store. The side panel runs the same checks again on a fresh copy of the record right before it fills the form.</p>
+        <p>To pass, at least two of them must say pre-owned, or one must and the car's page must link a Carfax report, and none may say new; a car with only one sign and no Carfax report goes to <b>Needs a look</b>. A demo or loaner flag means "sold as new". One known gap: on DealerOn and Dealer.com websites, a car the website marks certified is read as certified used even when its inventory type says demo or loaner, so it can pass when its title and web address do not say demo or loaner. Mileage is never used to call a car used. Anything that disagrees or looks off, like a used car showing 0 miles, goes to <b>Needs a look</b>. A pre-owned car is ready to post only if it has photos, a price, is on the lot, is not sale-pending and is at a store you ticked in Settings (any of the website's stores, when you tick none). The side panel runs the same checks again on a fresh copy of the record when a post starts, and reads the car once more before it opens or fills the form when that copy is more than ten minutes old or a scan since then contradicts it.</p>
         <p>Next: <a href="../pricing/">pricing and the free pilot</a>, the <a href="../faq/">questions and answers</a>, <a href="../for-managers/">what managers see</a>, or <a href="../support/">how to get support</a>.</p>
       </div>
     </section>

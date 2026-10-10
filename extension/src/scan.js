@@ -13,6 +13,10 @@
 // checks).
 
 export function probeSiteInPage() {
+  // Never a Facebook page: the extension may reach Marketplace pages (its fill
+  // code), but it reads nothing else of them, and a dealer tab the salesperson
+  // moved to Facebook is no dealer page. The adapters' probes say the same.
+  if (/(^|\.)facebook\.com$/i.test(String(location.hostname || ''))) return null;
   // The store's own address, from the page's structured data (schema.org
   // PostalAddress in JSON-LD, which most dealer platforms carry) or, failing
   // that, an address-looking line in the page text. Used for the Marketplace

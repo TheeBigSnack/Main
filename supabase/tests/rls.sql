@@ -18,7 +18,8 @@
 --                          wall a manager's checks run against
 --   newcomer   (none yet)  redeems two invites for B during the test: one
 --                          from create_invite's mould and one the owner
---                          typed in lower case
+--                          typed in lower case (and, as a salesperson of B,
+--                          is refused a second salesperson code)
 
 \set ON_ERROR_STOP on
 \set a_sales   '00000000-0000-4000-8000-0000000000a1'
@@ -153,7 +154,9 @@ insert into public.invites (code, dealership_id, role, created_by, expires_at) v
   ('EXPIREDB0003', :'dealer_b', 'salesperson', null,       now() - interval '1 minute'), -- past its 7 days
   ('ORPHANA00004', :'dealer_a', 'salesperson', :'b_sales', now() + interval '7 days'),   -- its maker is no manager of A (B's salesperson)
   ('DEMOTEA00006', :'dealer_a', 'salesperson', :'a_sales', now() + interval '7 days'),   -- live only while a_sales is a manager of A
-  ('OPENC0000005', :'dealer_c', 'salesperson', null,       now() + interval '7 days');   -- C's, out of a_mgr's reach
+  ('OPENC0000005', :'dealer_c', 'salesperson', null,       now() + interval '7 days'),   -- C's, out of a_mgr's reach
+  ('HIREB0000007', :'dealer_b', 'salesperson', :'a_mgr',   now() + interval '7 days'),   -- a_mgr's code for a new hire at B
+  ('SECONDB00008', :'dealer_b', 'salesperson', null,       now() + interval '7 days');   -- another salesperson code for B, which the newcomer enters as one
 
 -- ---------------------------------------------------------------------------
 -- a_sales: a salesperson of A
@@ -196,6 +199,28 @@ begin
   select count(*) into n from public.memberships;
   if n <> 1 then raise exception 'a_sales should see only their own membership, saw % rows', n; end if;
   raise notice 'ok: a_sales sees only their own membership';
+
+  -- the column grants (update (name, role) on memberships, update (name) on dealerships) leave only the
+  -- policies between a salesperson and a role or a name: none of these may change a row, so a later
+  -- policy that lets a member edit their own row fails here, not in production
+  update public.memberships set role = 'manager' where user_id = auth.uid();
+  get diagnostics n = row_count;
+  if n <> 0 or (select role from public.memberships where user_id = auth.uid() and dealership_id = a) is distinct from 'salesperson' then
+    raise exception 'a_sales made themselves a manager';
+  end if;
+  update public.memberships set name = 'Renamed';
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'a_sales renamed a member (% rows)', n; end if;
+  delete from public.memberships where user_id <> auth.uid();
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'a_sales removed another member (% rows)', n; end if;
+  delete from public.memberships where user_id = auth.uid();
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'a_sales removed their own membership'; end if;
+  update public.dealerships set name = 'Renamed by a salesperson' where id = a;
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'a_sales renamed their dealership'; end if;
+  raise notice 'ok: a_sales changes no role, no name and no membership, and cannot rename A';
 
   -- cannot insert into B
   begin
@@ -574,6 +599,7 @@ declare
   b uuid := '00000000-0000-4000-8000-0000000000d2';
   got jsonb;
   code text;
+  own_code text;
   i integer;
 begin
   select count(*) into n from public.listings;
@@ -612,6 +638,19 @@ begin
   end if;
   raise notice 'ok: an invite code works once';
 
+  -- a code at the role the member already has changes nothing either: the newcomer, a salesperson of B,
+  -- enters another salesperson code for B. Answered P0012 naming their role (the words docs/help.md
+  -- quotes), still a salesperson under the same name, the code left unused for whoever it was made for
+  -- (checked as the owner below), and no miss counted (the throttle below still counts four)
+  got := public.redeem_invite('SECONDB00008', 'Someone Else');
+  if got ->> 'code' is distinct from 'P0012' or got ->> 'message' is distinct from 'you are already a salesperson of this dealership; the code was not used' then
+    raise exception 'a salesperson redeeming a second salesperson code was answered with %', got;
+  end if;
+  if (select role || ' ' || name from public.memberships where user_id = auth.uid() and dealership_id = b) is distinct from 'salesperson Riley' then
+    raise exception 'a salesperson redeeming a second salesperson code changed their membership';
+  end if;
+  raise notice 'ok: a code at the member''s own role is answered P0012 and changes nothing';
+
   -- an owner-made lower-case code, typed the way the extension sends it
   -- (upper case, with spaces around it): found, and rejoining B with it
   -- takes the invite's role and keeps the name
@@ -623,19 +662,57 @@ begin
   if n <> 1 then raise exception 'redeeming the second invite did not update the membership'; end if;
   raise notice 'ok: an invite code is matched ignoring case and surrounding spaces';
 
+  -- a code never lowers a role: the newcomer, now a manager of B like a_mgr, enters the code a_mgr made for
+  -- a new hire. Nothing changes: still a manager, the codes the newcomer made still open, the new hire's code
+  -- still unused, and no miss counted (the throttle below still counts four)
+  own_code := public.create_invite(b, 'salesperson') ->> 'code';
+  got := public.redeem_invite('HIREB0000007', 'Riley');
+  if got ->> 'code' is distinct from 'P0012' or got ->> 'message' is distinct from 'you are already a manager of this dealership; the code was not used' then
+    raise exception 'a manager redeeming a salesperson code was answered with %', got;
+  end if;
+  if (select role from public.memberships where user_id = auth.uid() and dealership_id = b) is distinct from 'manager' then
+    raise exception 'redeeming a salesperson code made a manager a salesperson';
+  end if;
+  if not exists (select 1 from public.list_invites(b) l where l.code = own_code) then
+    raise exception 'redeeming a salesperson code deleted the codes the manager made';
+  end if;
+  if not exists (select 1 from public.list_invites(b) l where l.code = 'HIREB0000007') then
+    raise exception 'a manager who already belongs used up the code meant for a new hire';
+  end if;
+  raise notice 'ok: a code never lowers a role, and a member it would not raise leaves it unused';
+
   -- the throttle: four misses so far (NOPE, expired, orphaned, used); six more make ten, and then the
-  -- function refuses before looking anything up, even a good code
+  -- function refuses before looking anything up, even a good code (below)
   for i in 1..6 loop
     got := public.redeem_invite('GUESS' || i, null);
     if got ->> 'code' <> 'P0002' then raise exception 'miss % was answered with %', i, got; end if;
   end loop;
+end;
+$$;
+
+-- a miss another account made three hours ago, written now as the owner: the throttled call below must
+-- still drop it (the privacy policy: an old miss is deleted at the next attempt by anyone), so the
+-- throttle is answered, not raised, and what the call deleted is kept
+reset role;
+insert into public.invite_misses (user_id, at) values (:'a_sales', now() - interval '3 hours');
+set local role authenticated;
+
+do $$
+declare
+  got jsonb;
+begin
+  -- the eleventh try inside an hour, with the good code a_mgr made for a new hire: refused before the lookup
+  -- (a lookup would answer P0012, already a manager), and answered with status 400, as a miss is
   begin
-    perform public.redeem_invite('NOPE', null);
-    raise exception 'the eleventh try inside an hour was looked up';
+    got := public.redeem_invite('HIREB0000007', null);
   exception when others then
-    if sqlstate <> 'P0005' then raise; end if;
+    raise exception 'the eleventh try inside an hour was raised (%), so PostgREST would roll back what the call deleted', sqlstate;
   end;
-  raise notice 'ok: after 10 misses in an hour redeem_invite refuses with P0005';
+  if got is distinct from jsonb_build_object('code', 'P0005', 'message', 'too many attempts; try again in an hour', 'details', null::text, 'hint', null::text)
+     or current_setting('response.status', true) is distinct from '400' then
+    raise exception 'the eleventh try inside an hour was answered % with status %', got, current_setting('response.status', true);
+  end if;
+  raise notice 'ok: after 10 misses in an hour redeem_invite answers P0005 with status 400, before looking anything up';
 end;
 $$;
 
@@ -648,6 +725,9 @@ begin
   end if;
   if not exists (select 1 from public.invites where code = 'made-up-b002' and used_by = '00000000-0000-4000-8000-0000000000c1' and used_at is not null) then
     raise exception 'the redeemed lower-case invite was not marked used (it is stored as typed)';
+  end if;
+  if not exists (select 1 from public.invites where code = 'SECONDB00008' and used_by is null and used_at is null) then
+    raise exception 'a salesperson who already belongs used up a second salesperson code';
   end if;
   raise notice 'ok: the redeemed invite is marked used';
 
@@ -664,7 +744,10 @@ begin
   if (select count(*) from public.invite_misses where user_id = '00000000-0000-4000-8000-0000000000c3') <> 1 then
     raise exception 'another account''s miss from five minutes ago was dropped by the newcomer''s redeem_invite';
   end if;
-  raise notice 'ok: a miss older than an hour is dropped at anyone''s call, and a fresh one of another account stays';
+  if exists (select 1 from public.invite_misses where user_id = '00000000-0000-4000-8000-0000000000a1') then
+    raise exception 'another account''s miss from three hours ago survived a throttled redeem_invite: the throttle undid the call''s delete';
+  end if;
+  raise notice 'ok: a miss older than an hour is dropped at anyone''s call, a throttled one included, and a fresh one of another account stays';
 
   -- a removed manager's unused codes go with them; used ones stay as the record
   -- (a_sales becomes a manager first: A must keep one); the codes a_mgr made for B, where they are still a

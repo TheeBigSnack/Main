@@ -1,0 +1,39 @@
+-- Lot Current: a scan held back as a likely website hiccup, recorded as such.
+--
+-- When more than half of a lot of 10 or more cars disappears from one scan,
+-- the extension marks nothing gone and keeps the list it saved before: that
+-- is almost always a website hiccup (extension/src/rescan.js). It used to
+-- send nothing for such a scan, so the manager's "Last scan" stopped at the
+-- last scan the extension trusted, with no word of the scans after it. A lot
+-- that really shrank that much read as a hiccup on every scan until a
+-- salesperson accepted the smaller list in the popup, and the manager could
+-- not tell that scans were running and being held back.
+--
+-- withheld  true for a scan the extension held back as a likely website
+--           hiccup; its counts are of its own read (the cars it found, how
+--           many of those were ready, the to-do items it raised), not of the
+--           lot as last saved. The manager's page shows the scans held back
+--           since the last trusted one beside it, never one of them as the
+--           last scan (manager/data.js); the next trusted scan, after the
+--           website recovers or after a salesperson accepts the smaller list,
+--           is the last scan again. false for every other scan, and for the
+--           rows written before this column.
+--
+-- Nothing personal: a yes or no about a scan of the dealer's own website.
+-- The table's grants and row-level security policies cover the new column as
+-- they cover the others (0002_rls.sql). The owner's usage report counts a
+-- held-back scan as a scan the extension synced (usage_report's
+-- last_synced_scan_at, last made in 0014_posting_usage_listed_before.sql),
+-- which it is: that column says whether anyone's extension still runs and
+-- syncs, not when the lot was last read in a way the extension trusted, so
+-- it is left as it is. Apply this before deploying the sync
+-- function that writes it. The manager view reads the newest scan with
+-- withheld false, and counts the ones held back since it, in reads of their
+-- own, so no run of held-back scans pushes the last trusted one out of what
+-- it reads; on a database without this column it reads the newest scan, as
+-- before (manager/manager.js readScans).
+-- A change made after the project applied 0001 to 0008; it applies on top
+-- of 0009 to 0015 as on a fresh build.
+
+alter table public.scan_summaries add column if not exists withheld boolean not null default false;
+comment on column public.scan_summaries.withheld is 'True for a scan the extension held back as a likely website hiccup (more than half of a lot of 10 or more gone at once); its counts are of its own read, not of the lot as last saved.';

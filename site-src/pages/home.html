@@ -2,7 +2,7 @@
     <section class="hero" aria-labelledby="hero-h">
       <div class="wrap narrow">
         <h1 id="hero-h">Your used cars on Facebook Marketplace, from your website, in seconds.</h1>
-        <p class="lead">Lot Current fills in the Facebook Marketplace vehicle listing from your dealership website, photos included; you check it and click Publish. It also tells you the same day when a car sells or its price changes.</p>
+        <p class="lead">Lot Current fills in the Facebook Marketplace vehicle listing from your dealership website, photos included; you check it and click Publish. With automatic rescans allowed and Chrome open, it also tells you the same day when a car sells or its price changes.</p>
         <!-- The Start a free pilot links stay hidden, here and under Pricing, until config.js names the manager view
              (signupUrl): site.js then shows them, with the pilot's length from pricing.json. -->
         <div class="actions">
@@ -19,7 +19,7 @@
         <ol class="steps">
           <li>
             <h3>Reads your website</h3>
-            <p>Click Scan on your used inventory page. Lot Current lists the pre-owned cars at your store that have photos and a price. New, demo and loaner cars never get through.</p>
+            <p>Click Scan on your used inventory page. Lot Current lists the cars at your store that your website marks as pre-owned and that have photos and a price. A car whose details don't add up goes to Needs a look instead.</p>
           </li>
           <li>
             <h3>Fills in the listing</h3>
@@ -46,7 +46,7 @@
           <li>
             <figure>
               <img src="{{root}}screenshots/01-ready-to-post.png" alt="The Lot Current popup over the sample dealership website, on its Ready to post tab: four pre-owned cars with a price and a Post button each, and counts on the To do, Not ready, Other stores and Needs a look tabs." width="1280" height="800" loading="lazy">
-              <figcaption><b>Scan your website.</b> Only pre-owned cars at your store are ready to post. <span class="from">Sandbox with sample data.</span></figcaption>
+              <figcaption><b>Scan your website.</b> The cars your website marks as pre-owned, at your store, with photos and a price, are ready to post. <span class="from">Sandbox with sample data.</span></figcaption>
             </figure>
           </li>
           <li>
@@ -70,7 +70,7 @@
           <li>
             <figure>
               <img src="{{root}}screenshots/05-pilot.png" alt="The popup's Numbers tab: how many cars were posted through Lot Current and the median time per post, the form fields with nothing to fix by hand, and the Download CSV button." width="1280" height="800" loading="lazy">
-              <figcaption><b>The numbers you can share with your manager, kept in your browser.</b> Time per post, fields that could not be filled, how long sold cars stayed listed. <span class="from">Sandbox with sample data.</span></figcaption>
+              <figcaption><b>Your Numbers tab.</b> Time per post and how long sold cars stayed listed are kept in your browser and, while you are signed in, in your dealership's account for the manager view. The fields that could not be filled stay in your browser only. <span class="from">Sandbox with sample data.</span></figcaption>
             </figure>
           </li>
         </ul>
@@ -83,7 +83,7 @@
         <ul class="cards">
           <li class="card">
             <h3>Pre-owned only</h3>
-            <p>Three separate signs on your website have to agree a car is pre-owned before it can be posted. A demo or loaner flag always means no.</p>
+            <p>Lot Current compares three signs on your website: the inventory type and the condition words in the car's web address and title. Before a car can be posted, at least two must say pre-owned, or one must and the website must link a Carfax report, and none may say new. It goes by your website's labels as Lot Current reads them, so a car the website labels wrong can get through, and so can a demo or loaner whose label Lot Current misses: look over each car before you post it.</p>
           </li>
           <li class="card">
             <h3>Photos included</h3>
@@ -91,11 +91,11 @@
           </li>
           <li class="card">
             <h3>The website price, always</h3>
-            <p>The listed price is your website's price, on the price basis your dealership chooses. Price changes only mirror the website.</p>
+            <p>The listed price is your website's price, on the price basis your dealership chooses; a change of basis is for new posts, and a listing keeps the basis it was posted at. Price changes only mirror the website.</p>
           </li>
           <li class="card">
             <h3>A description from the facts</h3>
-            <p>Written from the website's own data, with every number checked against it, and your dealership named in every one. You can edit it before it goes in.</p>
+            <p>Written from the car's listed facts on the website, not copied from its write-up, with every number checked against the website, and your dealership named in every one. You can edit it before it goes in.</p>
           </li>
           <li class="card">
             <h3>Sold cars and price changes flagged</h3>
@@ -114,11 +114,11 @@
             <p>Before posting, the VIN's format, model year and manufacturer are compared with what the website says, and any difference is flagged.</p>
           </li>
           <li class="card">
-            <h3>A daily cap you set</h3>
-            <p>Your dealership sets how many posts a day each salesperson may make. It is a safety setting, not a guarantee of anything from Facebook.</p>
+            <h3>A daily cap your dealership picks</h3>
+            <p>Your dealership chooses how many posts a day each salesperson may make, and each salesperson enters that number in their own Settings. It is a safety setting, not a guarantee of anything from Facebook.</p>
           </li>
         </ul>
-        <p>Once the manager view opens, managers will see the same numbers for the whole store: <a href="{{root}}for-managers/">what managers see</a>.</p>
+        <p>Once the manager view opens, managers will see the post and to-do numbers for the whole store: <a href="{{root}}for-managers/">what managers see</a>.</p>
       </div>
     </section>
 
@@ -127,7 +127,7 @@
         <h2 id="wont-h">What Lot Current won't do</h2>
         <ul class="wont">
           <li>Click Publish, Update, Delete or Mark as sold. Ever. There is no code for it, and a test that fails if any appears.</li>
-          <li>Post a new, demo or loaner vehicle, or any car the pre-owned check can't confirm.</li>
+          <li>Post a car the pre-owned check reads as new, demo or loaner, or any car it can't confirm.</li>
           <li>Invent a price or a price drop. The listed price is the website price.</li>
           <li>Hide that the car is at a dealership. Every description names the store and your role.</li>
           <li>Ask for your Facebook password, read your cookies or messages, use fake delays, proxies or extra accounts.</li>
@@ -143,7 +143,9 @@
     <section id="pricing" aria-labelledby="pricing-h">
       <div class="wrap narrow">
         <h2 id="pricing-h">Pricing</h2>
-        <p><b>Planned pricing:</b> <span data-pricing="perRooftopMonthly">$149</span> per rooftop per month, with <span data-pricing="includedSalespeople">five</span> salespeople included, <span data-pricing="extraSalespersonMonthly">$20</span> a month for each extra salesperson, and a <span data-pricing="pilotDays">30</span>-day free pilot first. These are planned prices, confirmed with you before any paid subscription starts. <a href="{{root}}pricing/">The pricing page</a> has the founding-dealer price and the details of the free pilot.</p>
+        <!-- Each data-pricing number is written in by npm run site-pages from marketing/pricing.json, and site.js
+             writes it again from site/pricing.json: never type a price here. -->
+        <p><b>Planned pricing:</b> <span data-pricing="perRooftopMonthly"></span> per rooftop per month, with <span data-pricing="includedSalespeople"></span> salespeople included, <span data-pricing="extraSalespersonMonthly"></span> a month for each extra salesperson, and a <span data-pricing="pilotDays"></span>-day free pilot first. These are planned prices, confirmed with you before any paid subscription starts. <a href="{{root}}pricing/">The pricing page</a> has the founding-dealer price and the details of the free pilot.</p>
         <div class="actions">
           <a class="button" href="#demo">Request a demo</a>
           <a class="button alt" data-signup hidden>Start a free pilot</a>

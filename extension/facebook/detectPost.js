@@ -1,7 +1,14 @@
 // Watches the Facebook tab after the form is filled and reports when its
 // address changes to a published listing. It only listens; it never acts on
-// the page. Detection is best-effort: the side panel always asks the
-// salesperson to confirm ("Did it post?") and lets them paste the link.
+// the page. Detection is best-effort. A single post always waits for the
+// salesperson to confirm ("Looks like it posted", It's posted, record it)
+// and lets them paste the link. In a queue, every listing address the tab
+// moves to is read by the side panel first, and only a page that shows the
+// car just published (showsPostedCar) is called posted or offered as its
+// link; one the form's own tab moved to straight from the create page, for a
+// listing not already recorded (isNewListingFromForm), is then taken as the
+// person's Publish and recorded without asking. Any other listing address
+// waits for their click, its address kept out of the Listing link box.
 
 // 'listing' = a listing page with an id; 'probably' = the "your listings"
 // page, which usually follows a publish; null = nothing to report.
@@ -14,11 +21,92 @@ export function classifyUrl(url, { listingUrlPattern, afterPublishPatterns = [] 
   return null;
 }
 
+// The listing link to keep for a post, from an address the person pasted (or
+// the one the tab showed): only a listing's own address, the one the map's
+// listingUrlPattern reads an id from. Another spelling of the form's own
+// website (m., web. or no www, http, no scheme; createUrl's domain) becomes
+// the form's origin, without a query the pattern doesn't need. Anything else
+// (the Your listings page Facebook lands on after Publish, another page, text
+// that is not an address) gives '': no link is better than one that opens the
+// wrong page and hides upkeep's note that no link was saved.
+export function listingLink(text, { listingUrlPattern, afterPublishPatterns = [], createUrl = '' } = {}) {
+  const t = String(text || '').trim();
+  if (!t || !listingUrlPattern) return '';
+  let u;
+  try {
+    u = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(t) ? t : 'https://' + t);
+  } catch (e) {
+    return '';
+  }
+  let tries = [u.href];
+  try {
+    const form = new URL(createUrl);
+    const domain = form.hostname.replace(/^www\./i, '').toLowerCase();
+    const host = u.hostname.toLowerCase();
+    if (/^https?:$/.test(u.protocol) && (host === domain || host.endsWith('.' + domain))) tries = [form.origin + u.pathname, form.origin + u.pathname + u.search];
+  } catch (e) {
+    /* no form address to compare with: the address as given */
+  }
+  return tries.find((link) => {
+    const r = classifyUrl(link, { listingUrlPattern, afterPublishPatterns });
+    return Boolean(r) && r.status === 'listing' && Boolean(r.id);
+  }) || '';
+}
+
+// Whether an address is the create-listing page: createUrl's page or a page
+// under it, with any query.
+export function onCreatePage(url, createUrl) {
+  try {
+    const u = new URL(String(url || ''));
+    const c = new URL(String(createUrl || ''));
+    const page = u.pathname.replace(/\/+$/, '');
+    const form = c.pathname.replace(/\/+$/, '');
+    return u.origin === c.origin && (page === form || page.startsWith(form + '/'));
+  } catch (e) {
+    return false;
+  }
+}
+
+// In a queue, whether a watch result may be recorded without asking: a
+// listing address the tab moved to straight from the create page
+// (afterCreate), whose listing is not one already recorded in `posted`.
+export function isNewListingFromForm(result, posted, patterns) {
+  if (!result || result.status !== 'listing' || result.afterCreate !== true) return false;
+  if (!result.id) return true;
+  return !Object.values(posted || {}).some((p) => {
+    const known = classifyUrl(p && p.listingUrl, patterns);
+    return Boolean(known) && known.status === 'listing' && known.id === result.id;
+  });
+}
+
+// In a queue, whether the listing page the form's tab is on shows the car
+// just published, as the read-only listing reader (readListingInPage, asked
+// for that listing's id, this car's name, VIN and filled price) saw it: still
+// that listing's address, not marked sold or gone, no form on the page, and
+// this car's VIN in the page's text; or, when no other car in the posted list
+// shares this car's name (namesakes 0; null when unknown), every word of its
+// name and that price. Another listing opened from a notification, or a
+// listing of another car, shows neither, and the panel asks instead. The
+// create form itself is never proof: it carries this car in its boxes and its
+// preview, and it can still be drawn while the address already names another
+// listing (a page that has not redrawn yet, or a listing opened over it).
+export function showsPostedCar(seen, { namesakes = null } = {}) {
+  if (!seen || !seen.matchesId || seen.sold || seen.unavailable) return false;
+  if (seen.formOnPage !== false || seen.hasPriceBox) return false;
+  if (seen.vinInText === true) return true;
+  return namesakes === 0 && Boolean(seen.matchesName && seen.matchesPrice);
+}
+
 /**
  * Resolves with { status: 'listing' | 'probably' | 'closed' | 'timeout' | 'cancelled', url }.
+ * A 'listing' result also says whether the address came straight after the
+ * create page (createUrl) in this tab, as an address change this watch saw:
+ * afterCreate. The address the tab already showed when the watch began
+ * never counts as coming from the form.
  */
-export function watchForListing({ tabId, listingUrlPattern, afterPublishPatterns = [], timeoutMs = 30 * 60 * 1000 }) {
+export function watchForListing({ tabId, listingUrlPattern, afterPublishPatterns = [], createUrl = '', timeoutMs = 30 * 60 * 1000 }) {
   const patterns = { listingUrlPattern, afterPublishPatterns };
+  let onForm = false; // the last address this watch saw in the tab was the create page
   let done = false;
   let timer = null;
   let resolveFn;
@@ -32,12 +120,17 @@ export function watchForListing({ tabId, listingUrlPattern, afterPublishPatterns
     chrome.tabs.onRemoved.removeListener(onRemoved);
     resolveFn(result);
   }
-  function check(url) {
+  function check(url, changed) {
     const r = classifyUrl(url, patterns);
-    if (r) finish(r);
+    if (!r) {
+      onForm = onCreatePage(url, createUrl);
+      return;
+    }
+    if (r.status === 'listing') r.afterCreate = changed && onForm;
+    finish(r);
   }
   function onUpdated(id, info) {
-    if (id === tabId && info && info.url) check(info.url);
+    if (id === tabId && info && info.url) check(info.url, true);
   }
   function onRemoved(id) {
     if (id === tabId) finish({ status: 'closed', url: null });
@@ -46,7 +139,7 @@ export function watchForListing({ tabId, listingUrlPattern, afterPublishPatterns
   chrome.tabs.onUpdated.addListener(onUpdated);
   chrome.tabs.onRemoved.addListener(onRemoved);
   timer = setTimeout(() => finish({ status: 'timeout', url: null }), timeoutMs);
-  chrome.tabs.get(tabId).then((t) => check(t && t.url)).catch(() => finish({ status: 'closed', url: null }));
+  chrome.tabs.get(tabId).then((t) => check(t && t.url, false)).catch(() => finish({ status: 'closed', url: null }));
 
   return { promise, cancel: () => finish({ status: 'cancelled', url: null }) };
 }

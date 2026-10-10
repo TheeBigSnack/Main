@@ -8,7 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
-import { siteKeys, SITE_KEY_NAMES, GLOBAL_KEYS, SITES_KEY, REQUEST_KEYS, pilotKey } from '../extension/src/storageKeys.js';
+import { siteKeys, SITE_KEY_NAMES, GLOBAL_KEYS, SITES_KEY, REQUEST_KEYS, pilotKey, originOfSiteKey } from '../extension/src/storageKeys.js';
 import { SITES_KEY as RUNNER_SITES_KEY } from '../extension/src/scanRunner.js';
 import { pilotKey as pilotKeyFromPilot } from '../extension/src/pilot.js';
 import { withLock, updateKey, STORAGE_FULL, storageErrorText } from '../extension/src/storage.js';
@@ -29,8 +29,10 @@ test('siteKeys names every per-website key as existing installs hold it; the glo
     flow: `postFlow:${ORIGIN}`,
     pilot: `pilot:${ORIGIN}`,
     sync: `sync:${ORIGIN}`,
+    postLog: `postLog:${ORIGIN}`,
+    takenDown: `takenDown:${ORIGIN}`,
   });
-  assert.deepEqual(Object.keys(SITE_KEY_NAMES), ['settings', 'snapshot', 'diff', 'posted', 'boilerplate', 'queue', 'drafts', 'wizard', 'wizardDone', 'flow', 'pilot', 'sync']);
+  assert.deepEqual(Object.keys(SITE_KEY_NAMES), ['settings', 'snapshot', 'diff', 'posted', 'boilerplate', 'queue', 'drafts', 'wizard', 'wizardDone', 'flow', 'pilot', 'sync', 'postLog', 'takenDown']);
   assert.ok(Object.isFrozen(SITE_KEY_NAMES) && Object.isFrozen(GLOBAL_KEYS) && Object.isFrozen(REQUEST_KEYS));
   assert.deepEqual(GLOBAL_KEYS, { sites: 'sites', devOverrides: 'devOverrides', postRequest: 'postRequest', setupRequest: 'setupRequest', upkeepRequest: 'upkeepRequest', lastPostOrigin: 'lastPostOrigin', account: 'account' });
   assert.equal(SITES_KEY, 'sites');
@@ -45,19 +47,27 @@ test('siteKeys names every per-website key as existing installs hold it; the glo
   assert.equal(siteKeys(undefined).posted, 'posted:', 'never throws; the caller checks the origin');
 });
 
-// Milestone 4's keys are documented when that work lands in HANDOFF.md.
-const PENDING_DOCS = new Set();
+// Sign out finds every website's sync state among the keys Chrome holds.
+test('originOfSiteKey names the website a stored key belongs to, only for that field\'s key', () => {
+  assert.equal(originOfSiteKey('sync', siteKeys(ORIGIN).sync), ORIGIN);
+  assert.equal(originOfSiteKey('queue', siteKeys(ORIGIN).queue), ORIGIN, 'by the stored name (postQueue), not the field\'s');
+  assert.equal(originOfSiteKey('wizard', siteKeys(ORIGIN).wizardDone), '', 'wizardDone:<origin> is not wizard:<origin>');
+  assert.equal(originOfSiteKey('sync', siteKeys(ORIGIN).settings), '');
+  assert.equal(originOfSiteKey('sync', GLOBAL_KEYS.account), '');
+  assert.equal(originOfSiteKey('sync', 'sync:'), '', 'a key with no origin names none');
+  assert.equal(originOfSiteKey('nope', 'nope:x'), '');
+  assert.equal(originOfSiteKey('toString', 'toString:x'), '', 'only the module\'s own fields');
+  assert.equal(originOfSiteKey('sync', null), '');
+});
 
 test('the names are the documented ones (HANDOFF.md section 5.1)', () => {
   const handoff = readFileSync(new URL('../HANDOFF.md', import.meta.url), 'utf8');
   const section = handoff.slice(handoff.indexOf('### 5.1'), handoff.indexOf('### 5.2'));
   assert.ok(section.length > 500, 'section 5.1 is there');
   for (const name of Object.values(SITE_KEY_NAMES)) {
-    if (PENDING_DOCS.has(name)) continue;
     assert.ok(section.includes('`' + name + ':<origin>`'), `HANDOFF.md 5.1 does not document ${name}:<origin>`);
   }
   for (const name of Object.values(GLOBAL_KEYS)) {
-    if (PENDING_DOCS.has(name)) continue;
     assert.ok(section.includes('`' + name + '`'), `HANDOFF.md 5.1 does not document ${name}`);
   }
 });

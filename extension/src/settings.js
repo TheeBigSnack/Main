@@ -1,7 +1,7 @@
 // Settings shared by the popup and the side panel, with defaults so a
 // settings object saved by v0.1 ({ myStores, basis }) keeps working.
 
-import { shortLocation, storeNames, matchStore } from './normalize.js';
+import { storeNames, matchStore } from './normalize.js';
 import { DEFAULT_DAILY_CAP } from './cap.js';
 import { TITLE_STATUSES, CONDITIONS, DEFAULT_LISTING_DEFAULTS } from './listingData.js';
 import { sortOrder, newDaysOf } from './readyList.js';
@@ -10,6 +10,13 @@ export const SETTINGS_VERSION = 2;
 export const DEFAULT_SALESPERSON_TITLE = 'sales consultant';
 // A closing line is checked by words (src/rewriteTemplate.js); this only stops a pasted page being kept.
 export const CLOSING_LINE_MAX_CHARS = 300;
+
+// Every description names the dealership. The name comes from the website
+// (src/scan.js) or a person; a website that gives none leaves it blank until
+// someone types it. The wizard's address step does not go on without it,
+// Settings says so on Save, and the side panel opens no form until it is set.
+export const NO_DEALER_NAME = 'No dealership name is set: type it in Dealership name. Every description names the dealership, so nothing can be posted until it is.';
+export const dealerNameMissing = (dealer) => !String((dealer && dealer.name) || '').trim();
 
 // The usual gap between the main price and the lower second price a website
 // shows (on some sites that is the doc fee), taken from what most cars agree
@@ -43,13 +50,21 @@ export function withDefaults(settings, site = {}) {
   return {
     version: SETTINGS_VERSION,
     myStores,
+    // true once a person chose the stores with the website's stores in view
+    // (Settings after a scan, set-up's store step, or a profile saved from
+    // either), so none ticked is their choice of every store and the
+    // website's first scan keeps it (src/scanRunner.js performScan)
+    storesChosen: s.storesChosen === true,
     basis: s.basis === 'beforeFees' ? 'beforeFees' : 'website',
     // closingLine: the salesperson's own line after the sign-off (src/rewriteTemplate.js checkClosingLine); '' for none
     salesperson: { name: String(sp.name || ''), title: String(sp.title || DEFAULT_SALESPERSON_TITLE), closingLine: String(sp.closingLine || '').replace(/\s+/g, ' ').trim().slice(0, CLOSING_LINE_MAX_CHARS) },
-    // blanks are filled from the website's own address (site.address, read by the scan)
+    // blanks are filled from the website's own address (site.address, read by the scan). The city
+    // is never guessed from a store name: with no address on the website it stays blank, and the
+    // wizard and Settings ask a person to type it (a store name is not a town to put in a listing
+    // or in Marketplace's location box)
     dealer: {
       name: String(d.name || site.name || ''),
-      city: String(d.city || (site.address && site.address.city) || (myStores[0] ? shortLocation(myStores[0]) : '')),
+      city: String(d.city || (site.address && site.address.city) || ''),
       state: String(d.state || (site.address && site.address.state) || ''),
       zip: String(d.zip || (site.address && site.address.zip) || ''),
     },
@@ -61,7 +76,7 @@ export function withDefaults(settings, site = {}) {
       titleStatus: pickDefault(ld.titleStatus, TITLE_STATUSES, DEFAULT_LISTING_DEFAULTS.titleStatus),
       condition: pickDefault(ld.condition, CONDITIONS, DEFAULT_LISTING_DEFAULTS.condition),
     },
-    // automatic rescans (set by the wizard once the host permission is granted) and the desktop notification
+    // automatic rescans (on only once Chrome granted the host permission: the wizard, the popup's allow-rescans button, or a Settings save that asks for it) and the desktop notification
     autoRescan: Boolean(s.autoRescan),
     notify: s.notify !== false,
     rulesReadAt: typeof s.rulesReadAt === 'string' ? s.rulesReadAt : '',
@@ -88,6 +103,7 @@ export function profileFrom(settings, origin = '') {
     salesperson: s.salesperson,
     dealer: s.dealer,
     myStores: s.myStores,
+    storesChosen: s.storesChosen,
     basis: s.basis,
     priceNote: s.priceNote,
     dailyCap: s.dailyCap,
@@ -108,9 +124,12 @@ export function profileFrom(settings, origin = '') {
 export function settingsFromProfile(profile, site = {}) {
   if (!profile || typeof profile !== 'object') return null;
   // The website the profile was saved from decides, never the editable dealer
-  // name. A profile saved before that was recorded (0.4.0) is kept whole, as
-  // before, until it is saved again.
-  const sameDealer = !profile.origin || !site.origin || profile.origin === site.origin;
+  // name. A profile saved before that was recorded (0.4.0: no `origin` key at
+  // all) is kept whole, as before, until it is saved again. One that records
+  // no website (origin '': saved from a tab that was not a dealer's website,
+  // before saveProfile refused that) belongs to no dealership.
+  const legacy = !Object.prototype.hasOwnProperty.call(profile, 'origin');
+  const sameDealer = legacy || !site.origin || (Boolean(profile.origin) && profile.origin === site.origin);
   const person = { salesperson: profile.salesperson, defaults: profile.defaults, legal: profile.legal, rewrite: { ...(profile.rewrite || {}), key: '' } };
   return withDefaults(sameDealer ? { ...profile, ...person } : person, site);
 }
@@ -145,6 +164,20 @@ export function priceStepModel(entries, basis = 'website') {
   };
 }
 
+// Said before "Price to post" changes (Settings and set-up's Price step),
+// given how many of the person's own listings this website has: a change is
+// for new posts. A listing already posted keeps the price it was posted at
+// and is still checked against the website on that price (src/rescan.js
+// postedBasis), so the change never asks for a price edit: the posting rules
+// say a listing's price changes only when the website's does
+// (legal/posting-rules.md). Plain text, no markup.
+export function basisChangeNote(n) {
+  if (!n) return '';
+  return n === 1
+    ? 'You have one posted listing on this website. A change here is for new posts: that listing keeps the price it was posted at, and rescans keep checking it against the website on that price.'
+    : `You have ${n} posted listings on this website. A change here is for new posts: those listings keep the price they were posted at, and rescans keep checking each one against the website on that price.`;
+}
+
 export async function loadProfile(storage) {
   try {
     const area = storage || chrome.storage.sync;
@@ -154,7 +187,11 @@ export async function loadProfile(storage) {
   }
 }
 
+// Saved only with the website the settings belong to: a profile with none
+// would carry one dealership's name, address, price note and cap to every
+// other dealer's website (settingsFromProfile).
 export async function saveProfile(settings, storage, origin = '') {
+  if (!origin) return false;
   try {
     const area = storage || chrome.storage.sync;
     await area.set({ [PROFILE_KEY]: profileFrom(settings, origin) });

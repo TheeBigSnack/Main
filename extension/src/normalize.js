@@ -8,12 +8,18 @@
 
 export { VEHICLE_FIELDS } from './vehicle.js';
 
+// One amount as a number: "$24,995", "24995", "24,995.00", "$ 24,995", "-3".
+// Text holding anything else is no number, so two amounts in one field ("$24,995
+// $25,495", a was/now pair) are never run together into one ("2499525495"),
+// and commas count only as thousands separators.
+const ONE_AMOUNT = /^(-?)\s*\$?\s*(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?$/;
+
 export function toNumber(value) {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
   if (typeof value !== 'string') return null;
-  const cleaned = value.replace(/[$,\s]/g, '');
-  if (!/^-?\d+(\.\d+)?$/.test(cleaned)) return null;
-  return Number(cleaned);
+  const m = value.trim().match(ONE_AMOUNT);
+  if (!m) return null;
+  return Number(m[1] + m[2].replace(/,/g, '') + (m[3] || ''));
 }
 
 // ---------- pre-owned signs any website can carry ----------

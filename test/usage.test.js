@@ -9,6 +9,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { lastDefinition } from './migrations.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const sql = read('../supabase/migrations/0008_usage.sql');
@@ -30,11 +31,14 @@ const COLUMNS = [
   'last_synced_scan_at', 'rewrite_calls',
 ];
 
+// the function as the database runs it: its last definition (0008_usage.sql,
+// or a later migration that replaced it)
 const body = (() => {
-  const start = sql.indexOf('create or replace function public.usage_report(');
-  const end = sql.indexOf(`comment on function ${SIGNATURE} is `, start);
-  assert.ok(start >= 0 && end > start, '0008_usage.sql has no usage_report() with a comment after it');
-  return sql.slice(start, end);
+  const { file, sql: text } = lastDefinition('usage_report');
+  const start = text.indexOf('create or replace function public.usage_report(');
+  const end = text.indexOf(`comment on function ${SIGNATURE} is `, start);
+  assert.ok(start >= 0 && end > start, `${file} has no usage_report() with a comment after it`);
+  return text.slice(start, end);
 })();
 const returned = (() => {
   const m = body.match(/\nreturns table \(\n([^]*?)\n\)\n/);
@@ -82,7 +86,10 @@ test('the window starts at since, included, has no end, and a null since counts 
   assert.match(body, /coalesce\(usage_report\.since, '-infinity'::timestamptz\) as since/);
   const windowed = [...body.matchAll(/(\w+\.\w+) >= w\.since/g)].map((m) => m[1]);
   assert.deepEqual(windowed, ['l.posted_at', 'l.posted_at', 'u.at'], 'active salespeople and posts by posted_at, rewrite calls by at');
-  assert.doesNotMatch(body.replace(/--.*$/gm, ''), /[<>]=? ?now\(\)|\bw\.since\b[^\n]*<|>\s*w\.since/, 'no upper end and no strict edge');
+  // the one comparison with now() is last_synced_scan_at's clock guard (checked below), not a window's end
+  const guard = "x.taken_at <= now() + interval '5 minutes'";
+  assert.equal(body.split(guard).length, 2, 'the scan clock guard appears once');
+  assert.doesNotMatch(body.replace(/--.*$/gm, '').replace(guard, ''), /[<>]=? ?now\(\)|\bw\.since\b[^\n]*<|>\s*w\.since/, 'no upper end and no strict edge');
   assert.match(body, /\n {2}order by r\.active_salespeople desc, r\.name, r\.dealership_id;\n/, 'the busiest first, then by name');
 });
 
@@ -90,7 +97,8 @@ test('active_salespeople counts current members with the salesperson role; the r
   const active = body.match(/\(select count\(distinct l\.user_id\)([^]*?)\)::integer as active_salespeople/);
   assert.ok(active, 'active_salespeople counts distinct people');
   assert.match(active[1], /join public\.memberships m on m\.dealership_id = l\.dealership_id and m\.user_id = l\.user_id and m\.role = 'salesperson'/);
-  assert.match(active[1], /where l\.dealership_id = d\.id and l\.posted_at >= w\.since$/);
+  assert.match(active[1], /where l\.dealership_id = d\.id and l\.posted_at >= w\.since and not l\.listed_before$/, 'a listing marked as made before that day makes no one active');
+  assert.match(body, /\(select count\(\*\) from public\.listings l where l\.dealership_id = d\.id and l\.posted_at >= w\.since and not l\.listed_before\)::integer as posts,/, 'a listing marked as made before that day is no post');
   // every subquery is tied to the row's dealership
   const subqueries = [...body.matchAll(/\(select [^]*? from public\.(\w+) (\w+)\b([^]*?)\)(?:::integer)? as (\w+)/g)];
   assert.equal(subqueries.length, 10, subqueries.map((m) => m[4]).join(', '));
@@ -100,7 +108,7 @@ test('active_salespeople counts current members with the salesperson role; the r
   assert.match(body, /count\(distinct l\.vin\) from public\.listings l where l\.dealership_id = d\.id and l\.status = 'listed'\)::integer as cars_listed_now/, 'cars, not listing rows');
   assert.match(body, /t\.done_at is null and t\.kind = 'takeDown'\)::integer as open_take_downs/);
   assert.match(body, /t\.done_at is null and t\.kind = 'price'\)::integer as open_price_changes/);
-  assert.match(body, /max\(x\.taken_at\) from public\.scan_summaries x/, 'the newest scan');
+  assert.match(body, /max\(x\.taken_at\) from public\.scan_summaries x where x\.dealership_id = d\.id and x\.taken_at <= now\(\) \+ interval '5 minutes'\) as last_synced_scan_at/, 'the newest scan, leaving out one stamped more than 5 minutes ahead (the margin /sync gives)');
   assert.match(body, /u\.kind = 'rewrite' and u\.at >= w\.since\)::integer as rewrite_calls/, 'description writer calls, not color guesses');
 });
 
@@ -111,6 +119,8 @@ test('tests/usage.sql checks both dealerships, the edges, the zeros and every AP
     'since a microsecond before the 7 days', 'since exactly a post', 'since a microsecond after a post', 'a null since',
     '% says % where subscription_state() says %', 'a dealership with no activity has no row', 'a dealership with no activity does not read zeros',
     'a signed-in manager ran the usage report', 'anon ran the usage report', 'the service role ran the usage report',
+    'a scan stamped just over 5 minutes ahead is the last synced scan: %', 'a scan stamped 5 minutes ahead (ordinary drift) is not the last synced scan: %',
+    'listings marked as made before that day count as posts: A reads %', 'listings marked as made before that day count as posts: B reads %',
   ]) {
     assert.ok(sqlTest.includes(words), `usage.sql does not check: ${words}`);
   }
@@ -145,6 +155,17 @@ test('supabase/README.md, "Usage report": the three calls, who cannot call it, a
   assert.match(s, /`scan_summaries\.taken_at`/, 'which timestamp stands for the last sync');
   assert.match(s, /The database keeps no log of syncs/, 'and why');
   assert.match(s, /Nothing in the database records a manager opening the manager view/, 'what it cannot say');
+  // review: the section said seconds per post stay in the salespeople's browsers, while the sync uploads
+  // each attempt's seconds (post_attempts.seconds) and the manager view shows their median; only the
+  // records of fields that could not be filled stay local
+  const sync = read('../extension/src/sync.js');
+  if (/seconds: intOrNull\(a\.seconds\)/.test(sync)) {
+    assert.match(read('../supabase/migrations/0001_schema.sql'), /create table public\.post_attempts \([^;]*\bseconds integer/, 'post_attempts has no seconds column');
+    assert.doesNotMatch(s, /stay in the salespeople's browsers \([^)]*seconds per post/, 'the section says seconds per post stay in the browsers; the sync uploads them');
+    assert.match(s, /Time per post is in the database but not in this report: each post attempt's `seconds` in `post_attempts`/, 'the section does not say where time per post is');
+  }
+  assert.match(sync, /fills are never sent/, 'the sync now sends the form-field records: the section changes with it');
+  assert.match(s, /The fields that could not be filled never leave the salespeople's browsers/, 'what stays in the browsers');
 });
 
 test('docs/launch-checklist.md: the weekly run with its SQL line, and what two active salespeople means in the columns', () => {

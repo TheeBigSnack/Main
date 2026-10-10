@@ -10,9 +10,10 @@
 // calendar day the daily cap counts (todayRange) and who takes a seat
 // (seatCount). No Stripe SDK anywhere.
 //
-// The row is public.subscriptions from migrations/0004_billing.sql:
+// The row is public.subscriptions from migrations/0004_billing.sql, with
+// cancel_at from 0009_cancel_at.sql:
 //   dealership_id, stripe_customer_id, stripe_subscription_id, status,
-//   pilot_ends_at, current_period_end, seats, updated_at
+//   pilot_ends_at, current_period_end, cancel_at, seats, updated_at
 //
 // The state a dealership is in, from the row (subscriptionState below and
 // subscription_state() in SQL, kept equal by supabase/tests/billing.sql):
@@ -25,10 +26,14 @@
 //   lapsed  everything else: the pilot ended unpaid, past_due, unpaid,
 //           canceled, incomplete, incomplete_expired, paused
 
-// From marketing/pricing.json, a hypothesis until a dealer pays.
+// From marketing/pricing.json, a hypothesis until a dealer agrees to a price
+// in writing (docs/launch-checklist.md, "Pricing confirmed").
 // test/billing.test.js keeps these equal to that file and to the numbers
 // baked into migrations/0004_billing.sql (seats default, start_pilot).
 export const PRICING = Object.freeze({ includedSalespeople: 5, pilotDays: 30 });
+// The subscription metadata key that keeps the included count a dealership
+// was sold, so its seats are counted from that count after PRICING changes.
+export const INCLUDED_KEY = 'included_salespeople';
 
 // 'pilot' is Lot Current's own (no Stripe object behind it); the rest are every
 // status Stripe can put on a subscription, so a webhook never fails the
@@ -58,10 +63,13 @@ const idOf = (x) => (typeof x === 'string' ? x : isRecord(x) && typeof x.id === 
 // ---------- the state machine ----------
 
 // Stripe keeps a subscription open in these statuses (a trial or a paid
-// period running, an invoice in dunning, a first payment not finished, a
-// pause): the card is changed in the Billing Portal and Stripe retries the
-// open invoice. Everything else (canceled, incomplete_expired, no
-// subscription at all) is over, and a new Checkout is how to pay again.
+// period running, an invoice being retried (past_due) or no longer retried
+// but still payable (unpaid), a first payment not finished, a pause): the
+// card is changed in the Billing Portal, where the open invoice can be paid.
+// With the failed-payment setting docs/stripe-setup.md step 3 asks for, a
+// subscription whose retries all fail is canceled rather than left unpaid.
+// Everything else (canceled, incomplete_expired, no subscription at all) is
+// over, and a new Checkout is how to pay again.
 export const OPEN_STATUSES = Object.freeze(['trialing', 'active', 'past_due', 'unpaid', 'incomplete', 'paused']);
 export const OPEN_SUBSCRIPTION_CODE = 'open-subscription';
 export const OPEN_SUBSCRIPTION_MESSAGE = 'update the card in Manage billing; the subscription is still open';
@@ -103,12 +111,29 @@ export function pilotAvailable(row) {
   return (row.status === null || row.status === undefined) && (row.pilot_ends_at === null || row.pilot_ends_at === undefined);
 }
 
+// Which Stripe mode a secret key is for: 'test' or 'live' for a secret
+// (sk_) or restricted (rk_) key, null for anything else. The setup script
+// refuses a live key without --live by it, and the billing function tells
+// the manager page it runs in test mode by it (testMode in the status).
+export function keyMode(key) {
+  const m = /^(sk|rk)_(test|live)_[A-Za-z0-9]+$/.exec(String(key || '').trim());
+  return m ? m[2] : null;
+}
+
+// Stripe answers this for a customer that is gone (deleted, or made with a
+// test-mode key that the function no longer has): the portal has nothing to
+// open, and the manager is told whom to ask instead of Stripe's own error.
+export const NO_BILLING_ACCOUNT_MESSAGE = 'Stripe has no billing account for this dealership any more (one made while billing was in test mode does not carry over): ask your Lot Current contact';
+
 // What GET /billing/status answers, from the row and the caller's role: the
-// state, the row, which buttons the manager page may show, and the
+// state, the row, which buttons the manager page may show, the
 // dealership's seat count now (`salespeople`, from seatCount below), which
-// the function counts for a manager only and passes in; null when it was
-// not counted.
-export function statusAnswer(row, { role = '', now = Date.now(), pricing = PRICING, salespeople = null } = {}) {
+// the function counts for a manager only and passes in, null when it was
+// not counted, and whether the function's Stripe key is a test-mode one
+// (`testMode`: only Stripe's test cards work and nothing is charged; the
+// card says so, and docs/stripe-setup.md resets what test mode wrote when
+// billing goes live).
+export function statusAnswer(row, { role = '', now = Date.now(), pricing = PRICING, salespeople = null, testMode = false } = {}) {
   const state = subscriptionState(row, now);
   const manager = role === 'manager';
   return {
@@ -120,6 +145,7 @@ export function statusAnswer(row, { role = '', now = Date.now(), pricing = PRICI
     pilotDays: pricing.pilotDays,
     includedSalespeople: pricing.includedSalespeople,
     salespeople: Number.isInteger(salespeople) && salespeople >= 0 ? salespeople : null,
+    testMode: testMode === true,
   };
 }
 
@@ -174,7 +200,7 @@ export function planOf(row, now = Date.now()) {
 // on; `plan` lets it say since when. The billing function is never gated:
 // a lapsed dealership must be able to renew.
 export const LAPSED_CODE = 'lapsed';
-export const LAPSED_MESSAGE = "the dealership's Lot Current subscription has lapsed: a manager can renew it in the manager view";
+export const LAPSED_MESSAGE = "the dealership's Lot Current subscription has lapsed: a manager can renew it, and the manager view's Billing card says how";
 export function lapsedAnswer(plan) {
   return { ok: false, error: LAPSED_MESSAGE, code: LAPSED_CODE, plan };
 }
@@ -282,12 +308,14 @@ export function trialEndFor(pilotEndsAt, now = Date.now()) {
 
 // The Checkout Session as Stripe's form wants it. subscription_data.metadata
 // carries the dealership id so a webhook can find the row even when the
-// customer id is unknown; allow_promotion_codes lets the owner hand a
+// customer id is unknown, and the included count the rooftop price is sold
+// with (INCLUDED_KEY), so the webhook counts this subscription's seats
+// from it after PRICING changes; allow_promotion_codes lets the owner hand a
 // founding dealer a code instead of a second price. automaticTax (the
 // STRIPE_AUTOMATIC_TAX secret, off until the attorney has said what to
 // collect) has Stripe add sales tax: Checkout then asks for the billing
 // address and saves it on the customer, which Stripe needs to work tax out.
-export function checkoutSessionParams({ customerId, dealershipId, lineItems, returnUrl, trialEnd = null, automaticTax = false }) {
+export function checkoutSessionParams({ customerId, dealershipId, lineItems, returnUrl, trialEnd = null, automaticTax = false, included = PRICING.includedSalespeople }) {
   if (!customerId) throw new Error('a Stripe customer id is required');
   if (!dealershipId) throw new Error('a dealership id is required');
   if (!Array.isArray(lineItems) || !lineItems.length) throw new Error('line items are required');
@@ -298,7 +326,7 @@ export function checkoutSessionParams({ customerId, dealershipId, lineItems, ret
     line_items: lineItems,
     ...returnUrls(returnUrl),
     allow_promotion_codes: true,
-    subscription_data: { metadata: { dealership_id: dealershipId } },
+    subscription_data: { metadata: { dealership_id: dealershipId, [INCLUDED_KEY]: String(Number.isInteger(included) && included >= 0 ? included : PRICING.includedSalespeople) } },
   };
   if (typeof trialEnd === 'number' && trialEnd > 0) params.subscription_data.trial_end = trialEnd;
   if (automaticTax === true) {
@@ -387,18 +415,45 @@ function invoicePeriodEndOf(inv) {
   return unixToIso(best);
 }
 
+// The tag scripts/stripe-setup.mjs puts on each price it makes (metadata
+// lotcurrent = 'rooftop' or 'seat'; TAG in scripts/stripe-setup-lib.mjs). A
+// reprice makes a new price and moves the lookup key to it, but subscribers
+// already paying stay on the old price, which keeps its tag; so the tag, not
+// the configured id, says what an item is.
+export const PRICE_TAG = 'lotcurrent';
+const tagOf = (price) => (isRecord(price) && isRecord(price.metadata) && typeof price.metadata[PRICE_TAG] === 'string' ? price.metadata[PRICE_TAG] : '');
+
+// The included count a subscription was sold with (Checkout writes it into
+// the subscription's metadata under INCLUDED_KEY), or null when it carries
+// none (one made by hand, or before Checkout wrote it).
+function includedOf(sub) {
+  const v = isRecord(sub.metadata) ? sub.metadata[INCLUDED_KEY] : undefined;
+  const n = typeof v === 'string' && /^\d{1,4}$/.test(v.trim()) ? Number(v) : v;
+  return Number.isInteger(n) && n >= 0 && n <= MAX_SEATS ? n : null;
+}
+
 // Seats from the subscription's items: the included count plus the seat
-// price's quantity. With no seat price configured, every item that is not
-// the rooftop counts as seats. null when the items say nothing.
+// items' quantity. An item whose price is tagged 'seat' is seats and one
+// tagged 'rooftop' is not, whatever the configured ids say now, so a
+// subscription sold on a seat price that was repriced since still counts its
+// seats. An untagged price (made by hand in the Dashboard) falls back to the
+// configured ids: the seat price's quantity, or, with no seat price
+// configured, every item that is not the rooftop. null when the items say
+// nothing, or when an untagged item cannot be placed because no price is
+// configured.
 function seatsOf(sub, included, priceRooftop, priceSeat) {
-  const items = isRecord(sub.items) && Array.isArray(sub.items.data) ? sub.items.data : null;
+  const items = isRecord(sub.items) && Array.isArray(sub.items.data) ? sub.items.data.filter(isRecord) : null;
   if (!items) return null;
-  if (!priceSeat && !priceRooftop) return null;
   let extra = 0;
   for (const it of items) {
-    if (!isRecord(it)) continue;
-    const price = idOf(it.price) || idOf(it.plan);
     const qty = Number.isInteger(it.quantity) ? it.quantity : 0;
+    const tag = tagOf(it.price) || tagOf(it.plan);
+    if (tag === 'seat' || tag === 'rooftop') {
+      if (tag === 'seat') extra += qty;
+      continue;
+    }
+    if (!priceSeat && !priceRooftop) return null;
+    const price = idOf(it.price) || idOf(it.plan);
     if (priceSeat ? price === priceSeat : price !== priceRooftop) extra += qty;
   }
   return Math.min(included + extra, MAX_SEATS);
@@ -414,22 +469,40 @@ export function normalizeStatus(status) {
 // goes on sending events (dunning retries, the final delete) after the row
 // has moved to a new one. An event is stale, and must not win, when it is
 // older than the row's last change for the same subscription, or when it is
-// about another subscription than the row's; the one exception is
-// customer.subscription.created, newer than the row's last change, on a row
-// whose subscription is over (canceled, incomplete_expired) or that never
-// had one: the replacement a manager just paid for.
+// about another subscription than the row's; the one exception is the
+// replacement a manager just paid for: customer.subscription.created, or an
+// update saying it is trialing or active (Stripe sends both within the same
+// second of a Checkout, in any order), newer than the row's last change, on
+// a row whose subscription is over (canceled, incomplete_expired) or that
+// never had one.
 const OVER_STATUSES = Object.freeze(['canceled', 'incomplete_expired']);
-function isStale(row, subscriptionId, eventMs, eventType = '') {
+const ADOPTING_UPDATE_STATUSES = Object.freeze(['trialing', 'active']);
+function isStale(row, subscriptionId, eventMs, eventType = '', eventStatus = '') {
   if (!isRecord(row)) return false;
   const last = ms(row.updated_at);
   const have = typeof row.stripe_subscription_id === 'string' && row.stripe_subscription_id !== '' ? row.stripe_subscription_id : '';
   if (!have) return false; // a row with no subscription yet (a pilot, a customer shell) takes the first one whatever its stamp
   if (subscriptionId !== have) {
     const over = row.status === null || row.status === undefined || OVER_STATUSES.includes(String(row.status));
-    return !(eventType === 'customer.subscription.created' && over && (last === null || eventMs > last));
+    const adopts = eventType === 'customer.subscription.created' || (eventType === 'customer.subscription.updated' && ADOPTING_UPDATE_STATUSES.includes(eventStatus));
+    return !(adopts && over && (last === null || eventMs > last));
   }
   return last !== null && last > eventMs;
 }
+
+// Stripe stamps events to the second, and one Checkout sends several in the
+// same second (created as incomplete, updated to active, invoice paid), so a
+// tie is settled by Stripe's own lifecycle: a subscription is incomplete
+// only when it is created, and canceled and incomplete_expired are final.
+// For the row's own subscription, an event that would put it back to
+// incomplete, or bring it out of a final status, is older than what the row
+// holds, whatever its stamp says.
+export function goesBack(fromStatus, toStatus) {
+  const from = String(fromStatus);
+  if (OVER_STATUSES.includes(from)) return !OVER_STATUSES.includes(String(toStatus));
+  return toStatus === 'incomplete' && from !== 'incomplete';
+}
+const sameSubscription = (row, subscriptionId) => isRecord(row) && Boolean(subscriptionId) && row.stripe_subscription_id === subscriptionId;
 
 // The columns to set on the dealership's row for one event, or null when
 // the event is not one of HANDLED_EVENTS, is stale, or has nothing to
@@ -446,12 +519,18 @@ export function applyStripeEvent(row, event, { included = PRICING.includedSalesp
 
   if (event.type.startsWith('customer.subscription.')) {
     const subscriptionId = idOf(obj);
-    if (isStale(row, subscriptionId, at, event.type)) return null;
+    const status = event.type === 'customer.subscription.deleted' ? 'canceled' : normalizeStatus(obj.status);
+    if (isStale(row, subscriptionId, at, event.type, status)) return null;
+    if (sameSubscription(row, subscriptionId) && goesBack(row.status, status)) return null;
     if (subscriptionId) patch.stripe_subscription_id = subscriptionId;
-    patch.status = event.type === 'customer.subscription.deleted' ? 'canceled' : normalizeStatus(obj.status);
+    patch.status = status;
     const end = periodEndOf(obj);
     if (end) patch.current_period_end = end;
-    const seats = seatsOf(obj, Number.isInteger(included) ? included : PRICING.includedSalespeople, priceRooftop, priceSeat);
+    // A cancellation scheduled in the portal leaves the status trialing or
+    // active until the period ends; the date it ends is kept, and written on
+    // every subscription event, so undoing the cancellation clears it.
+    patch.cancel_at = unixToIso(obj.cancel_at) || (obj.cancel_at_period_end === true ? end : null);
+    const seats = seatsOf(obj, includedOf(obj) ?? (Number.isInteger(included) ? included : PRICING.includedSalespeople), priceRooftop, priceSeat);
     if (seats !== null) patch.seats = seats;
     return patch;
   }
@@ -463,6 +542,7 @@ export function applyStripeEvent(row, event, { included = PRICING.includedSalesp
   if (isStale(row, subscriptionId, at, event.type)) return null;
   if (subscriptionId) patch.stripe_subscription_id = subscriptionId;
   if (event.type === 'invoice.payment_failed') {
+    if (goesBack(row.status, 'past_due')) return null; // the last retry failed in the same second the subscription ended
     patch.status = 'past_due';
     return patch;
   }

@@ -52,3 +52,16 @@ test('pause keeps the place; resume carries on', () => {
   assert.equal(summary(null).total, 0);
   assert.equal(describe(null), '');
 });
+
+test('the queue moves only while it is still on the car the caller finished', () => {
+  let q = createQueue(VINS, { remaining: 10 }).queue;
+  q = advance(q, 'posted', VINS[0].toLowerCase());
+  assert.deepEqual([q.index, q.results], [1, { [VINS[0]]: 'posted' }]);
+  // a second confirm of the first car: the second car is neither recorded nor skipped
+  assert.equal(advance(q, 'posted', VINS[0]), q);
+  assert.equal(currentVin(q), VINS[1]);
+  q = advance(q, 'draft', VINS[1]);
+  assert.deepEqual(q.results, { [VINS[0]]: 'posted', [VINS[1]]: 'draft' });
+  // no car named: the car the queue is on, as before
+  assert.equal(currentVin(advance(q, 'skipped')), null);
+});

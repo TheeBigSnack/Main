@@ -330,7 +330,7 @@ function makeContext(settings) {
         const hash = /[?&]token=([A-Za-z0-9_-]+)/.exec(words);
         const type = /[?&]type=([a-z_]+)/.exec(words);
         if (!hash) throw new Error(`the sign-in email (${mail.catcher}, "${mail.subject}") has neither a six-digit code nor a link with a token: ${brief(words, 400)}`);
-        const r = await exchangeTokenFromUrl(`https://lotsync.invalid/?token_hash=${hash[1]}&type=${type ? type[1] : 'magiclink'}`, { url: settings.url, anonKey: settings.anonKey, fetchImpl: tracedFetch });
+        const r = await exchangeTokenFromUrl(`https://lotcurrent.invalid/?token_hash=${hash[1]}&type=${type ? type[1] : 'magiclink'}`, { url: settings.url, anonKey: settings.anonKey, fetchImpl: tracedFetch });
         if (!r.ok) throw new Error(`the extension's exchangeTokenFromUrl refused the emailed link: ${r.status || ''} ${r.error}`);
         await storeSession(r.session, storage);
         session = r.session;
@@ -348,7 +348,7 @@ function makeContext(settings) {
         how = "generate_link's six-digit code, typed into the extension's signInFinish";
       } else {
         const type = link.body.verification_type || 'magiclink';
-        const r = await exchangeTokenFromUrl(`https://lotsync.invalid/?token_hash=${encodeURIComponent(link.body.hashed_token)}&type=${encodeURIComponent(type)}`, { url: settings.url, anonKey: settings.anonKey, fetchImpl: tracedFetch });
+        const r = await exchangeTokenFromUrl(`https://lotcurrent.invalid/?token_hash=${encodeURIComponent(link.body.hashed_token)}&type=${encodeURIComponent(type)}`, { url: settings.url, anonKey: settings.anonKey, fetchImpl: tracedFetch });
         if (!r.ok) throw new Error(`the extension's exchangeTokenFromUrl refused generate_link's token hash: ${r.status || ''} ${r.error}`);
         await storeSession(r.session, storage);
         session = r.session;

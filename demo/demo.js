@@ -428,7 +428,7 @@ async function reset() {
   browser.tabs = [];
   browser.seq = 0;
   browser.activeId = null;
-  try { sessionStorage.removeItem('lotSyncSandbox.listings'); sessionStorage.removeItem('lotSyncSandbox.publishClicks'); } catch (e) { /* no sessionStorage */ }
+  try { for (const key of ['listings', 'publishClicks', 'updateClicks', 'markSoldClicks', 'deleteClicks']) sessionStorage.removeItem('lotSyncSandbox.' + key); } catch (e) { /* no sessionStorage */ }
   scenario = 'day1';
   renderScenario();
   $('rescanStatus').hidden = true;

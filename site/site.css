@@ -10,6 +10,8 @@
   --text: #1c1f1d;
   --muted: #5f6661;
   --line: #e2e5e1;
+  /* a form field's edge: at least 3:1 against --bg (WCAG 1.4.11), unlike --line, which draws decorative rules */
+  --field-line: #8a918c;
   --accent: #14532d;
   --accent-text: #ffffff;
   --good: #166534;
@@ -29,6 +31,7 @@
     --text: #e9ece9;
     --muted: #a3aaa5;
     --line: #2f3531;
+    --field-line: #6b736d;
     --accent: #4ade80;
     --accent-text: #0b1a10;
     --good: #86efac;
@@ -165,7 +168,7 @@ article.qa p:last-child { margin-bottom: 0; }
 .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
 .field label { font-weight: 600; }
 .field .hint { color: var(--muted); font-size: 0.9rem; margin: 0; }
-input, textarea { width: 100%; font: inherit; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); }
+input, textarea { width: 100%; font: inherit; padding: 10px 12px; border: 1px solid var(--field-line); border-radius: 6px; background: var(--bg); color: var(--text); }
 input:focus-visible, textarea:focus-visible { border-color: var(--accent); }
 textarea { min-height: 120px; resize: vertical; }
 .status { min-height: 1.5em; margin-top: 12px; }

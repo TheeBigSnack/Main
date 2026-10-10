@@ -14,10 +14,11 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  PAGES, REDIRECTS, STATUS_FILE, CSP, REDIRECT_CSP, FOOTER_LINE, USAGE, escapeHtml, safeHref, renderInline, renderMarkdown, readStatus, renderPage, renderRedirect, stalePages, main,
+  PAGES, REDIRECTS, STATUS_FILE, CSP, REDIRECT_CSP, FOOTER_LINE, USAGE, DRAFT_BANNER, RULES_DRAFT_BANNER, escapeHtml, safeHref, renderInline, renderMarkdown, readStatus, renderPage, renderRedirect, stalePages, main,
 } from '../scripts/legal-pages.mjs';
 import { NAV, NO_SCRIPT_CSP, fullTitle, rootFor, ancestorsOf, readContext } from '../scripts/site-pages.mjs';
 import { SITE } from '../site/config.js';
+import { LEGAL, legalHosted, isPlaceholderUrl } from '../extension/src/legalLinks.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const read = (rel) => readFileSync(join(root, rel), 'utf8');
@@ -85,7 +86,12 @@ test('while the status says draft, every page opens with the banner and its titl
     assert.equal(title, fullTitle(entry, status.draft));
     if (status.draft) {
       assert.ok(first && first[1].startsWith('<p class="draft">'), `${entry.file}: the banner is the first thing in the page's main content`);
-      assert.match(textOf(first[1]), /^Draft under attorney review\. Not in effect/, `${entry.file}: the banner says draft and not in effect`);
+      if (entry.source === 'legal/posting-rules.md') {
+        // the extension already asks every salesperson to follow the posting rules: their page says that, not "applies to no one"
+        assert.match(textOf(first[1]), /^Draft under attorney review\. The wording may change\. Lot Current already shows these rules at set-up and before a salesperson's first post, and asks every salesperson to follow them\.$/, `${entry.file}: the banner says draft, and that the extension asks salespeople to follow the rules`);
+      } else {
+        assert.match(textOf(first[1]), /^Draft under attorney review\. Not in effect/, `${entry.file}: the banner says draft and not in effect`);
+      }
       assert.equal(title, `${entry.title} (draft) | Lot Current`, `${entry.file}: the title says draft`);
       assert.equal(html.match(/<meta property="og:title" content="([^"]*)">/)[1], `${entry.title} (draft)`);
     } else {
@@ -359,9 +365,9 @@ test('a final page cannot keep the DRAFT line or a blank in brackets, and drops 
 });
 
 test('--check exits 1 when a file is missing or differs, names it and writes nothing; a run writes all six and --check passes', async () => {
-  const tmp = mkdtempSync(join(tmpdir(), 'lotsync-legal-'));
+  const tmp = mkdtempSync(join(tmpdir(), 'lotcurrent-legal-'));
   try {
-    for (const rel of [STATUS_FILE, 'site/config.js', 'site/pricing.json', ...PAGES.map((p) => p.source)]) {
+    for (const rel of [STATUS_FILE, 'site/config.js', 'marketing/pricing.json', ...PAGES.map((p) => p.source)]) {
       mkdirSync(dirname(join(tmp, rel)), { recursive: true });
       cpSync(join(root, rel), join(tmp, rel));
     }
@@ -401,7 +407,7 @@ test('--check exits 1 when a file is missing or differs, names it and writes not
     assert.equal((await run([])).code, 0);
     for (const p of PAGES) assert.ok(readFileSync(join(tmp, p.file), 'utf8').includes(`<link rel="canonical" href="${FIXTURE_URL}${p.path}">`), p.file);
     for (const s of REDIRECTS) assert.ok(readFileSync(join(tmp, s.file), 'utf8').includes(`<link rel="canonical" href="${FIXTURE_URL}${s.target}">`), s.file);
-    writeFileSync(join(tmp, 'site/config.js'), config.replace(/demoMailto: '[^']*',/, "demoMailto: 'mailto:demo@lotsync.example',"));
+    writeFileSync(join(tmp, 'site/config.js'), config.replace(/demoMailto: '[^']*',/, "demoMailto: 'mailto:demo@lotcurrent.example',"));
     const refusedConfig = await run([]);
     assert.equal(refusedConfig.code, 1);
     assert.match(refusedConfig.error.join('\n'), /reserved placeholder host/);
@@ -431,4 +437,59 @@ test('the script needs nothing beyond Node and the site generator, and npm run l
   for (const p of PAGES) assert.ok(existsSync(dirname(join(root, p.file))));
   const ctx = await readContext(root);
   assert.equal(typeof ctx.legalDraft, 'boolean');
+});
+
+// Once legalHosted() is true the wizard's Terms step and the tick in
+// Settings record acceptance of LEGAL.version. Pointing LEGAL at pages that
+// are still marked "not in effect" would record a false acceptance, so the
+// addresses follow legal/legal-status.json: placeholders while it says
+// draft; once real, all three, with an edition that is not a draft's.
+const LINK_KEYS = ['termsUrl', 'privacyUrl', 'rulesUrl'];
+function linkProblems(legal, draft) {
+  const real = LINK_KEYS.filter((key) => !isPlaceholderUrl(legal[key]));
+  const problems = [];
+  if (draft && real.length) problems.push(`${real.join(', ')} point at real pages while ${STATUS_FILE} says draft`);
+  if (real.length && real.length < LINK_KEYS.length) problems.push(`only ${real.join(', ')} are real addresses: all three go live together`);
+  if (real.length && /draft/i.test(String(legal.version || ''))) problems.push(`version ${legal.version} is a draft's edition: bump it with the real addresses`);
+  return problems;
+}
+
+test('legalLinks.js names real pages only once legal-status.json says the texts are final, all three at once, with a new edition', () => {
+  const placeholders = { version: '2026-09-28-draft', termsUrl: 'https://placeholder.example/terms', privacyUrl: 'https://placeholder.example/privacy', rulesUrl: 'https://placeholder.example/posting-rules' };
+  const live = { version: '2026-12-01', termsUrl: 'https://lotcurrent.com/legal/terms/', privacyUrl: 'https://lotcurrent.com/legal/privacy/', rulesUrl: 'https://lotcurrent.com/legal/posting-rules/' };
+  // the rule, on sample values
+  assert.deepEqual(linkProblems(placeholders, true), [], 'drafts behind placeholders: fine');
+  assert.deepEqual(linkProblems(placeholders, false), [], 'final texts not linked yet: fine');
+  assert.deepEqual(linkProblems(live, false), [], 'final texts, real addresses, a new edition: fine');
+  assert.match(linkProblems(live, true).join('\n'), /point at real pages while legal\/legal-status\.json says draft/);
+  assert.match(linkProblems({ ...live, version: '2026-09-28-draft' }, false).join('\n'), /a draft's edition/);
+  assert.match(linkProblems({ ...live, rulesUrl: placeholders.rulesUrl }, false).join('\n'), /all three go live together/);
+  // and on what is committed
+  assert.deepEqual(linkProblems(LEGAL, status.draft), [], `extension/src/legalLinks.js and ${STATUS_FILE} disagree`);
+  // review: the module's comment said every page is "marked as a draft that is not in effect", while the posting
+  // rules' page has its own banner (the extension already asks salespeople to follow them)
+  const links = read('extension/src/legalLinks.js');
+  assert.ok(RULES_DRAFT_BANNER !== DRAFT_BANNER, 'the posting rules share the not-in-effect banner again: the comment can change');
+  assert.doesNotMatch(links, /each marked as a draft that is not in\s*\/\/\s*effect/, 'legalLinks.js says every legal page is marked not in effect, the posting rules\' page included');
+  assert.match(links, /RULES_DRAFT_BANNER/, 'legalLinks.js does not point at the posting rules\' own banner');
+  if (status.draft) assert.equal(legalHosted(), false, 'while the texts are drafts nobody can accept them');
+});
+
+// review: the posting rules page said "Not in effect: nothing on this page applies to anyone yet", and the
+// legal index said nothing on any of the three pages applies to anyone, while set-up and the side panel show
+// the same rules and ask every salesperson to tick "I have read the posting rules and will follow them".
+test('while the extension asks salespeople to follow the posting rules, no page says the rules apply to no one', () => {
+  const wizard = read('extension/wizard.js');
+  const panel = read('extension/sidepanel.js');
+  const asks = /I have read the posting rules and will follow them/.test(wizard) || /state\.step = 'rules'/.test(panel);
+  assert.ok(asks, 'the extension no longer asks salespeople to follow the posting rules: the banner and the legal index can change');
+  const rules = read('site/legal/posting-rules/index.html');
+  assert.doesNotMatch(textOf(rules), /applies to anyone|not in effect/i, 'the posting rules page says the rules apply to no one');
+  const index = textOf(read('site/legal/index.html'));
+  assert.doesNotMatch(index, /Nothing on those pages applies to anyone|All three are drafts under attorney review and not in effect/, 'the legal index says all three pages apply to no one');
+  if (status.draft) {
+    assert.match(index, /The Terms of Service and the Privacy Policy are not in effect yet/, 'the index keeps the two texts that are not in effect');
+    assert.match(index, /Lot Current already shows them at set-up and before a salesperson's first post, and asks every salesperson to follow them/);
+    for (const entry of PAGES.filter((p) => p.source !== 'legal/posting-rules.md')) assert.match(textOf(read(entry.file)), /Not in effect: nothing on this page applies to anyone yet/, `${entry.file} keeps its not-in-effect banner`);
+  }
 });

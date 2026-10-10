@@ -14,6 +14,7 @@ textarea#description { width: 100%; min-height: 220px; resize: vertical; font: i
 .checks { font-size: 12px; margin: 6px 0; }
 .checks.ok { color: var(--good); }
 .checks.bad { color: var(--bad); }
+.checks.warn { color: var(--warn); }
 .checks ul { margin: 4px 0 0; padding-left: 18px; }
 .actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 button.plain { border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: var(--radius); padding: 6px 10px; }

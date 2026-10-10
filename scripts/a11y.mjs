@@ -16,7 +16,11 @@
 //   - headings do not skip a level; the page has a language and a title;
 //   - every focusable control shows a focus ring (outline or box-shadow);
 //   - text meets WCAG AA contrast (4.5:1, 3:1 for large text) against the
-//     colour behind it.
+//     colour behind it;
+//   - on the website's pages, each form field has an edge (its border, or
+//     its own fill) with at least 3:1 contrast against the colour behind it
+//     (WCAG 1.4.11). The manager view, popup and side panel are not judged
+//     on this yet.
 //
 // Exit code 1 when any page has a finding; each finding names the page, the
 // rule and the element.
@@ -27,8 +31,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { startServer } from '../demo/serve.mjs';
 import { PAGES } from './site-pages.mjs';
 
-// Runs inside the page: must be self-contained.
-export function auditPage() {
+// Runs inside the page: must be self-contained. `opts.fieldEdges` also
+// judges each form field's edge (WCAG 1.4.11 non-text contrast).
+export function auditPage(opts = {}) {
   const out = [];
   const add = (rule, el, detail = '') => {
     const tag = el ? el.tagName.toLowerCase() + (el.id ? `#${el.id}` : '') + (el.className && typeof el.className === 'string' ? `.${el.className.trim().split(/\s+/).slice(0, 2).join('.')}` : '') : '';
@@ -150,6 +155,23 @@ export function auditPage() {
       add('text contrast is below WCAG AA', node, `${ratio.toFixed(2)}:1, needs ${need}:1 (${s.color} on rgb(${Math.round(bg.r)}, ${Math.round(bg.g)}, ${Math.round(bg.b)}))`);
     }
   }
+
+  // a form field's edge: its border on some side, or its own fill, at least 3:1 against what is behind it
+  if (opts.fieldEdges) {
+    const contrast = (a, b) => { const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x); return (hi + 0.05) / (lo + 0.05); };
+    const over = (c, under) => ({ r: c.r * c.a + under.r * (1 - c.a), g: c.g * c.a + under.g * (1 - c.a), b: c.b * c.a + under.b * (1 - c.a), a: 1 });
+    const fields = 'input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=submit]):not([type=button]):not([type=reset]):not([type=image]), select, textarea';
+    for (const el of document.querySelectorAll(fields)) {
+      if (!visible(el) || el.disabled) continue;
+      const outside = el.parentElement ? behind(el.parentElement) : { r: 255, g: 255, b: 255, a: 1 };
+      if (!outside) continue; // a picture or gradient behind: not judged
+      const s = getComputedStyle(el);
+      const fill = over(rgba(s.backgroundColor) || { r: 0, g: 0, b: 0, a: 0 }, outside);
+      const sides = ['Top', 'Right', 'Bottom', 'Left'].filter((side) => s[`border${side}Style`] !== 'none' && parseFloat(s[`border${side}Width`]) > 0);
+      const best = Math.max(contrast(fill, outside), ...sides.map((side) => contrast(over(rgba(s[`border${side}Color`]) || { r: 0, g: 0, b: 0, a: 0 }, outside), outside)));
+      if (best < 3) add("a form field's edge is below WCAG 3:1", el, `${best.toFixed(2)}:1 (border ${s.borderTopColor}, fill ${s.backgroundColor}, on rgb(${Math.round(outside.r)}, ${Math.round(outside.g)}, ${Math.round(outside.b)}))`);
+    }
+  }
   return out;
 }
 
@@ -251,8 +273,8 @@ async function main() {
   const results = [];
   const reachedBy = new Map(); // page -> controls the Tab walk reached, printed so the coverage shows
   let current = null; // the page the frames belong to, for the keyboard
-  const audit = async (name, target) => {
-    const found = await target.evaluate(`(${auditPage.toString()})()`);
+  const audit = async (name, target, opts = {}) => {
+    const found = await target.evaluate(`(${auditPage.toString()})(${JSON.stringify(opts)})`);
     const walk = await focusWalk(current, target);
     found.push(...walk.found);
     reachedBy.set(name, walk.reached);
@@ -272,9 +294,9 @@ async function main() {
         const name = `${label}${/page/i.test(label) ? '' : ' page'} (${scheme})`;
         await page.setViewportSize({ width: 1280, height: 900 });
         await page.goto(`${siteBase}${entry.path}`);
-        await audit(name, page);
+        await audit(name, page, { fieldEdges: true });
         await page.setViewportSize({ width: 390, height: 844 });
-        await audit(name.replace(' (', ', phone ('), page);
+        await audit(name.replace(' (', ', phone ('), page, { fieldEdges: true });
       }
       // the Start a free pilot links show only once config.js names the manager view: audit the home and
       // pricing pages as they will look then, from a config.js served with signupUrl set (the file on disk
@@ -288,7 +310,7 @@ async function main() {
         await page.setViewportSize({ width: 1280, height: 900 });
         await page.goto(`${base}/${entry.file}`);
         await page.locator('a[data-signup]').first().waitFor({ state: 'visible', timeout: 15000 });
-        await audit(`${entry.nav} page, sign-up open (${scheme})`, page);
+        await audit(`${entry.nav} page, sign-up open (${scheme})`, page, { fieldEdges: true });
       }
       await page.unroute('**/site/config.js');
       await page.setViewportSize({ width: 1280, height: 900 });
