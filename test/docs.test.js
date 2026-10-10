@@ -29,6 +29,7 @@ import { LEGAL } from '../extension/src/legalLinks.js';
 import { accountsConfigured } from '../extension/src/accountConfig.js';
 import { FORM_MAP } from '../extension/facebook/formMap.js';
 import { runGuardrails } from '../extension/src/rewriteTemplate.js';
+import { scanInventory } from '../extension/adapters/inventoryJson.js';
 
 // A checkout with CRLF line ends (git's autocrlf on Windows) reads the same as
 // an LF one: every line-anchored pattern below is written for \n.
@@ -214,16 +215,24 @@ test('the adapter contract says what the standard-data reader does with robots.t
   assert.match(read('../docs/data-inventory.md'), /`\/robots\.txt` \(read for its sitemap lines only\)/);
 });
 
-test('help.md gives the one-car-at-a-time sold check only for the standard-data reader, and the whole-check rule the others still use, as the code words it', () => {
+test('help.md gives the one-car-at-a-time sold check for the standard-data, DealerOn and Dealer.com readers, and the whole-check rule only for Dealer Inspire, as the code words it', async () => {
   const help = doc('help.md');
-  const own = help.split('\n').find((l) => /whose own page could not be checked/.test(l)) || '';
-  assert.match(own, /^- On a website Lot Current reads from the standard vehicle data on each car's page,/, 'the per-car rule is the standard-data reader\'s only');
-  // what every other reader still does when its check fails: no car is marked gone that scan
+  const own = help.split('\n').filter((l) => /whose own page could not be checked/.test(l));
+  assert.equal(own.length, 2, 'one per-car bullet for the standard-data reader, one for DealerOn and Dealer.com');
+  assert.match(own[0], /^- On a website Lot Current reads from the standard vehicle data on each car's page,/);
+  // the DealerOn and Dealer.com reader checks each missing car on its own too: a page that fails is that car's alone
+  const vin = '1SAMPLE0000000001';
+  const failed = await scanInventory(async ({ url }) => (url.endsWith('/list') ? { ok: true, status: 200, finalUrl: url, json: { totalCount: 1, cars: [{ vin: '1SAMPLE0000000002' }] } } : { ok: false, status: 500, finalUrl: url }),
+    { origin: 'https://dealer.example', inventoryUrl: 'https://dealer.example/list', confirmVins: [vin], confirmUrls: { [vin]: 'https://dealer.example/car' }, pageGapMs: 0 },
+    { pageAddress: (u) => u, pagePhotos: () => [], pageGapMs: 0 });
+  assert.deepEqual([failed.confirm.error, Object.keys(failed.confirm.unchecked || {})], [null, [vin]], 'inventoryJson.js leaves a failing page unchecked by itself');
+  assert.match(own[1], /^- On DealerOn and Dealer\.com websites it works the same way:/, 'help.md gives DealerOn and Dealer.com the per-car rule their reader has');
+  // what Dealer Inspire still does when its check fails: no car is marked gone that scan
   const one = { vin: 'V1', name: 'Car', decision: 'ready', price: 1 };
   const held = diffScans({ vehicles: { V1: one } }, { vehicles: {} }, { confirm: { checked: [], notFound: [], error: 'HTTP 500' } }).needsALook[0].text;
   // (the standard-data bullet quotes it too, for a refused page: the whole-check rule's own bullet is the other one)
-  const rest = help.split('\n').find((l) => l.includes(`"${held}"`) && l !== own) || '';
-  assert.match(rest, /^- On Dealer Inspire, DealerOn and Dealer\.com websites, one failed check holds back every missing car for that scan/, `help.md names the readers that still show "${held}"`);
+  const rest = help.split('\n').find((l) => l.includes(`"${held}"`) && !own.includes(l)) || '';
+  assert.match(rest, /^- On Dealer Inspire websites, one failed check holds back every missing car for that scan/, `help.md names the reader that still shows "${held}"`);
 });
 
 test('help.md is organised by what people are trying to do', () => {

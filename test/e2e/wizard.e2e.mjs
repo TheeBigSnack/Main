@@ -21,6 +21,7 @@ import { LEGAL, legalHosted } from '../../extension/src/legalLinks.js';
 import { wizardSteps } from '../../extension/src/wizardSteps.js';
 import { accountsConfigured } from '../../extension/src/accountConfig.js';
 import { blockFacebook } from './noFacebook.mjs';
+import { until } from './until.mjs';
 
 // The step numbers come from the wizard's own list, so filling in the
 // account config (supabase/README.md step 6) adds the Account step here too.
@@ -234,7 +235,7 @@ try {
   await popup.screenshot({ path: join(shots, 'wizard-5-badge-todo.png') });
   await popup.click('button[data-action="takenDown"]');
   await popup.waitForFunction(() => document.querySelector('.tabs button[data-view="todo"] .count').textContent === '0');
-  await popup.waitForFunction(async () => (await chrome.action.getBadgeText({})) === '');
+  await until(popup, async () => (await chrome.action.getBadgeText({})) === '', undefined, { what: 'the badge cleared' });
   await popup.close();
   await panel.close();
 

@@ -187,10 +187,36 @@ const AMOUNT = /(\bUSD?\s*\$|(?<![A-Za-z])\$|\bUSD\b)\s*(\d{1,3}(?:,\d{3}){1,2}|
 // $24,995", "Kelley Blue Book® Fair Purchase Price", "Typical Listing
 // Price", "Book value", "Trade-in value", "Instant Cash Offer", "NADA
 // value", "J.D. Power value", "Black Book", "Edmunds", "Estimated value",
-// "Average market price"), the words inventoryJson.js also never takes for
-// the price. Always whole phrases: a bare "value" is no cue ("Value Price
-// $24,995" is a selling price).
-const REFERENCE_CUE = /\b(?:was|msrp|m\.s\.r\.p|retail|list|compared? at|original(?:ly)?|reg(?:ular)?|previous(?:ly)?|based on|market value|market price|fair market|fair purchase|typical listing|book value|trade[-\s]?in(?: value)?|kbb|kelley(?: blue book)?|blue book|black book|nada|j\.?\s?d\.?\s?power|cash offer|edmunds|estimated(?: value)?|window sticker|sticker)\b\.?(?:[\s:\-\u2013\u2014\u00ae\u2122]*(?:price|pricing|of|a|the|at|for|value)\b)*[\s:\-\u2013\u2014\u00ae\u2122]*$/i;
+// "Average market price"). Always whole phrases: a bare "value" is no cue
+// ("Value Price $24,995" is a selling price).
+//
+// GUIDE_PRICE_WORDS, the guide's, estimate's and offer's words, are shared
+// with the inventory-data reader (inventoryJson.js priceKind and
+// choosePrices), so both readers quote the same labels and neither ever
+// takes such a figure, an instant or cash offer for the car included, for
+// the price. One list: add a word here, never in a copy. The words of a
+// phrase may be joined by a space, a hyphen or nothing ("Cash Offer",
+// "Cash-Offer", "cashoffer"), as labels and field names write them.
+export const GUIDE_PRICE_WORDS = String.raw`market[-\s]?value|market[-\s]?price|fair[-\s]?market|fair[-\s]?purchase|typical[-\s]?listing|book[-\s]?value|trade[-\s]?in(?:[-\s]?value|[-\s]?offer)?|kbb|kelley(?:[-\s]?blue[-\s]?book)?|blue[-\s]?book|black[-\s]?book|nada|j\.?\s?d\.?\s?power|cash[-\s]?offer|instant[-\s]?offer|edmunds|estimated(?:[-\s]?value)?`;
+// The footnote and trademark marks a website puts after a label or its
+// words ("Market Value*", "Your Offer™", "KBB Value¹", "MSRP†",
+// "Offer⁽¹⁾"), as the inside of a character class; and a footnote written
+// as a number, a short list of numbers or a letter in brackets ("(1)",
+// "[2]", "(1, 2)", "(a)", "(*)") or as a mark with a number ("*1", "†2",
+// "*1,2"), as a pattern (LABEL_NOTE). Both shared with the inventory-data
+// reader (inventoryJson.js labelWords), so both readers read a label the
+// same with or without them: before, "Market Value*: $24,995" hid the
+// guide's words and the page's only price, a guide's value, was taken, and
+// "Market Value (1): $24,995" still did here after the inventory reader had
+// learned it. A bare number is no footnote here: page text can't tell one
+// in a superscript from a number of the label's own.
+export const LABEL_MARKS = String.raw`*!\u00a7\u00ae\u00b2\u00b3\u00b9\u2020\u2021\u2070\u2074-\u2079\u207d\u207e\u2120\u2122`;
+export const LABEL_NOTE = String.raw`[(\[]\s*(?:\d{1,3}(?:\s*,\s*\d{1,3}){0,3}|[A-Za-z]|[${LABEL_MARKS}]{1,3})\s*[)\]]|[${LABEL_MARKS}]\d{1,3}(?:,\d{1,3}){0,3}`;
+// What may sit between a cue's words, or after them before the amount:
+// spaces, a colon or a dash, the marks and the footnotes above.
+const CUE_GAP = String.raw`(?:[\s:\-\u2013\u2014${LABEL_MARKS}]|${LABEL_NOTE})`;
+const REFERENCE_CUE = new RegExp(String.raw`\b(?:was|msrp|m\.s\.r\.p|retail|list|compared? at|original(?:ly)?|reg(?:ular)?|previous(?:ly)?|based on|${GUIDE_PRICE_WORDS}|window sticker|sticker)\b\.?(?:${CUE_GAP}*(?:price|pricing|of|a|the|at|for|value)\b)*${CUE_GAP}*$`, 'i');
+const CUE_END = new RegExp(String.raw`${CUE_GAP}+$`);
 
 // Every dollar amount the page shows: its value, whether it is written with
 // a dollar sign, and whether the words before it make it a reference price
@@ -204,7 +230,7 @@ function shownPrices(pageText) {
       value: Number(m[2].replace(/,/g, '') + (m[3] ? '.' + m[3] : '')),
       dollar: m[1].includes('$'),
       reference: Boolean(cue),
-      cue: cue ? cue[0].replace(/[\s:\-\u2013\u2014\u00ae\u2122]+$/, '').replace(/\s+/g, ' ') : '',
+      cue: cue ? cue[0].replace(CUE_END, '').replace(/\s+/g, ' ') : '',
     });
   }
   return out;

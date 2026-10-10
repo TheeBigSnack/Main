@@ -20,6 +20,7 @@ import assert from 'node:assert/strict';
 import { startMockSite } from './mock-dealer-site.mjs';
 import { startMockMarketplace, INITIAL_LISTINGS } from './mock-marketplace.mjs';
 import { blockFacebook } from './noFacebook.mjs';
+import { until } from './until.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const shots = join(root, 'test/e2e/screenshots');
@@ -148,12 +149,14 @@ try {
   // saving the order, redrawing and putting the focus back on the menu land in
   // turns of their own, and the first row can be the same under the old order:
   // wait for all three rather than read any of them once
-  await panel.waitForFunction(
+  await until(
+    panel,
     async (o) =>
       document.activeElement?.id === 'panelSort' &&
       document.querySelector('#panelList .row .name')?.textContent.trim() === '2019 Ram 1500 Classic Express' &&
       (await chrome.storage.local.get(`settings:${o}`))[`settings:${o}`]?.readySort === 'name',
     origin,
+    { what: 'the order by name saved, drawn and focused' },
   );
 
   // another website in the registry: the choice appears, and a website with no scan says how to start

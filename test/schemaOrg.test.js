@@ -499,7 +499,9 @@ test('price: a guide or estimate value, a class that strikes the old price throu
   // a value from a price guide, an estimate or the window sticker at the stale markup amount
   for (const label of ['KBB Fair Market Value', 'Market value', 'Sticker price', 'Book value:', 'Estimated value', 'Window sticker', 'Kelley Blue Book® Value:', 'Trade-in value', 'Edmunds True Market Value',
     // a guide's own labels, and an offer to buy the car
-    'Kelley Blue Book® Fair Purchase Price', 'KBB Fair Purchase Price', 'Kelley Blue Book Typical Listing Price', 'Instant Cash Offer', 'NADA value', 'J.D. Power value', 'JD Power', 'Black Book', 'Average market price', 'Fair Market Price']) {
+    'Kelley Blue Book® Fair Purchase Price', 'KBB Fair Purchase Price', 'Kelley Blue Book Typical Listing Price', 'Instant Cash Offer', 'NADA value', 'J.D. Power value', 'JD Power', 'Black Book', 'Average market price', 'Fair Market Price',
+    // the same words joined by a hyphen (R-8, repair round 2)
+    'Instant Cash-Offer', 'Instant-Offer', 'Market-Value', 'Kelley Blue-Book Value', 'Fair-Market Price']) {
     assert.equal(at(26000, `${label} $26,000 Our price $24,995`), null, label);
     assert.equal(at(24995, `${label} $26,000 Our price $24,995`), 24995, `${label}: the current price is still read`);
   }
@@ -529,6 +531,12 @@ test('price: when the page\'s only price carries a guide\'s or an old price\'s l
     ['Fair Market Price $24,995', 'Fair Market Price'],
     ['Dealer Cash Offer price $24,995', 'Cash Offer price'],
     ['Market Value $24,995 \u00b7 Market Value $24,995', 'Market Value'],
+    // an offer for the car, in the list shared with the inventory-data reader (GUIDE_PRICE_WORDS)
+    ['Instant Offer $24,995', 'Instant Offer'],
+    ['Your Trade-In Offer: $24,995', 'Trade-In Offer'],
+    // the words joined by a hyphen are the same words (R-8, repair round 2)
+    ['Your Cash-Offer $24,995', 'Cash-Offer'],
+    ['Market-Price $24,995', 'Market-Price'],
   ]) assert.deepEqual(at(text), quoted(label), text);
   // the same label next to a current price is a stale or guide value, as before
   const notShown = { value: null, label: 'the page does not show this price', reason: 'the page does not show this price' };
@@ -540,6 +548,32 @@ test('price: when the page\'s only price carries a guide\'s or an old price\'s l
   const v = flat({ offers: { '@type': 'Offer', price: 24995, priceCurrency: 'USD', availability: 'https://schema.org/InStock' } }, shown('Market Price $24,995 \u00b7 41,230 miles'));
   assert.equal(v.price, null);
   assert.deepEqual(assessVehicle(v, {}).blockers.map((b) => b.text), ['No price on the website (the page labels its only price "Market Price", which Lot Current does not read as the selling price)']);
+});
+
+// The footnote and trademark marks the inventory-data reader sets aside
+// (inventoryJson.js labelWords, the marks shared as LABEL_MARKS), after a
+// guide's or an old price's words in page text ("Market Value*: $24,995",
+// "MSRP† $24,995"). Before, the mark hid the words, so a page whose only
+// price was a guide's value or an offer had it taken as the car's price
+// (PR #9, repair round 3).
+test('price: a footnote or trademark mark after a guide\'s or an old price\'s words changes nothing', () => {
+  const at = (text, price = 24995) => priceFromOffers(car({ offers: { '@type': 'Offer', price, priceCurrency: 'USD' } }), shown(text));
+  const quoted = (label) => ({ value: null, label: `the page labels its only price "${label}", which Lot Current does not read as the selling price`, reason: `the page labels its only price "${label}", which Lot Current does not read as the selling price` });
+  for (const [text, label] of [
+    ['Market Value*: $24,995', 'Market Value'],
+    ['Market Value\u2020 $24,995', 'Market Value'],
+    ['Kelley Blue Book\u00ae Value\u00b9 $24,995', 'Kelley Blue Book\u00ae Value'],
+    ['Instant Cash Offer* $24,995', 'Cash Offer'],
+    ['KBB Value** $24,995', 'KBB Value'],
+    ['MSRP\u2021 $24,995', 'MSRP'],
+    ['Was* $24,995', 'Was'],
+  ]) assert.deepEqual(at(text), quoted(label), text);
+  // beside a current price the marked figure is a stale or guide value, and the current price is read
+  assert.deepEqual(at('Was* $24,995 Now $23,995'), { value: null, label: 'the page does not show this price', reason: 'the page does not show this price' });
+  assert.equal(at('Market Value* $26,000 Our price $24,995').value, 24995);
+  // a mark after the selling price's own words changes nothing either
+  assert.equal(at('Internet Price* $24,995').value, 24995);
+  assert.equal(at('Our Price\u2122 $24,995').value, 24995);
 });
 
 test('price: the page text comes in segments, each tied to the car whose card holds it', () => {
@@ -1012,4 +1046,30 @@ test('parity: the sandbox lot too, with its descriptions, features and single-pa
       assertParity(`${day} ${r.stock || r.vin}`, trimRecord(r, { fullRecords: true }), { myStores: ['Example Motors Springfield'] });
     }
   }
+});
+
+// R-8, PR #9's repair cycle 2 round 3: the inventory-data reader sets aside a
+// footnote written "(1)", "[1]", "*1", "(a)" or "(1, 2)" after a guide's or an
+// offer's label; this reader did not, so "Market Value (1): $24,995" as a
+// page's only price was taken as the car's price there. Both readers now read
+// the same footnotes, from one pattern (LABEL_NOTE).
+test('price: a footnote in brackets or a mark with a number after a guide\'s or an old price\'s words changes nothing', () => {
+  const at = (text, price = 24995) => priceFromOffers(car({ offers: { '@type': 'Offer', price, priceCurrency: 'USD' } }), shown(text));
+  const quoted = (label) => ({ value: null, label: `the page labels its only price "${label}", which Lot Current does not read as the selling price`, reason: `the page labels its only price "${label}", which Lot Current does not read as the selling price` });
+  for (const [text, label] of [
+    ['Market Value (1): $24,995', 'Market Value'],
+    ['Market Value [1] $24,995', 'Market Value'],
+    ['Market Value *1 $24,995', 'Market Value'],
+    ['Market Value (a) $24,995', 'Market Value'],
+    ['Market Value (1, 2) $24,995', 'Market Value'],
+    ['Market Value ⁽¹⁾ $24,995', 'Market Value'],
+    ['Instant Cash Offer (1) $24,995', 'Cash Offer'],
+    ['Was (1) $24,995', 'Was'],
+    ['MSRP [2]: $24,995', 'MSRP'],
+  ]) assert.deepEqual(at(text), quoted(label), text);
+  // beside a current price the noted figure is a guide's or an old one, and the current price is read
+  assert.equal(at('Market Value (1) $26,000 Our price $24,995').value, 24995);
+  // a footnote after the selling price's own words changes nothing either
+  assert.equal(at('Internet Price (1) $24,995').value, 24995);
+  assert.equal(at('Our Price *1 $24,995').value, 24995);
 });

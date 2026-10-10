@@ -7,14 +7,19 @@
 //     3. the condition word at the start of the listing title ("Pre-Owned 2019 ...")
 //   Demo and loaner flags always win: those units are sold as new. So does a
 //   demo or loaner word after the model year in the car's own title, trim or
-//   page address (unitWordAfterYear).
+//   page address (unitWordAfterYear). Such a car the website also lists as
+//   pre-owned (any sign, or the second condition field, readableType) and
+//   nowhere as new goes to "needs a look" instead, never to Ready.
 //   A Carfax report link counts as a supporting sign of pre-owned: a car two
 //   signs call pre-owned needs none (7 of 124 used cars on the test site have
 //   none), but a car with only one pre-owned sign needs the link, or it goes
 //   to "needs a look".
 //   Mileage is never used to call a car used: the test site has "New" units
 //   with 3,000-29,000 miles (demos/loaners that aren't flagged as such).
-//   When the signs disagree, or look off, the car goes to "needs a look".
+//   When the signs disagree, or look off, the car goes to "needs a look". So
+//   does a car whose two condition fields (the inventory type and the second
+//   one, readableType) disagree, one calling it new and the other pre-owned,
+//   whatever its title says, unless every sign calls it new.
 //   A website that marks a car damaged or refurbished (in its own words or
 //   with schema.org's DamagedCondition and RefurbishedCondition) sends it to
 //   "needs a look" too: a person checks what that means before it is posted.
@@ -139,7 +144,8 @@ function describe(checks) {
 }
 
 export function checkPreOwned(v) {
-  const titleWords = titleConditionWords(v.siteTitle) || v.readableType || null;
+  const titleOwn = titleConditionWords(v.siteTitle);
+  const titleWords = titleOwn || v.readableType || null;
   const checks = [
     { key: 'type', label: 'Inventory type', says: readCondition(v.inventoryType), detail: v.inventoryType || 'missing' },
     { key: 'url', label: 'Web address', says: readCondition(v.urlConditionWord), detail: v.urlConditionWord || 'no condition word' },
@@ -155,7 +161,15 @@ export function checkPreOwned(v) {
   if (v.isDemo || v.isLoaner || saying('demo').length || unit) {
     const what = v.isLoaner || (!v.isDemo && unit && !/demo/i.test(unit.word)) ? 'loaner' : 'demo';
     if (unit) notes.push(`The website's ${unit.where} says "${unit.word}".`);
-    if (preOwned.length && !isNew.length) {
+    // The second condition field backs up the title above; for a demo or
+    // loaner it also counts when the title has words of its own, so a car
+    // the website lists there as pre-owned (a certified mark the DealerOn
+    // and Dealer.com readers keep beside a loaner word) gets a person's
+    // look, never a silent skip. It never makes such a car Ready. When it is
+    // the only thing calling the car pre-owned, a note says so.
+    const listedThere = readCondition(v.readableType) === 'pre-owned';
+    if (listedThere && !preOwned.some((c) => c.key !== 'title' || titleOwn)) notes.push(`The website also lists it as "${v.readableType}".`);
+    if ((preOwned.length || listedThere) && !isNew.length) {
       const flagged = v.isDemo || v.isLoaner || saying('demo').length ? `also flagged as a ${what}` : `its ${unit.where} says "${unit.word}"`;
       return { verdict: 'review', reason: `Listed as pre-owned but ${flagged}. Demos and loaners are usually sold as new, so check before posting.`, checks, notes };
     }
@@ -165,6 +179,17 @@ export function checkPreOwned(v) {
   if (isNew.length && !preOwned.length) {
     if (v.carfaxUrl) notes.push('Has a Carfax report even though the website calls it new. If it is really used, fix its type in the inventory system.');
     return { verdict: 'new', reason: "New vehicle. Marketplace doesn't allow dealers to list new cars.", checks, notes };
+  }
+
+  // The record's two condition fields disagree: one calls the car new, the
+  // other pre-owned ("Used" and "New"). The second field is otherwise only
+  // the title's fallback; here it counts whatever the title and the address
+  // say, so the car waits on a person, never Ready, and both words are named.
+  // A car every sign calls new is skipped as new above, as before.
+  const typeSays = readCondition(v.inventoryType);
+  const secondSays = readCondition(v.readableType);
+  if ((typeSays === 'new' && secondSays === 'pre-owned') || (typeSays === 'pre-owned' && secondSays === 'new')) {
+    return { verdict: 'review', reason: `The website disagrees with itself: it lists the car as "${v.inventoryType}" and as "${v.readableType}". Check its condition before posting.`, checks, notes };
   }
 
   // Damaged or refurbished never goes straight to Ready, whatever the other
