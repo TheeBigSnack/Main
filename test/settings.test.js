@@ -318,3 +318,12 @@ test('Settings saves with no dealership name but says so: nothing can be posted 
   const none = await saveSettings({ fields, origin: null });
   assert.deepEqual([none.saved, none.note, none.said], [[], '', [['no website open', 'error']]]);
 });
+
+test('Settings saves a price note the checks would refuse: the warning under it holds nothing back', async () => {
+  const note = 'Tax, title and fees go to the state, not the dealer. Text Sam.';
+  const fields = { salespersonName: 'Sam', salespersonTitle: 'sales consultant', closingLine: '', dealerName: 'Example Motors', dealerCity: 'Springfield', dealerState: 'oh', dealerZip: '43215', priceNote: note, dailyCap: '10', newDays: '7' };
+  const r = await saveSettings({ fields });
+  assert.equal(r.saved.length, 1);
+  assert.equal(r.saved[0][1].priceNote, note);
+  assert.equal(r.note, 'Saved. Click Rescan website to apply.');
+});

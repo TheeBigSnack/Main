@@ -13,9 +13,9 @@
 import assert from 'node:assert/strict';
 import { runGuardrails as jsGuardrails } from '../../extension/src/rewriteTemplate.js';
 import { buildRewritePrompt as jsPrompt } from '../../backend/rewritePrompt.js';
-import { runGuardrails as tsGuardrails, BANNED_PHRASES, BANNED_UNLESS, PRICE_NOTE_UNLESS, WORD_LIMITS, CLAIM_KINDS, spelledQuantities as tsSpelled, ownAbbreviations as tsOwn } from '../functions/_shared/guardrails.ts';
+import { runGuardrails as tsGuardrails, BANNED_PHRASES, BANNED_UNLESS, PRICE_NOTE_UNLESS, PRICE_NOTE_WORDS, WORD_LIMITS, CLAIM_KINDS, spelledQuantities as tsSpelled, ownAbbreviations as tsOwn, numbersAsWords as tsWords, nameWithoutNumber as tsNameWithout } from '../functions/_shared/guardrails.ts';
 import { buildRewritePrompt as tsPrompt, SYSTEM_PROMPT } from '../functions/_shared/rewritePrompt.ts';
-import { BANNED_PHRASES as JS_BANNED, BANNED_UNLESS as JS_UNLESS, PRICE_NOTE_UNLESS as JS_NOTE_UNLESS, WORD_LIMITS as JS_LIMITS, CLAIM_KINDS as JS_CLAIMS, spelledQuantities as jsSpelled, ownAbbreviations as jsOwn } from '../../extension/src/rewriteTemplate.js';
+import { BANNED_PHRASES as JS_BANNED, BANNED_UNLESS as JS_UNLESS, PRICE_NOTE_UNLESS as JS_NOTE_UNLESS, PRICE_NOTE_WORDS as JS_NOTE_WORDS, WORD_LIMITS as JS_LIMITS, CLAIM_KINDS as JS_CLAIMS, spelledQuantities as jsSpelled, ownAbbreviations as jsOwn, numbersAsWords as jsWords, nameWithoutNumber as jsNameWithout } from '../../extension/src/rewriteTemplate.js';
 import { SYSTEM_PROMPT as JS_SYSTEM } from '../../backend/rewritePrompt.js';
 
 const vehicle = {
@@ -110,10 +110,46 @@ const texts = [
   sixty('Deal direct with the salesperson, incl. Plus tax, title and registration, which go to the state, not the dealer. Text the salesperson esp. Plus tax, title and registration, which go to the state, not the dealer.') + '\nVIN TESTVIN0000000001.',
   sixty('Deal direct, approx. Plus tax, title and registration, which go to the state, not the dealer. Fees (excl.) Plus tax, title and registration, which go to the state, not the dealer. Ask me etc. Plus tax, title and registration, which go to the state, not the dealer.') + '\nVIN TESTVIN0000000001.',
   sixty('Deal direct with the salesperson, ie. Plus tax, title and registration, which go to the state, not the dealer. Text the salesperson eg. Plus tax, title and registration, which go to the state, not the dealer.') + '\nVIN TESTVIN0000000001.',
+  // a number typed into Settings: in the role, the name or the dealership's name, alone or beside another number
+  sixty('2019 Ram 1500 Big Horn with 41,230 miles.').replace('sales consultant', '2nd shift sales') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn with 41,230 miles and a 3.92 axle.').replace('I am Alex, sales consultant', 'I am Alex 2, 3rd shift sales') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn with 41,230 miles.').replace(/Example Motors/g, '8 Mile Auto') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn with 41,230 miles, in row 2.').replace('sales consultant', 'Team 2 sales, 24/7') + '\nVIN TESTVIN0000000001.',
+  // the example the reason offers: none that fails a check of its own, none for "#1", a name that loses only its digits
+  sixty('2019 Ram 1500 Big Horn with 41,230 miles.').replace('I am Alex, sales consultant', 'I am J2 Smith, 1 owner car specialist') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn with 41,230 miles.').replace('sales consultant', 'Sales Associate 2') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn with 41,230 miles.').replace('sales consultant', '#1 salesman') + '\nVIN TESTVIN0000000001.',
+  // a name whose number belongs to the words around it: no example, since the name without it would be garbled
+  sixty('2019 Ram 1500 Big Horn with 41,230 miles.').replace('I am Alex,', 'I am Alex (Store 2),') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn with 41,230 miles.').replace('I am Alex,', 'I am Alex 2nd shift,') + '\nVIN TESTVIN0000000001.',
+  // a role that is only a number: set aside only where it is said once, and never inside a longer number
+  sixty('2019 Ram 1500 Big Horn with 41,230 miles. Seats 2 rows.').replace('sales consultant', '2') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn with 2,000 miles.').replace('sales consultant', '2') + '\nVIN TESTVIN0000000001.',
+  // "not the dealers" and "not the dealerships" in a description, and a price note with words that are not price and fee wording
+  sixty('2019 Ram 1500 Big Horn. Buy from me, not the dealers; text me, not the dealerships.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. Tax, title and fees go to the state, not the dealer. Text Sam at 555-123-4567.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. Example Motors prices plus tax. Tax and fees go to the county, not the dealers. Springfield sales tax applies.') + '\nVIN TESTVIN0000000001.',
+  // a list after "new": commas, "and", "&", "/", "+", "plus", words before a part, a part said to be checked, the car's own features
+  sixty('2019 Ram 1500 Big Horn with new tires, struts and brakes that were replaced last month, new tires/rotors + pads, and fresh tires, the battery, front and rear shocks.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn with new tires, HEMI engine, brakes; new tires, brakes inspected; new tires, Brake Assist, Battery Saver, struts; new tires and brake assist; new brake pads and rotors; a new set of tires plus new front/rear brakes are brand new.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. Highlights: New Tires/Brakes, New Brake Pads & Rotors, Brake Assist, Wipers - Rain Sensing, Rear Wiper/Washer and wipers, new tires, brakes for winter.') + '\nVIN TESTVIN0000000001.',
+  // the list stops at a line break (but for "and", "&" and "plus" with spaces around them), and only "brake pads" and "brake rotors" are one part in two words
+  sixty('2019 Ram 1500 Big Horn. It rides on new tires\nEngine and transmission run great.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. Set of new tires\nBrakes, rotors and pads were inspected.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. Just put on new tires\nTransmission, engine and exhaust all strong.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. New tires, struts\nBrakes inspected at our shop.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. New tires brakes and rotors. New brake rotors and pads. New tires\nand brakes. + New battery\n+ Wipers') + '\nVIN TESTVIN0000000001.',
+  // "and", "&" and "plus" with spaces around them cross a line break, and "front" or "rear" after them may end its line; after a comma a line break ends the item
+  sixty('2019 Ram 1500 Big Horn with new tires &\nbrakes. New battery and front\nbrakes &\nrear\nshocks. New wipers +\nstruts.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. New tires, front\nbrakes. New battery, brake\npads. New wipers, struts\ninspected.') + '\nVIN TESTVIN0000000001.',
+  // an item without its own "new" is quoted from the nearest "new" before it, and a very long list is read once
+  sixty('2019 Ram 1500 Big Horn with new tires and new brakes, plus a battery; new tires, struts, new brakes and rotors; fresh brakes, the new battery and wipers.') + '\nVIN TESTVIN0000000001.',
+  sixty(`2019 Ram 1500 Big Horn with ${'new tires, struts, Brake Assist, new brake pads & '.repeat(60)}wipers.`) + '\nVIN TESTVIN0000000001.',
 ];
 const contexts = [
   { vehicle, dealer, priceNote: '', price: 28995 },
   { vehicle, dealer, priceNote: 'Price includes the $490 doc fee; tax and tags extra.', price: 28995 },
+  { vehicle, dealer, priceNote: 'Price includes new tires/brakes and new brake pads + rotors; tax and tags extra.', price: 28995 },
   { vehicle: { ...vehicle, carfaxOneOwner: true }, dealer, priceNote: 'Price includes the $500 doc fee; tax and tags extra.', price: 28995 },
   { vehicle: { ...vehicle, priceBeforeFees: null }, dealer: {}, priceNote: 'doc fee of $490', price: null },
   { vehicle, dealer, salesperson: { name: 'Alex', title: 'sales manager' }, priceNote: '', price: 28995 },
@@ -138,20 +174,61 @@ const contexts = [
   { vehicle: { ...vehicle, descriptionRaw: 'Recent service: new tires, brakes and rotors, plus new shocks and a new battery.' }, dealer, priceNote: '', price: 28995 },
   { vehicle: { ...vehicle, descriptionRaw: 'Traded in by a locally owned company. Example Motors is a locally owned dealership.' }, dealer, priceNote: '', price: 28995 },
   { vehicle: { ...vehicle, descriptionRaw: 'Reduced from 31,995 to 28,995. Only 28.9k! Miles: 38,000. With 38,000 on it. Call 555-555-0100. Since 1985. Tows 7,500 lbs.' }, dealer, priceNote: '', price: 27995 },
+  { vehicle, dealer, salesperson: { name: 'Alex', title: '2nd shift sales' }, priceNote: '', price: 28995 },
+  { vehicle, dealer, salesperson: { name: 'Alex 2', title: '3rd shift sales' }, priceNote: '', price: 28995 },
+  { vehicle, dealer: { name: '8 Mile Auto', city: 'Springfield' }, salesperson: { name: 'Alex', title: 'sales consultant' }, priceNote: '', price: 28995 },
+  { vehicle, dealer: { name: 'Route 19 Motors', city: 'Springfield' }, salesperson: { name: 'Alex', title: 'Team 2 sales, 24/7' }, priceNote: '', price: 28995 },
+  { vehicle, dealer, salesperson: { name: 'Alex', title: '2' }, priceNote: '', price: 28995 },
+  { vehicle, dealer, salesperson: { name: 'J2 Smith', title: '1 owner car specialist' }, priceNote: '', price: 28995 },
+  { vehicle, dealer, salesperson: { name: 'Alex', title: 'Sales Associate 2' }, priceNote: '', price: 28995 },
+  { vehicle, dealer, salesperson: { name: 'Alex', title: '#1 salesman' }, priceNote: '', price: 28995 },
+  { vehicle, dealer, salesperson: { name: 'Alex (Store 2)', title: 'sales consultant' }, priceNote: '', price: 28995 },
+  { vehicle, dealer, salesperson: { name: 'Alex 2nd shift', title: 'sales consultant' }, priceNote: '', price: 28995 },
+  // a price note that says "not the dealer": every word price and fee wording, the dealership's own name, city and state, amounts and percentages
+  { vehicle, dealer: { ...dealer, state: 'OH' }, priceNote: 'Tax, title and fees go to the state, not the dealer. Text Sam at 555-123-4567.', price: 28995 },
+  { vehicle, dealer: { ...dealer, state: 'OH' }, priceNote: 'Example Motors prices plus tax. Tax and fees go to the county, not the dealers. Springfield sales tax applies.', price: 28995 },
+  { vehicle, dealer: { name: 'Sample Auto', city: 'Shelbyville' }, priceNote: 'Example Motors prices plus tax. Tax and fees go to the county, not the dealers. Springfield sales tax applies.', price: 28995 },
+  { vehicle, dealer, priceNote: 'Price includes the $490 doc fee and 6.25 % tax. Tax and tags go to the state, not the dealerships. Call \uff15\uff15\uff15-0100 or email sales@carmail.com \u{1F4DE}', price: 28995 },
+  { vehicle, dealer, priceNote: "Ask for Sam, not the dealer's front desk. T\u0435xt us; prices valid through 2026, $5551234567.", price: 28995 },
+  { vehicle, dealer, priceNote: 'Text Sam, not the dealers.', price: 28995 },
+  // the state is not one of the dealership's own words (the service is not sent it), "your" is not on the list, invisible characters
+  { vehicle, dealer: { name: 'Example Motors', city: 'Portland', state: 'ME' }, priceNote: 'Tax, title and fees go to the state, not the dealer. Cash price paid to me. Price excludes ME sales tax.', price: 28995 },
+  { vehicle, dealer, priceNote: 'Tax and fees go to your state, not the dealer. Your price requires financing.', price: 28995 },
+  { vehicle, dealer, priceNote: 'Tax, title and fees go to the state, not the dealer. Cash price paid to A\u200Bbe, A\u00ADna or S\uFEFFam from the \u202Eper\u202C; t\u00ADhe doc fee and the\u0336 tax.', price: 28995 },
+  { vehicle, dealer, priceNote: 'Price excludes t\u00ADhe doc fee\u200B. Tax, title and fees go to the state, not the dealer.', price: 28995 },
+  // a word joined to the next by "." or ":" with no space (a web link of listed words), and the dealership's own name with its dots
+  { vehicle, dealer, priceNote: 'Tax, title and fees go to the state, not the dealer. Cash price at dealer.to/sale, cash.sale, price.is or Example-Motors.city; dealer:sale, dealer\u2024to, dealer.\u200Bto. Tags extra.Doc fee $499.', price: 28995 },
+  { vehicle, dealer: { name: 'J.D. Example Motors', city: 'Springfield' }, priceNote: 'All J.D. Example Motors prices plus tax and tags. Tax, title and fees go to the state, not the dealer.', price: 28995 },
+  { vehicle, dealer, priceNote: 'All J.D. Example Motors prices plus tax and tags. Tax, title and fees go to the state, not the dealer.', price: 28995 },
+  // a phone number written as amounts or percentages (a run of seven or more digits), amounts with words between, a number in the dealership's own name, "change"
+  { vehicle, dealer, priceNote: 'Tax, title and fees go to the state, not the dealer. $555-$123-$4567, $555.$123.$4567 or ($555) $123-$4567; $ 555 $ 123 $ 4567\n$555/$123/$4567 555% 123% 456% 7%.', price: 28995 },
+  { vehicle, dealer, priceNote: 'Price $555-$123-$45.67. Tax, title and fees go to the state, not the dealer. A $499 doc fee and a $25 title fee apply; $499/$25, 6.25%/7.25%.', price: 28995 },
+  { vehicle, dealer: { name: 'Route 19 Motors', city: '29 Palms' }, priceNote: 'All Route 19 Motors prices plus tax and tags. Tax, title and fees go to the state, not the dealer. 29 Palms tax; Route 9, 191 or 19-1.', price: 28995 },
+  { vehicle, dealer: { name: 'Route 19 Motors', city: '29 Palms' }, priceNote: 'All Route 19 Motors prices plus 29 Palms tax and tags. Tax, title and fees go to the state, not the dealer.', price: 28995 },
+  { vehicle, dealer, priceNote: 'Prices subject to change. Tax and title fees go to the Department of Motor Vehicles, not the dealer. See the agent, incl. fees due at signing.', price: 28995 },
+  { vehicle: { ...vehicle, features: [...vehicle.features, 'New Tires/Brakes', 'New Brake Pads & Rotors', 'Brake Assist', 'Battery Saver', 'Wipers - Rain Sensing', 'Rear Wiper/Washer'], descriptionRaw: 'Recent service: new tires, brakes and rotors, plus new shocks.' }, dealer, priceNote: '', price: 28995 },
   {},
 ];
 
 let checks = 0;
+const settingsNamed = new Set(); // the settings the reasons above named, so the cases are known to reach that part
+
 for (const text of texts) {
   for (const ctx of contexts) {
-    assert.deepEqual(JSON.parse(JSON.stringify(tsGuardrails(text, ctx))), JSON.parse(JSON.stringify(jsGuardrails(text, ctx))), `runGuardrails differs for ${JSON.stringify(text.slice(0, 40))}`);
+    const js = jsGuardrails(text, ctx);
+    assert.deepEqual(JSON.parse(JSON.stringify(tsGuardrails(text, ctx))), JSON.parse(JSON.stringify(js)), `runGuardrails differs for ${JSON.stringify(text.slice(0, 40))}`);
+    for (const p of js.problems) if (p.code === 'setting-number') settingsNamed.add(p.text.slice(0, p.text.indexOf(' "')));
     checks += 1;
   }
 }
 assert.deepEqual([...BANNED_PHRASES], [...JS_BANNED]);
 assert.deepEqual(JSON.parse(JSON.stringify(BANNED_UNLESS)), JSON.parse(JSON.stringify(JS_UNLESS)));
 assert.deepEqual(JSON.parse(JSON.stringify(PRICE_NOTE_UNLESS)), JSON.parse(JSON.stringify(JS_NOTE_UNLESS)));
+assert.deepEqual([...PRICE_NOTE_WORDS], [...JS_NOTE_WORDS]);
 assert.deepEqual(CLAIM_KINDS.map((k) => [k.what, String(k.re), Boolean(k.part), String(k.hedge), String(k.sourceRe)]), JS_CLAIMS.map((k) => [k.what, String(k.re), Boolean(k.part), String(k.hedge), String(k.sourceRe)]));
+assert.deepEqual([...settingsNamed].sort(), ["Your dealership's name", 'Your name', 'Your role']);
+for (const value of ['2nd shift sales', 'sales, 2nd shift', 'Team 3 Sales', '8 Mile Auto', '12th Street Motors', 'sales, 24/7', 'Route19', 'sales consultant', '', '0th', '21st', '#1 salesman', 'Sales 2.0', '0% APR specialist', '$0 down specialist', 'Sales Associate 2', 'Internet Sales (Store 2)', 'Sales 2nd shift', 'Shift 2.', '(2nd shift)', '“3rd” shift']) assert.equal(tsWords(value), jsWords(value), value);
+for (const value of ['Sam 2', 'Sam2', 'J2 Smith', 'Sam 2nd', 'Sam (2)', 'Sam [2]', 'Sam "2"', 'Sam (2) Smith', 'Mary-Kate 2', "Sam O'Brien 2", 'Sam (Store 2)', 'Sam (2nd shift)', 'Sam 2nd shift', 'Sam, 2nd shift', 'Sam 2 Smith', 'Sam-2', 'Sam #2', 'Sam 24/7', 'Sam 2.0', 'Sam, 2', 'Sam (Jr 2', 'Sam 2-3', '2nd shift Sam', '22', '', 'Sam']) assert.equal(tsNameWithout(value), jsNameWithout(value), value);
 for (const text of texts) assert.deepEqual(tsSpelled(text), jsSpelled(text));
 for (const ctx of contexts) assert.deepEqual([...tsOwn(ctx.vehicle)], [...jsOwn(ctx.vehicle)]);
 assert.deepEqual({ ...WORD_LIMITS }, { ...JS_LIMITS });

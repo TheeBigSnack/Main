@@ -18,6 +18,8 @@ import { LISTING_SIGNS } from '../extension/facebook/listingSigns.js';
 import { FORM_MAP } from '../extension/facebook/formMap.js';
 import { onListing, listingIdFrom, startUpkeep, endUpkeep, up, namesakesOf, namesakesNow, offTargetNote, upkeepHtml, handleUpkeepClick } from '../extension/upkeep.js';
 import { noteTakenDown } from '../extension/src/takenDown.js';
+import { siteKeys } from '../extension/src/storageKeys.js';
+import { fakeChrome } from './helpers.js';
 
 // A page as the reader walks it: text nodes, each inside a plain block or a
 // dialog, and an optional Price box (in a dialog or on the page).
@@ -363,6 +365,43 @@ test('upkeep asks for Delete, not Mark as sold, when the car was not sold but re
       assert.match(/id="takeDownWaiting">(.*?)<\/div>/.exec(upkeepHtml())[1], /click <b>Mark as sold<\/b> \(or <b>Delete<\/b>\)/);
       endUpkeep();
     }
+  } finally {
+    endUpkeep();
+    delete globalThis.chrome;
+  }
+});
+
+// A price update recorded from the side panel ("I updated it", or the panel
+// seeing the new price) keeps the basis the read worked its price out on
+// (ctx.priceNow, sidepanel.js upkeepPriceNow) on a listing that carries none
+// (posted with an older version: src/rescan.js markPriceUpdated), as Updated
+// in the popup does, so a switch of Price to post before the next scan is no
+// part of the next price change. A listing that carries a basis keeps it.
+test('a price update recorded from the side panel keeps the basis its price was read on, for a listing that carries none', async () => {
+  const origin = 'https://www.example-motors.test';
+  const k = siteKeys(origin);
+  const record = async (entry, now) => {
+    const store = { [k.posted]: { AAA: entry } };
+    globalThis.chrome = { ...fakeChrome({}, store), tabs: { create: async () => ({ id: 9 }) }, runtime: { sendMessage: async () => ({}) } };
+    const ctx = { render: () => {}, map: () => FORM_MAP, priceNow: async () => now };
+    const started = startUpkeep({ origin, vin: 'aaa', kind: 'price', price: 27163, listingUrl: 'https://www.facebook.com/marketplace/item/111/', name: 'Car A', listedPrice: entry.price, dealerTabId: 4 }, ctx);
+    for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(up.status, 'waiting', 'the listing is open with the price to fill');
+    assert.equal(await handleUpkeepClick('upkeepDoneBtn', ctx), true);
+    assert.equal(up.status, 'done');
+    endUpkeep();
+    await started;
+    return store[k.posted].AAA;
+  };
+  try {
+    const older = { name: 'Car A', price: 26900, postedAt: '2026-10-02T09:00:00.000Z' };
+    const kept = await record(older, { ok: true, price: 27163, basis: 'website' });
+    assert.deepEqual([kept.price, kept.basis], [27163, 'website']);
+    assert.ok(kept.updatedAt);
+    const lower = await record(older, { ok: true, price: 26673, basis: 'beforeFees' });
+    assert.deepEqual([lower.price, lower.basis], [26673, 'beforeFees']);
+    const own = await record({ ...older, basis: 'beforeFees' }, { ok: true, price: 26673, basis: 'website' });
+    assert.equal(own.basis, 'beforeFees', 'a listing that carries a basis keeps it');
   } finally {
     endUpkeep();
     delete globalThis.chrome;

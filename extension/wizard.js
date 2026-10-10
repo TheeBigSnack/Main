@@ -26,6 +26,7 @@ import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { signInStart, signInFinish, currentSession, rewriteEndpointFor } from './src/accountFlow.js';
 import { loadSession, redeemInvite } from './src/account.js';
 import { wizardSteps, accountStepModel, joinedFrom, rewriteAtAccount, termsSummary, TERMS_PENDING, addressHint } from './src/wizardSteps.js';
+import { settingNumberWarning, settingNumberNotice, priceNoteWarning, priceNoteNotice } from './src/rewriteTemplate.js';
 
 const steps = () => wizardSteps(accountsConfigured());
 // The Account step's own state: what was typed and answered, never a token.
@@ -59,6 +60,54 @@ async function loadAccount() {
 const knownStep = (step) => (step === 'account' && !steps().includes(step) ? 'address' : step);
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+// A number in the role or the name, or a dealership name that reads as a
+// price or a mileage, is in every description and keeps the Marketplace form
+// shut for nearly every car (src/rewriteTemplate.js settingNumberWarning).
+// The field says so under it, and its input is described by that warning:
+// drawn with the step, and brought up to date as the person types
+// (handleWizardInput). The warning quotes the number and a way to write the
+// value, so it changes on nearly every key; a screen reader is told through a
+// live region of its own beside it (<id>Say), written only when the warning
+// comes or goes, so it is spoken once, not on every key. Settings says the
+// same (popup.js).
+const WARNED_FIELDS = Object.freeze({ wizName: 'name', wizTitle: 'role', wizDealer: 'dealer' });
+// the dealership as set-up holds it: a role or a name whose numbers its name, city and ZIP all hold passes
+const dealerNow = () => (wiz.settings && wiz.settings.dealer) || {};
+function warningHtml(id, value) {
+  const text = settingNumberWarning(WARNED_FIELDS[id], value, dealerNow());
+  return text ? `<div class="banner warn">${esc(text)}</div>` : '';
+}
+const noticeOf = (id, value) => settingNumberNotice(WARNED_FIELDS[id], value, dealerNow());
+const warningRegion = (id, value) => `<div id="${id}Warn">${warningHtml(id, value)}</div><div id="${id}Say" class="sr" aria-live="polite">${esc(noticeOf(id, value))}</div>`;
+// The address step comes after the You step, which read the role and the
+// name against the dealership as set-up held it then. A dealership name, city
+// or ZIP typed on the address step that no longer has the number in the role
+// or the name brings that warning up there, under the fields that changed
+// it; one the You step already gave is not said again. `typed` is the
+// dealership as the step's boxes hold it now. Each warning stays the same
+// while it stands, so its live region (wizYouSay) says it whole, once.
+function youWarnings(typed) {
+  const s = wiz.settings || withDefaults({}, wiz.site || {});
+  return [['role', s.salesperson.title], ['name', s.salesperson.name]]
+    .filter(([setting, value]) => !settingNumberWarning(setting, value, dealerNow()))
+    .map(([setting, value]) => [setting, settingNumberWarning(setting, value, typed)])
+    .filter(([, text]) => text)
+    .map(([setting, text]) => `The dealership's name, city and ZIP typed here no longer have the number in your ${setting}. ${text} Your ${setting} is on the You step.`);
+}
+const youWarningHtml = (list) => list.map((text) => `<div class="banner warn">${esc(text)}</div>`).join('');
+const youWarningRegion = (typed) => `<div id="wizYouWarn">${youWarningHtml(youWarnings(typed))}</div><div id="wizYouSay" class="sr" aria-live="polite">${esc(youWarnings(typed).join(' '))}</div>`;
+// A price note that says "not the dealer" may say only where the fees go and
+// what the price includes (src/rewriteTemplate.js priceNoteWarning): the
+// price step says so under the note, read with the dealership's name and
+// city as set-up holds them, as it is typed; Next still keeps the note.
+// Its live region (wizPriceNoteSay) leaves out the quoted words, so it is
+// spoken once, when the warning comes or goes. Settings says the same (popup.js).
+const noteWarningHtml = (note) => {
+  const text = priceNoteWarning(note, dealerNow());
+  return text ? `<div class="banner warn">${esc(text)}</div>` : '';
+};
+const noteWarningRegion = (note) => `<div id="wizPriceNoteWarn">${noteWarningHtml(note)}</div><div id="wizPriceNoteSay" class="sr" aria-live="polite">${esc(priceNoteNotice(note, dealerNow()))}</div>`;
 const money = (n) => (typeof n === 'number' && Number.isFinite(n) ? '$' + Math.round(n).toLocaleString('en-US') : '—');
 const key = (origin) => siteKeys(origin).wizard; // the wizard's own persisted state
 // The Price step's model from the last read (showsLower, gap, example); empty for a read saved before the step existed.
@@ -262,9 +311,11 @@ export function wizardHtml() {
     }
     case 'you':
       return `${progress}<h3>You</h3>
-        <label class="block">Your name <input type="text" id="wizName" value="${esc(s.salesperson.name)}" placeholder="Your first name" /></label>
-        <label class="block">Your role <input type="text" id="wizTitle" value="${esc(s.salesperson.title)}" /></label>
-        <p class="hint">Every description ends with "I'm [name], [role] at [dealership]". Posing as a private seller isn't allowed.</p>
+        <label class="block">Your name <input type="text" id="wizName" value="${esc(s.salesperson.name)}" placeholder="Your first name" aria-describedby="wizNameWarn" /></label>
+        ${warningRegion('wizName', s.salesperson.name)}
+        <label class="block">Your role <input type="text" id="wizTitle" value="${esc(s.salesperson.title)}" aria-describedby="wizTitleWarn" /></label>
+        ${warningRegion('wizTitle', s.salesperson.title)}
+        <p class="hint">Every description is signed "I'm [name], [role] at [dealership]". Posing as a private seller isn't allowed.</p>
         ${nav()}`;
     case 'account': {
       // Settings' Account section in the wizard; Next ("Skip for now" until
@@ -296,11 +347,13 @@ export function wizardHtml() {
       // a website that gives no dealership name: the step says so, and Next waits for one (every description names it)
       return `${progress}<h3>The store's address</h3>
         <p class="hint" id="wizAddressHint">${esc(addressHint(wiz.site && wiz.site.address))}</p>
-        <label class="block">Dealership name <input type="text" id="wizDealer" value="${esc(s.dealer.name)}" /></label>
+        <label class="block">Dealership name <input type="text" id="wizDealer" value="${esc(s.dealer.name)}" aria-describedby="wizDealerWarn wizYouWarn" /></label>
+        ${warningRegion('wizDealer', s.dealer.name)}
         ${dealerNameMissing(s.dealer) ? `<div class="banner bad" id="wizNoDealer" role="alert">${esc(NO_DEALER_NAME)}</div>` : ''}
-        <label class="block">City <input type="text" id="wizCity" value="${esc(s.dealer.city)}" /></label>
+        <label class="block">City <input type="text" id="wizCity" value="${esc(s.dealer.city)}" aria-describedby="wizYouWarn" /></label>
         <label class="block">State <input type="text" id="wizState" value="${esc(s.dealer.state)}" maxlength="2" placeholder="e.g. OH" /></label>
-        <label class="block">ZIP <input type="text" id="wizZip" value="${esc(s.dealer.zip)}" placeholder="e.g. 43215" inputmode="numeric" /></label>
+        <label class="block">ZIP <input type="text" id="wizZip" value="${esc(s.dealer.zip)}" placeholder="e.g. 43215" inputmode="numeric" aria-describedby="wizYouWarn" /></label>
+        ${youWarningRegion(s.dealer)}
         ${nav()}`;
     case 'price': {
       // The same choice and wording as Settings' "Price to post". The note is
@@ -319,7 +372,8 @@ export function wizardHtml() {
       return `${progress}<h3>The price to post</h3>
         ${choice}
         ${gapNote}
-        <label class="block">Price note in every description <input type="text" id="wizPriceNote" value="${esc(s.priceNote)}" placeholder="${esc(suggested || NOTE_PLACEHOLDER)}" /></label>
+        <label class="block">Price note in every description <input type="text" id="wizPriceNote" value="${esc(s.priceNote)}" placeholder="${esc(suggested || NOTE_PLACEHOLDER)}" aria-describedby="wizPriceNoteWarn wizPriceHint" /></label>
+        ${noteWarningRegion(s.priceNote)}
         <p class="hint" id="wizPriceHint">${esc(priceHint(suggested))}</p>
         ${nav()}`;
     }
@@ -570,6 +624,40 @@ async function wizardClick(id, ctx) {
     default:
       return false;
   }
+}
+
+// Typing in the name, role or dealership name: the warning under it follows
+// what is typed, and the live region beside it is written only when what it
+// says changes, that is when the warning comes or goes (nothing is saved
+// until Next, as before). Typing in the address step's dealership name, city
+// or ZIP brings its warning about the role and the name up to date too.
+const ADDRESS_BOXES = Object.freeze({ wizDealer: 'name', wizCity: 'city', wizZip: 'zip' });
+export function handleWizardInput(target) {
+  if (!wiz.active || !target) return;
+  if (Object.hasOwn(ADDRESS_BOXES, target.id)) {
+    const saved = dealerNow();
+    const now = (id) => (id === target.id ? target.value : (document.getElementById(id) || { value: saved[ADDRESS_BOXES[id]] }).value);
+    const typed = Object.fromEntries(Object.entries(ADDRESS_BOXES).map(([id, key]) => [key, now(id)]));
+    const list = youWarnings(typed);
+    const shown = document.getElementById('wizYouWarn');
+    if (shown) shown.innerHTML = youWarningHtml(list);
+    const say = document.getElementById('wizYouSay');
+    if (say && say.textContent !== list.join(' ')) say.textContent = list.join(' ');
+  }
+  if (target.id === 'wizPriceNote') {
+    const shown = document.getElementById('wizPriceNoteWarn');
+    if (shown) shown.innerHTML = noteWarningHtml(target.value);
+    const say = document.getElementById('wizPriceNoteSay');
+    const notice = priceNoteNotice(target.value, dealerNow());
+    if (say && say.textContent !== notice) say.textContent = notice;
+    return;
+  }
+  if (!Object.hasOwn(WARNED_FIELDS, target.id)) return;
+  const shown = document.getElementById(`${target.id}Warn`);
+  if (shown) shown.innerHTML = warningHtml(target.id, target.value);
+  const say = document.getElementById(`${target.id}Say`);
+  const notice = noticeOf(target.id, target.value);
+  if (say && say.textContent !== notice) say.textContent = notice;
 }
 
 export function handleWizardChange(target) {

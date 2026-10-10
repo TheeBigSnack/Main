@@ -132,6 +132,14 @@ try {
   // it was marked after the last scan, which shows the website as it was before (src/rescan.js scanCar):
   // the switch leaves it for the next scan to read
   assert.deepEqual(Object.values(await postedNow()).map((e) => [e.price, e.basis]), [[27163, undefined]], 'not stamped off a scan taken before it was posted');
+  // nor does My listings read one off it (src/rescan.js listingLine): on the new setting that scan's price
+  // is not the listing's, so it names no website price and offers no Updated until the next scan compares it
+  await tab(popup, 'mine').click();
+  const waiting = await popup.textContent('.panel');
+  assert.match(waiting, /Price compared at the next scan/);
+  assert.match(waiting, /Listed \$27,163/);
+  assert.doesNotMatch(waiting, /posted at the|Website \$/, 'no basis and no price read off a scan from before the post');
+  assert.equal(await popup.locator('button[data-action="priceUpdated"]').count(), 0, 'nothing for Updated to record');
   const scanned = () => popup.waitForFunction(() => document.querySelector('#settingsBtn').getAttribute('aria-pressed') === 'false' && document.querySelector('#panel .meta') && !document.querySelector('#scan').disabled);
   await popup.click('#scan');
   await scanned(); // the view turns to To do only once the scan is saved
@@ -242,6 +250,29 @@ try {
   assert.equal(await popup.inputValue('input[name="dealerState"]'), 'PA');
   assert.equal(await popup.inputValue('input[name="dealerZip"]'), '15370');
   await popup.screenshot({ path: join(shots, '6-settings.png') });
+  // a price note that says "not the dealer" may hold only price and fee wording: Settings warns under the
+  // note as it is typed, going by the dealership's name and city as the form holds them (nothing here is saved)
+  const noteReason = (out) => `Your price note says "not the dealer", so it may only say where the fees go and what the price includes; take out ${out}, or take out "not the dealer". Change the note in Settings.`;
+  assert.equal(await popup.getAttribute('input[name="priceNote"]', 'aria-describedby'), 'priceNoteWarn priceNoteHint');
+  assert.equal(await popup.getAttribute('#priceNoteWarn', 'aria-live'), null, 'the warning under the field changes on every key, so it is not spoken on each');
+  assert.equal(await popup.getAttribute('#priceNoteSay', 'aria-live'), 'polite');
+  assert.equal((await popup.textContent('#priceNoteWarn')).trim(), '');
+  await popup.evaluate(() => {
+    window.__noteSayWrites = 0;
+    new MutationObserver((list) => { window.__noteSayWrites += list.length; }).observe(document.querySelector('#priceNoteSay'), { childList: true, characterData: true, subtree: true });
+  });
+  await popup.fill('input[name="priceNote"]', '');
+  await popup.locator('input[name="priceNote"]').pressSequentially('Tax, title and fees go to the state, not the dealer. Text Sam.');
+  await popup.waitForFunction(() => /"Sam"/.test(document.querySelector('#priceNoteWarn').textContent));
+  assert.equal((await popup.textContent('#priceNoteWarn')).trim(), noteReason('"Text" and "Sam"'));
+  assert.equal((await popup.textContent('#priceNoteSay')).trim(), 'Your price note says "not the dealer", so it may only say where the fees go and what the price includes. Take out the other words, or take out "not the dealer".');
+  assert.equal(await popup.evaluate(() => window.__noteSayWrites), 1, 'the live region was written once, when the warning came');
+  await popup.fill('input[name="dealerCity"]', 'Sam'); // a dealership in a town of that name may say it
+  await popup.waitForFunction(() => !/"Sam"/.test(document.querySelector('#priceNoteWarn').textContent));
+  assert.equal((await popup.textContent('#priceNoteWarn')).trim(), noteReason('"Text"'));
+  await popup.fill('input[name="priceNote"]', 'Tax, title and fees go to the state, not the dealer.');
+  await popup.waitForFunction(() => document.querySelector('#priceNoteWarn').textContent.trim() === '' && document.querySelector('#priceNoteSay').textContent.trim() === '');
+  assert.equal(await popup.evaluate(() => window.__noteSayWrites), 2, 'and once more, when it went');
   await popup.close();
 
   // ---- Day 3: the Tradesman gets photos and moves to Waynesburg, so three cars are ready ----

@@ -13,6 +13,8 @@
 //     mileage must be the website's, and no price change is claimed
 //   - the VIN and the dealership's name must be present (and a name must be set)
 //   - the salesperson's role (their title, or the default one) must be present
+//   - a number problem that comes only from the role, the salesperson's name
+//     or the dealership's name is one problem naming that setting
 //   - banned phrases (claims the data can't support, posing as a private
 //     seller, protected characteristics), "one owner" only with the flag,
 //     no ALL CAPS shouting, no walls of emoji
@@ -107,7 +109,7 @@ export const BANNED_PHRASES: readonly string[] = Object.freeze([
   'private seller', 'private sale', 'private party', 'by owner', 'fsbo', 'not a dealer', 'not a dealership',
   'selling it myself', 'i am the owner', "i'm the owner", 'i\u2019m the owner', 'selling my', 'my personal', 'my truck', 'my car', 'my suv', 'my daily driver',
   //   steering the buyer away from the dealership, or selling for someone else
-  'not the dealership', 'not the dealer', 'not through the dealership', 'not through the dealer', 'not at the dealership', 'skip the dealership', 'skip the dealer',
+  'not the dealership', 'not the dealer', 'not the dealerships', 'not the dealers', 'not through the dealership', 'not through the dealer', 'not at the dealership', 'skip the dealership', 'skip the dealer',
   'instead of the dealership', 'instead of the dealer', "don't call the dealership", "don't call the dealer", 'don\u2019t call the dealership', 'don\u2019t call the dealer',
   'bypass the dealership', 'bypass the dealer', 'avoid the dealership', 'avoid the dealer',
   'for the owner', 'for the owners', 'on behalf of the owner', 'for a friend', 'for my friend', 'for my brother', 'for my sister', 'for my neighbor', 'for my neighbour', 'reason for selling',
@@ -139,6 +141,8 @@ const THE_BUSINESS = "[\\s-]+of[\\s-]+(?:this|the|our)[\\s-]+(?:dealership|deale
 export const BANNED_UNLESS: Readonly<Record<string, Readonly<{ before?: string; after?: string }>>> = Object.freeze({
   'not the dealership': Object.freeze({ after: DEALERS_DESK }),
   'not the dealer': Object.freeze({ after: DEALERS_DESK }),
+  'not the dealerships': Object.freeze({ after: DEALERS_DESK }),
+  'not the dealers': Object.freeze({ after: DEALERS_DESK }),
   'i am the owner': Object.freeze({ after: THE_BUSINESS }),
   "i'm the owner": Object.freeze({ after: THE_BUSINESS }),
   'i\u2019m the owner': Object.freeze({ after: THE_BUSINESS }),
@@ -164,7 +168,46 @@ const FEES_GO_TO = `(?:^|[.!?\\n])\\s*${FEES_OPENING}\\b(?:tax(?:es)?|title|regi
 export const PRICE_NOTE_UNLESS: Readonly<Record<string, Readonly<{ before?: string; after?: string }>>> = Object.freeze({
   'not the dealership': Object.freeze({ before: FEES_GO_TO }),
   'not the dealer': Object.freeze({ before: FEES_GO_TO }),
+  'not the dealerships': Object.freeze({ before: FEES_GO_TO }),
+  'not the dealers': Object.freeze({ before: FEES_GO_TO }),
 });
+
+// A price note that says one of those phrases passes only when, besides that
+// rule, every word of the whole note is on this closed list or a word of the
+// dealership's own name or city (the facts this service gets name no state):
+// runs of letters after NFKC, in lower case, an apostrophe or a hyphen
+// splitting a word into its parts, an invisible character read as nothing
+// (one that changes the direction of the text is refused); its only digits
+// are dollar amounts, percentages and a number written as a word of the
+// dealership's name or city ("Route 19 Motors"), two or more amounts or
+// percentages with only spaces and marks between them are one run, refused
+// whole with seven or more digits, cents counted ("$555-$123-$4567"), its
+// only other marks are the punctuation between words, and a word joined to
+// the next by "." or ":" with no space (a web link) is refused unless the
+// dealership's name or city is written so. The reason quotes anything
+// else. A note without those phrases is read as before. The same words as
+// the extension's list.
+export const PRICE_NOTE_WORDS: readonly string[] = Object.freeze([
+  // articles, determiners, conjunctions and prepositions
+  'a', 'an', 'the', 'all', 'any', 'no', 'only', 'our', 'these', 'those', 'that', 'which',
+  'and', 'or', 'nor', 'but', 'as', 'if', 'where', 'also',
+  'of', 'to', 'for', 'from', 'in', 'on', 'at', 'by', 'with', 'without', 'per', 'before', 'after', 'through', 'upon',
+  // verbs that say what the price includes and where the fees go
+  'is', 'are', 'be', 'does', 'do', 'not', 'may', 'vary', 'change', 'apply', 'applies', 'note',
+  'include', 'includes', 'included', 'including', 'exclude', 'excludes', 'excluded', 'excluding',
+  'go', 'goes', 'paid', 'payable', 'collected', 'due', 'sent', 'remitted', 'directly', 'straight',
+  // the price
+  'price', 'prices', 'priced', 'pricing', 'advertised', 'listed', 'internet', 'sale', 'selling', 'cash', 'plus',
+  'applicable', 'additional', 'extra',
+  'rebate', 'rebates', 'incentive', 'incentives', 'discount', 'discounts', 'manufacturer',
+  'financing', 'finance', 'credit', 'approval', 'subject', 'qualified', 'buyers',
+  // the fees and who they go to
+  'tax', 'taxes', 'sales', 'title', 'titling', 'tag', 'tags', 'plate', 'plates', 'registration', 'registered', 'license', 'licensing',
+  'fee', 'fees', 'doc', 'documentation', 'documentary', 'processing', 'electronic', 'filing',
+  'dealer', 'dealers', 'dealership', 'dealerships',
+  'state', 'county', 'city', 'local', 'government',
+  'dmv', 'bmv', 'mvd', 'rmv', 'office', 'collector', 'assessor', 'secretary', 'department', 'motor', 'vehicle', 'vehicles', 'division', 'agency', 'revenue',
+]);
 
 export function wordCount(text: unknown): number {
   return String(text || '').trim().split(/\s+/).filter(Boolean).length;
@@ -395,6 +438,109 @@ const phraseRe = (p: string, { before, after }: { before?: string; after?: strin
 const BANNED_RE: Array<[string, RegExp]> = BANNED_PHRASES.map((p) => [p, phraseRe(p, BANNED_UNLESS[p])]);
 // the same phrases as the dealership's price note may say them (PRICE_NOTE_UNLESS)
 const NOTE_BANNED_RE: Map<string, RegExp> = new Map(BANNED_PHRASES.map((p) => [p, phraseRe(p, { ...BANNED_UNLESS[p], ...PRICE_NOTE_UNLESS[p] })]));
+// the phrases a price note may end its fee sentence with, as said anywhere in the note
+const NOTE_STEER_SAID: Map<string, RegExp> = new Map(Object.keys(PRICE_NOTE_UNLESS).map((p) => [p, phraseRe(p)]));
+const NOTE_WORD_SET: ReadonlySet<string> = new Set(PRICE_NOTE_WORDS);
+// a dollar amount of up to six digits, with a thousands comma or without, or a percentage, standing on its own
+const NOTE_AMOUNT = /(?<![\p{L}\p{N}])(?:\$\s?(?:\d{1,3},\d{3}|\d{1,6})(?:\.\d{1,2})?|\d{1,3}(?:\.\d{1,3})?\s?%)(?![\p{L}\p{N}]|[.,]\p{N})/gu;
+// two or more of those with nothing but spaces and marks between them are one run, refused whole with this many digits in all, cents counted
+const NOTE_RUN_GAP = /^[^\p{L}\p{N}]*$/u;
+const NOTE_RUN_DIGITS = 7;
+// the marks a note may have between its words
+const NOTE_MARKS = /^[\s.,;:!?'"\u2018\u2019\u201c\u201d()[\]\-\u2010-\u2015/&*+]$/u;
+const NOTE_EDGE_MARKS = /^[.,;:!?'"\u2018\u2019\u201c\u201d()[\]\-\u2010-\u2015/&*+]+|[.,;:!?'"\u2018\u2019\u201c\u201d()[\]\-\u2010-\u2015/&*+]+$/gu;
+// each run of characters with no space in it, read whole (a number or a web link is refused whole)
+const NOTE_TOKEN = /\S+/gu;
+const NOTE_DIGIT = /\p{N}/u;
+// a word joined to the next by "." or ":" with no space between, as in a web link
+const NOTE_LINK = /[\p{L}\p{M}][.:]\p{L}/u;
+const NOTE_WORD = /\p{L}[\p{L}\p{M}]*(?:['\u2019\u2010-]\p{L}[\p{L}\p{M}]*)*/gu;
+// an invisible character: read as nothing, unless it changes the direction of the text
+const NOTE_HIDDEN = /\p{Default_Ignorable_Code_Point}/gu;
+const NOTE_DIRECTION = /\p{Bidi_Control}/u;
+const lettersOf = (s: unknown): string[] => String(s ?? '').normalize('NFKC').replace(NOTE_HIDDEN, '').toLowerCase().match(/\p{L}[\p{L}\p{M}]*/gu) || [];
+const blank = (s: string): string => ' '.repeat(s.length);
+// Whether a run of characters with no space in it is written as a word of the dealership's own name or city as set
+// (each run looked for once, and only when the name or city has it at all).
+function ownWritten(bare: string, ownSaid: string, seen: Map<string, boolean>): boolean {
+  const key = bare.toLowerCase();
+  if (!ownSaid.includes(key)) return false;
+  if (!seen.has(key)) seen.set(key, new RegExp(`(?<![\\p{L}\\p{N}])${escapeRe(key)}(?![\\p{L}\\p{N}])`, 'u').test(ownSaid));
+  return seen.get(key) as boolean;
+}
+// What a price note says that is not price and fee wording, in order, each once, quoted as it shows.
+function noteSteerWords(note: unknown, dealer: GuardrailDealer | null | undefined): string[] {
+  const d = dealer || {};
+  const own = new Set([d.name, d.city].flatMap(lettersOf));
+  const ownSeen = new Map<string, boolean>();
+  const found: { at: number; text: string }[] = [];
+  let gone = 0;
+  let rest = String(note ?? '').normalize('NFKC').replace(NOTE_HIDDEN, (c: string, at: number) => {
+    if (!NOTE_DIRECTION.test(c)) {
+      gone += c.length;
+      return '';
+    }
+    found.push({ at: at - gone, text: 'an invisible direction mark' });
+    return ' ';
+  });
+  const ownSaid = [d.name, d.city].map((s) => String(s ?? '').normalize('NFKC').replace(NOTE_HIDDEN, '').toLowerCase()).join('\n');
+  rest = rest.replace(NOTE_TOKEN, (said: string, at: number) => {
+    if (!NOTE_LINK.test(said)) return said;
+    const bare = said.replace(NOTE_EDGE_MARKS, '');
+    // the dealership's own name or city as set, dots and all, is read word by word
+    if (ownWritten(bare, ownSaid, ownSeen)) return said;
+    found.push({ at, text: `"${bare}"` });
+    return blank(said);
+  });
+  // the amounts and percentages, each run of them read as one
+  type Amount = { from: number; to: number; digits: number };
+  const runs: Array<{ from: number; to: number; amounts: Amount[] }> = [];
+  for (const m of rest.matchAll(NOTE_AMOUNT)) {
+    const from = m.index as number;
+    const amount: Amount = { from, to: from + m[0].length, digits: m[0].replace(/\D/g, '').length };
+    const run = runs[runs.length - 1];
+    if (run && NOTE_RUN_GAP.test(rest.slice(run.to, amount.from))) {
+      run.amounts.push(amount);
+      run.to = amount.to;
+    } else runs.push({ from: amount.from, to: amount.to, amounts: [amount] });
+  }
+  let read = '';
+  let upTo = 0;
+  for (const run of runs) {
+    const long = run.amounts.length > 1 && run.amounts.reduce((n, a) => n + a.digits, 0) >= NOTE_RUN_DIGITS;
+    if (long) found.push({ at: run.from, text: `"${rest.slice(run.from, run.to).replace(/\s+/g, ' ')}"` });
+    for (const a of long ? [{ from: run.from, to: run.to }] : run.amounts) {
+      read += rest.slice(upTo, a.from) + blank(rest.slice(a.from, a.to));
+      upTo = a.to;
+    }
+  }
+  rest = read + rest.slice(upTo);
+  rest = rest.replace(NOTE_TOKEN, (said: string, at: number) => {
+    if (!NOTE_DIGIT.test(said)) return said;
+    const bare = said.replace(NOTE_EDGE_MARKS, '');
+    // a number the dealership's own name or city as set has as a word of its own, read as its letters are
+    if (ownWritten(bare, ownSaid, ownSeen)) return blank(said);
+    found.push({ at, text: `"${bare}"` });
+    return blank(said);
+  });
+  rest = rest.replace(NOTE_WORD, (said: string, at: number) => {
+    if (!lettersOf(said).every((w) => NOTE_WORD_SET.has(w) || own.has(w))) found.push({ at, text: `"${said}"` });
+    return blank(said);
+  });
+  for (const m of rest.matchAll(/\S/gu)) if (!NOTE_MARKS.test(m[0])) found.push({ at: m.index as number, text: `"${m[0]}"` });
+  const seen = new Set<string>();
+  return found.sort((a, b) => a.at - b.at).map((f) => f.text).filter((t) => !seen.has(t.toLowerCase()) && Boolean(seen.add(t.toLowerCase())));
+}
+const listOf = (list: string[]): string => (list.length > 1 ? `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}` : list[0]);
+// The reason a note that says one of those phrases is refused for its words ('' when it is not):
+// the phrase looked for in the note on one line, its words read in the note as written.
+function noteSteer(phrase: string, noteSaid: string, dealer: GuardrailDealer | null | undefined, note: unknown = noteSaid): string {
+  const said = NOTE_STEER_SAID.get(phrase);
+  if (!said || !said.test(noteSaid)) return '';
+  const words = noteSteerWords(note, dealer);
+  return words.length ? `Your price note says "${phrase}", so it may only say where the fees go and what the price includes; take out ${listOf(words)}, or take out "${phrase}". Change the note in Settings.` : '';
+}
+const noteBanned = (phrase: string): string => `Your dealership's price note says "${phrase}"; change the note in Settings`;
 // "one owner", "1-owner", "single-owner", "one careful owner", "one
 // careful, loving owner", "one very careful adult owner" (up to three words
 // between, a comma after any but the last), "only one previous owner", "its
@@ -614,12 +760,8 @@ function withoutOwnSentenceNote(text: unknown, note: unknown): string {
 
 // The parts a text says are new or replaced, each with the words that say
 // so: "new tires", "new Michelin tires", "a new set of tires", "replaced
-// brakes", and each part joined straight on to one with "and" ("new tires
-// and brakes"). In the website's own words a list with commas counts too
-// ("new tires, brakes and rotors"); in the text it does not, since the
-// highlights line lists the website's features with commas ("New Tires,
-// Brake Assist").
-const AND_PARTS = new RegExp(`^\\s+(?:and|&|plus)\\s+(?:(?:front|rear)\\s+)?(${PARTS})\\b`, 'i');
+// brakes", and in the website's own words each part listed after one with a
+// comma, "and", "&" or "plus" ("new tires, brakes and rotors").
 const LISTED_PARTS = new RegExp(`^(?:\\s*,\\s*(?:and\\s+|&\\s+)?|\\s+(?:and|&|plus)\\s+)(?:(?:front|rear)\\s+)?(${PARTS})\\b`, 'i');
 const partKey = (part: string): string => oneLine(part).toLowerCase().replace(/(?:ies|ys|s|y)$/, '');
 function newPartsSaid(text: unknown, re: RegExp, more: RegExp): Array<{ said: string; part: string }> {
@@ -631,6 +773,84 @@ function newPartsSaid(text: unknown, re: RegExp, more: RegExp): Array<{ said: st
     for (let next = more.exec(t.slice(end)); next; next = more.exec(t.slice(end))) {
       end += next[0].length;
       out.push({ said: t.slice(m.index as number, end), part: partKey(next[1]) });
+    }
+  }
+  return out;
+}
+
+// In the text checked, the list after a "new <part>" claim is followed across
+// commas, "and", "&", "/", "+" and "plus": each next item that is a part on
+// its own (maybe after "the", "a", "an" or "both", "new", and "front",
+// "rear", "front and rear" or "front/rear"; "brake pads" and "brake rotors"
+// are one part each) is claimed too, and the list stops at anything else
+// ("HEMI engine", "Bosch wipers", "tires brakes"). The list never goes on
+// past a line break, apart from "and", "&" or "plus" with spaces around it
+// (tried first), after which "front" or "rear" may end its line, as before
+// the list was read. A listed part followed by words about its state
+// ("inspected", "look great", "are original") is not claimed; followed by a
+// newness word or anything else, it is. After a comma alone, one of the
+// car's own features as the website writes it ("Brake Assist") is that
+// feature, and the list goes on past it; a claim inside one of them ("New
+// Tires/Brakes") is the website's own words. An item without its own "new"
+// is quoted from the nearest "new" before it in the list, and each place a
+// list stands at is read once (a later list that reaches it would claim the
+// same parts again), so a very long list is read in a moment.
+const LIST_JOIN = /^(?:\s+(?:and|&|plus)\s+|[^\S\n]*,[^\S\n]*(?:(?:and|plus)[^\S\n]+|[&+/][^\S\n]*)?|[^\S\n]*[&+/][^\S\n]*)/i;
+const ONLY_A_COMMA = /^[^\S\n]*,[^\S\n]*$/;
+const AND_JOIN = /^\s+(?:and|&|plus)\s+$/i;
+const SP = '[^\\S\\n]'; // a space that is not a line break
+const listItem = (frontSpace: string): RegExp => new RegExp(`^(?:(?:the|a|an|both)${SP}+)?((?:brand(?:${SP}|-)+)?new${SP}+)?(?:(?:front${SP}*(?:and|&|\\/)${SP}*rear|rear${SP}*(?:and|&|\\/)${SP}*front)${SP}+|(?:front|rear)${frontSpace}+)?(${PARTS})\\b(?:(?<=brakes?)${SP}+(?:pads|rotors?)\\b)?`, 'i');
+const LIST_ITEM = listItem(SP);
+const LIST_ITEM_AFTER_AND = listItem('\\s');
+const BRAKE = /^brakes?$/i;
+const LIST_TAIL = new RegExp(`^${SP}+(?:pads|rotors?)\\b`, 'i');
+const LIST_STATE = new RegExp(`^${SP}+(?:(?:is|are|was|were|has|have|had|been|got|all|both|also)${SP}+){0,3}(?:inspected|checked|serviced|looks?|good|in${SP}+good${SP}+shape|original)\\b`, 'i');
+const ITEM_NEW = /(?:brand[\s-]+)?new\b/i;
+const FEATURE_ENDS = "(?=[^\\S\\n]*(?:[,.;:!?&+/)\\]}\"'\u2019\u201d\u2026\\n]|$)|\\s+(?:and|plus)\\b)";
+function featureSpans(t: string, features: unknown): Array<[number, number]> {
+  const own = [...new Set((Array.isArray(features) ? features : []).filter((f): f is string => typeof f === 'string').map((f) => oneLine(f).toLowerCase()).filter(Boolean))];
+  if (!own.length) return [];
+  const alt = own.sort((a, b) => b.length - a.length).map((f) => escapeRe(f).replace(/ /g, '\\s+')).join('|');
+  return [...t.matchAll(new RegExp(`(?<![\\p{L}\\p{N}])(?:${alt})${FEATURE_ENDS}`, 'giu'))].map((m): [number, number] => [m.index as number, (m.index as number) + m[0].length]);
+}
+function newPartsListed(text: unknown, re: RegExp, features: unknown): Array<{ said: string; part: string }> {
+  const t = String(text ?? '');
+  let spans: Array<[number, number]> | null = null;
+  const featuresIn = (): Array<[number, number]> => (spans = spans || featureSpans(t, features));
+  let starts: Map<number, [number, number]> | null = null;
+  const featureAt = (at: number): [number, number] | undefined => (starts = starts || new Map(featuresIn().map((f): [number, [number, number]] => [f[0], f]))).get(at);
+  // every place a list has stood at: what a list claims from there on depends on nothing else
+  const stood = new Set<number>();
+  const out: Array<{ said: string; part: string }> = [];
+  for (const m of t.matchAll(new RegExp(re.source, 'gi'))) {
+    const from = m.index as number;
+    let end = from + m[0].length;
+    const whole = featuresIn().find(([a, b]) => a <= from && b >= end);
+    if (whole) end = whole[1];
+    else {
+      out.push({ said: m[0], part: partKey(m[1]) });
+      const tail = BRAKE.test(m[1]) && LIST_TAIL.exec(t.slice(end));
+      if (tail) end += tail[0].length;
+    }
+    // where the nearest "new" before the next item starts: the claim's, or an item's that says "new" itself
+    let lead = from;
+    while (!stood.has(end)) {
+      stood.add(end);
+      const join = LIST_JOIN.exec(t.slice(end));
+      if (!join) break;
+      const at = end + join[0].length;
+      const feature = ONLY_A_COMMA.test(join[0]) && featureAt(at);
+      if (feature) {
+        end = feature[1];
+        continue;
+      }
+      const item = (AND_JOIN.test(join[0]) ? LIST_ITEM_AFTER_AND : LIST_ITEM).exec(t.slice(at));
+      if (!item) break;
+      const itemEnd = at + item[0].length;
+      if (LIST_STATE.test(t.slice(itemEnd))) break;
+      if (item[1]) lead = at + item[0].search(ITEM_NEW);
+      out.push({ said: t.slice(lead, itemEnd), part: partKey(item[2]) });
+      end = itemEnd;
     }
   }
   return out;
@@ -674,9 +894,10 @@ function claimProblems(text: string, ctx: GuardrailContext): GuardrailProblem[] 
     if (kind.what === 'certification' && listedCertified(ctx.vehicle)) continue;
     if (kind.part) {
       const said = new Set<string>();
-      // a part passes only when the website's own words say that part is new: naming it ("ABS Brakes") is not enough
-      const named = new Set(newPartsSaid(source, kind.re, LISTED_PARTS).map((p) => p.part));
-      for (const p of newPartsSaid(text, kind.re, AND_PARTS)) {
+      // a part passes only when the website's own words say that part is new: naming it ("ABS Brakes") is not enough;
+      // the price note stands in the text whole, so its own list is read the way the text's is
+      const named = new Set([...newPartsSaid(source, kind.re, LISTED_PARTS), ...newPartsListed(ctx.priceNote, kind.re, ctx.vehicle && ctx.vehicle.features)].map((p) => p.part));
+      for (const p of newPartsListed(text, kind.re, ctx.vehicle && ctx.vehicle.features)) {
         if (named.has(p.part) || said.has(p.part)) continue;
         said.add(p.part);
         problems.push({ code: 'unsupported-claim', text: `Says "${p.said}", but the website says nothing about ${kind.what} for this car` });
@@ -780,6 +1001,125 @@ export function spelledQuantities(text: unknown): Spelled[] {
 }
 const saysWords = (text: unknown, words: string): boolean => new RegExp(`\\b${escapeRe(oneLine(words)).replace(/[\s-]+/g, '[\\s-]+')}\\b`, 'i').test(String(text || ''));
 
+// ---------- numbers typed into Settings ----------
+// A number in the role or the salesperson's name, or a dealership name that
+// reads as a price or a mileage, is in every description and fails the
+// number, price or mileage check for nearly every car. The description still
+// fails; the reason names the setting, what it says and a way to write it.
+// (The extension's set-up and Settings warning, settingNumberWarning, is not
+// ported: no draft needs it.)
+const SMALL_NUMBERS: readonly string[] = Object.freeze(['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty']);
+const ORDINAL_WORDS: readonly string[] = Object.freeze(['', 'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth', 'eleventh', 'twelfth', 'thirteenth', 'fourteenth', 'fifteenth', 'sixteenth', 'seventeenth', 'eighteenth', 'nineteenth', 'twentieth']);
+const capitalize = (s: string): string => (s ? s[0].toUpperCase() + s.slice(1) : s);
+// The value with each number up to twenty, or "1st" to "20th", standing as
+// a word of its own, written as a word ("2nd shift sales" is "Second shift
+// sales"), with a capital at the start, where the word after it has one or,
+// with none after it, where the word before it has one; '' when a number is
+// left that no word stands in for ("24/7", "Route19", "#1", "$0", "0%", "2.0").
+const NUMBER_ALONE = /(?<=^|[\s(\[{"'\u2018\u201c])(\d{1,2})(st|nd|rd|th)?(?=$|[\s)\]}"'\u2019\u201d,;!?]|[.:](?:\s|$))/gi;
+const startsUpper = (c: string | undefined | null): boolean => Boolean(c) && c !== String(c).toLowerCase();
+export function numbersAsWords(value: unknown): string {
+  const v = oneLine(value);
+  const out = v.replace(NUMBER_ALONE, (said: string, n: string, nth: string | undefined, at: number) => {
+    const word = (nth ? ORDINAL_WORDS : SMALL_NUMBERS)[Number(n)];
+    if (!word) return said;
+    const before = v.slice(0, at);
+    if (!/[\p{L}\p{N}]/u.test(before)) return capitalize(word);
+    const next = /^[^\p{L}\p{N}]*(\p{L})/u.exec(v.slice(at + said.length));
+    const prev = /(\p{L})\p{L}*[^\p{L}\p{N}]*$/u.exec(before);
+    return startsUpper(next ? next[1] : prev && prev[1]) ? capitalize(word) : word;
+  });
+  return /\d/.test(out) ? '' : out;
+}
+// The name without its number, only where taking the number out leaves the
+// rest of the name as typed: digits after a letter in a word ("J2 Smith" is
+// "J Smith"), a number that is a word of its own at the end ("Sam 2"), or
+// one in brackets or quotes of its own ("Sam (2)"); '' for any other number
+// ("Sam 2nd shift", "Sam (Store 2)", "Sam-2"), for what has no letter, and
+// for brackets or quotes left unpaired.
+const NTH = '\\d+(?:st|nd|rd|th)?';
+const BARE_NUMBER = new RegExp(`^${NTH}$`, 'i');
+const OWN_BRACKETS = new RegExp(`^(?:\\(${NTH}\\)|\\[${NTH}\\]|\\{${NTH}\\}|"${NTH}"|'${NTH}'|\u2018${NTH}\u2019|\u201c${NTH}\u201d)$`, 'i');
+const AFTER_A_LETTER = /(?<=\p{L})\d+(?:(?:st|nd|rd|th)(?!\p{L}))?/giu;
+const timesIn = (text: string, c: string): number => text.split(c).length - 1;
+const paired = (text: string): boolean => [['(', ')'], ['[', ']'], ['{', '}'], ['\u201c', '\u201d']].every(([a, b]) => timesIn(text, a) === timesIn(text, b)) && timesIn(text, '"') % 2 === 0;
+export function nameWithoutNumber(value: unknown): string {
+  const words = oneLine(value).split(' ');
+  const kept: string[] = [];
+  for (const [i, word] of words.entries()) {
+    if (!/\d/.test(word)) kept.push(word);
+    else if (OWN_BRACKETS.test(word) || (BARE_NUMBER.test(word) && i === words.length - 1)) continue;
+    else {
+      const left = word.replace(AFTER_A_LETTER, '');
+      if (/\d/.test(left)) return '';
+      kept.push(left);
+    }
+  }
+  const out = kept.join(' ');
+  return /\p{L}/u.test(out) && paired(out) && /[\p{L}.)\]}"'\u2019\u201d]$/u.test(out) ? out : '';
+}
+type Setting = 'role' | 'name' | 'dealer';
+const SETTING_WORDS: Readonly<Record<Setting, Readonly<{ your: string; field: string; example: (value: unknown) => string; otherwise: string }>>> = Object.freeze({
+  role: Object.freeze({ your: 'Your role', field: 'Your role', example: numbersAsWords, otherwise: 'write the number as a word or leave it out' }),
+  name: Object.freeze({ your: 'Your name', field: 'Your name', example: nameWithoutNumber, otherwise: 'leave the number out' }),
+  dealer: Object.freeze({ your: "Your dealership's name", field: 'Dealership name', example: numbersAsWords, otherwise: 'write the number as a word' }),
+});
+// The example is offered only when the sign-off written with it gives the
+// checks no problem the sign-off with the plain role gives none of; it holds
+// no digit, so checking it never comes back here.
+const EXAMPLE_SLOT: Readonly<Record<Setting, 'title' | 'person' | 'dealerName'>> = Object.freeze({ role: 'title', name: 'person', dealer: 'dealerName' });
+function signOffCodes(slot: Partial<Record<'title' | 'person' | 'dealerName', string>>): Set<string> {
+  const s = { person: '', title: DEFAULT_SALESPERSON_TITLE, dealerName: '', ...slot };
+  const g = runGuardrails(signOffLine(s.person, s.title, s.dealerName), { salesperson: { name: s.person, title: s.title }, dealer: { name: s.dealerName } });
+  return new Set(g.problems.map((p) => p.code));
+}
+function exampleOf(setting: Setting, value: unknown): string {
+  const v = oneLine(value);
+  const example = SETTING_WORDS[setting].example(v);
+  if (!example || example === v) return '';
+  const plain = signOffCodes({});
+  return [...signOffCodes({ [EXAMPLE_SLOT[setting]]: example })].every((code) => plain.has(code)) ? example : '';
+}
+function settingNumberText(setting: Setting, value: string): string {
+  const w = SETTING_WORDS[setting];
+  const example = exampleOf(setting, value);
+  const how = example ? `, for example to "${example}"` : `: ${w.otherwise}`;
+  const why = setting === 'dealer'
+    ? 'reads as a price or a mileage, and every price and mileage in a description must match the listing'
+    : "has a number in it, and every number in a description must match the website's data for the car";
+  return `${w.your} "${value}" ${why}; change it in Settings (${w.field})${how}`;
+}
+// The text with each value set aside where it stands as words of its own:
+// "Sam 2" in "I'm Sam 2, ...", never the "2" of "12,000", "2,000" or "2.5".
+// A value with no letter ("2") can't be told from the description's own
+// numbers, so it is set aside only where the text says it once (the
+// sign-off), after the values with letters; said again, it stays.
+const asWords = (value: string): RegExp => new RegExp(`(?<![\\p{L}\\p{N}]|\\p{N}[.,])${escapeRe(value).replace(/ /g, '\\s+')}(?![\\p{L}\\p{N}]|[.,]\\p{N})`, 'giu');
+const hasLetter = (value: string): boolean => /\p{L}/u.test(value);
+const setAside = (text: string, values: string[]): string => [...values].sort((a, b) => Number(hasLetter(b)) - Number(hasLetter(a))).reduce((out, value) => {
+  const re = asWords(value);
+  return !hasLetter(value) && (out.match(re) || []).length > 1 ? out : out.replace(re, ' ');
+}, text);
+// The problems the text no longer gives with every such setting set aside
+// (gone), and one problem for each setting that, with the others set aside,
+// still gives one of those; nothing is set aside when no setting is to blame.
+function settingNumberProblems(prose: string, check: (text: string) => GuardrailProblem[], { role, name, dealerName }: { role: unknown; name: unknown; dealerName: unknown }): { problems: GuardrailProblem[]; gone: Set<string> } {
+  const none = { problems: [] as GuardrailProblem[], gone: new Set<string>() };
+  const settings = ([['role', oneLine(role)], ['name', oneLine(name)], ['dealer', oneLine(dealerName)]] as [Setting, string][]).filter(([, value]) => /\d/.test(value));
+  if (!settings.length) return none;
+  const said = (text: string) => new Set(check(text).map((p) => p.text));
+  const aside = (list: [Setting, string][]) => said(setAside(prose, list.map(([, value]) => value)));
+  const rest = aside(settings);
+  const gone = new Set([...said(prose)].filter((t) => !rest.has(t)));
+  if (!gone.size) return none;
+  const blamed = settings.filter((s) => {
+    const alone = aside(settings.filter((o) => o !== s));
+    return [...gone].some((t) => alone.has(t));
+  });
+  if (!blamed.length) return none;
+  return { problems: blamed.map(([setting, value]) => ({ code: 'setting-number', text: settingNumberText(setting, value) })), gone };
+}
+
 /**
  * Checks a description against the source data. Returns { ok, problems, words }.
  * Every problem has a code and a short plain-English text.
@@ -793,11 +1133,14 @@ export function runGuardrails(text: unknown, { vehicle = {}, dealer = {}, salesp
   if (words > WORD_LIMITS.max) problems.push({ code: 'too-long', text: `${words} words; the limit is ${WORD_LIMITS.max}` });
 
   const src = sourceNumbers({ vehicle, dealer, priceNote, price });
-  for (const n of numbersIn(prose)) {
-    if (!src.has(n)) problems.push({ code: 'unknown-number', text: `"${n}" isn't in the website's data for this car` });
-  }
-  // the car's own words: without the dealership's name, its city, the store the website lists the car at and the role, which are not claims about it
+  const unknownNumbers = (text: string): GuardrailProblem[] => [...numbersIn(text)].filter((n) => !src.has(n)).map((n) => ({ code: 'unknown-number', text: `"${n}" isn't in the website's data for this car` }));
+  const amountProblems = (text: string): GuardrailProblem[] => [...priceAndMileageProblems(text, { vehicle, priceNote, price }), ...bareAmountProblems(text, { vehicle, dealer, priceNote, price }, src)];
   const role = roleOf(salesperson);
+  // a number problem that comes only from the role, the name or the dealership's name is said as one reason naming that setting
+  const fromSettings = settingNumberProblems(prose, (text) => [...unknownNumbers(text), ...amountProblems(text)], { role, name: salesperson && salesperson.name, dealerName: dealer.name });
+  const notFromSettings = (p: GuardrailProblem) => !fromSettings.gone.has(p.text);
+  problems.push(...fromSettings.problems, ...unknownNumbers(prose).filter(notFromSettings));
+  // the car's own words: without the dealership's name, its city, the store the website lists the car at and the role, which are not claims about it
   // with each run of spaces read as one, so "Driven  by" is read like "Driven by"
   const aboutCar = without(prose, [dealer.name, dealer.city, vehicle.location, role]).replace(/[^\S\n]+/g, ' ');
   const sourceWords = claimSource({ vehicle, priceNote });
@@ -808,8 +1151,7 @@ export function runGuardrails(text: unknown, { vehicle = {}, dealer = {}, salesp
     spelled.add(words);
     problems.push({ code: 'unknown-number', text: `"${oneLine(q.words)}" isn't in the website's data for this car` });
   }
-  problems.push(...priceAndMileageProblems(prose, { vehicle, priceNote, price }));
-  problems.push(...bareAmountProblems(prose, { vehicle, dealer, priceNote, price }, src));
+  problems.push(...amountProblems(prose).filter(notFromSettings));
   // The price note is the dealer's wording. When it quotes a dollar amount and
   // the website shows two prices for this car, the amount must be their
   // difference; a note written for one fee must not ride on a car with another.
@@ -844,7 +1186,8 @@ export function runGuardrails(text: unknown, { vehicle = {}, dealer = {}, salesp
   const besideOwnNote = noteSaid ? withoutOwnSentenceNote(t, noteSaid) : t;
   for (const [phrase, re] of BANNED_RE) {
     if (re.test(besideNote)) problems.push({ code: 'banned-phrase', text: `Says "${phrase}"` });
-    else if (noteSaid && (NOTE_BANNED_RE.get(phrase) as RegExp).test(noteSaid)) problems.push({ code: 'banned-phrase', text: `Your dealership's price note says "${phrase}"; change the note in Settings` });
+    else if (noteSaid && (NOTE_BANNED_RE.get(phrase) as RegExp).test(noteSaid)) problems.push({ code: 'banned-phrase', text: noteBanned(phrase) });
+    else if (noteSaid && noteSteer(phrase, noteSaid, dealer, priceNote)) problems.push({ code: 'banned-phrase', text: noteSteer(phrase, noteSaid, dealer, priceNote) });
     else if (!re.test(t)) continue;
     else if (!(noteSaid && re.test(noteSaid))) problems.push({ code: 'banned-phrase', text: `Says "${phrase}"` });
     else if (re.test(besideOwnNote)) problems.push({ code: 'banned-phrase', text: `Says "${phrase}" with words joined to your price note's sentence; keep the note as a sentence of its own: end the sentence before it, and start the one after it with a capital letter` });

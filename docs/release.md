@@ -1,6 +1,6 @@
 # Releasing a version
 
-Every version ships the same way. A person writes the release notes, `npm run release` stamps the number and packs the zip, and a person commits, tags and uploads. The script never commits, tags, pushes or uploads anything.
+Every version ships the same way. A person writes the release notes, `npm run release` stamps the number and packs the two zips (the one for the store, and the pilot zip for testers, which offers no sign-in), and a person commits, tags and uploads. The script never commits, tags, pushes or uploads anything.
 
 ## The checklist, in order
 
@@ -11,10 +11,12 @@ Every version ships the same way. A person writes the release notes, `npm run re
    - `CHANGELOG.md` has no `## 0.6.0 (` heading, or a newer version sits above it, or `## Unreleased` is missing, below it or still holds entries (they ship in 0.6.0, so they belong under its heading);
    - the README's first line does not carry the new major and minor number.
 
-   Then it writes the version into `extension/manifest.json`, `package.json` and both places in `package-lock.json`, runs `npm test` and `npm run pack`, and prints the next steps. If the tests or the pack fail, it puts the three files back as they were.
+   Then it writes the version into `extension/manifest.json`, `package.json` and both places in `package-lock.json`, runs `npm test`, `npm run pack` and `npm run pack -- --pilot`, and prints the next steps. If the tests or either pack fail, it puts the three files back as they were and removes a zip it packed in that run, so a release that stops leaves no zip of a version nothing is stamped with.
 
    **A build that names the account project.** When `extension/src/accountConfig.js` names a Supabase project (`npm run set-project` filled it in), the build shows the optional Account step in the first-run wizard and sign-in under Settings, and the printed steps say so. That sign-in works only once the project is set up, so hand such a build to no tester and upload it nowhere before `docs/production-setup.md` steps 3 to 5 are done and `npm run check-deploy` shows no FAIL. The config cannot simply be emptied for the meantime: the Supabase deploy workflow refuses a project the committed config does not name.
-3. **The end-to-end flows and the sandbox drive**: `npm run test:e2e`, then `npm run test:demo`, with Playwright's Chromium (README, "For development"). Both must pass before the commit. CI runs them again after the push.
+
+   **The pilot zip** is the build testers get meanwhile. `npm run pack -- --pilot`, which the release runs after `npm run pack`, writes `dist/lot-current-extension-0.6.0-pilot.zip`: the normal zip's files, byte for byte, except `src/accountConfig.js`, whose `url`, `anonKey` and `functionsUrl` are left empty in the zip only, with one comment line at its top saying so. The committed file is only read, never changed. That copy has no Account step in set-up and one line under **Settings**, **Account** ("Accounts are not set up yet") instead of a sign-in, and nothing syncs. (With the rewrite service turned on in Settings, it still asks the service at the address the synced profile holds, as any build does.) Before it writes anything, the pack loads the emptied file as a module and refuses, with the reason, when it would not turn accounts off or when the committed file no longer has the shape it rewrites (`scripts/pilot-config.mjs`; change that file and `test/pilotPack.test.js` with it). Typed without the `--` (`npm run pack --pilot`), the option goes to npm instead of the pack; the pack sees that and refuses, as it refuses an option it does not know, rather than pack the zip with sign-in. The normal pack's own line ends "offers sign-in" whenever the committed file names an account project, so a misspelled option npm kept for itself is still noticed. The release packs it itself, rather than printing the command, so the testers' zip comes from the same files in the same run as the store zip and a release never ends with only a zip that offers sign-in. `npm run store-check` checks the pilot zip whenever it is in `dist/`: one account config, exactly the text the pilot pack makes of today's file (the zip's own copy is compared, never run). The store never gets it.
+3. **The end-to-end flows and the sandbox drive**: `npm run test:e2e`, then `npm run test:demo`, with Playwright's Chromium (README, "For development"). Then set-up on the pilot zip: `npm run test:e2e:wizard -- --zip dist/lot-current-extension-0.6.0-pilot.zip` runs the wizard flow on that zip's own files and checks there is no Account step and no sign-in under Settings. All must pass before the commit. CI runs the flows and the drive again after the push, packs and checks both zips, and runs set-up on the pilot zip in the wizard flow's job.
 4. **Commit and tag**, as the script prints them:
 
    ```
@@ -24,9 +26,9 @@ Every version ships the same way. A person writes the release notes, `npm run re
    git push --follow-tags
    ```
 
-5. **Upload the zip.** In the Chrome Web Store Developer Dashboard: Lot Current, Package, Upload new package, choose `dist/lot-current-extension-0.6.0.zip`, then Submit for review. Upload the zip the script packed from the tagged files, not one rebuilt later. The first submission also needs every box in `store/listing.md`, "Before submitting", ticked.
+5. **Upload the zip.** In the Chrome Web Store Developer Dashboard: Lot Current, Package, Upload new package, choose `dist/lot-current-extension-0.6.0.zip` (the normal zip, never the `-pilot` one), then Submit for review. Upload the zip the script packed from the tagged files, not one rebuilt later. The first submission also needs every box in `store/listing.md`, "Before submitting", ticked.
 6. **Unlisted first.** Visibility is Unlisted for the pilot and the design partners. It goes Public only after the review passes and the owner says so. Check the visibility on the Distribution page before submitting an update.
-7. **Testers on the zip** get the same file. The README's "Update" section says how to replace the files and reload.
+7. **Testers** get `dist/lot-current-extension-0.6.0-pilot.zip` until `docs/production-setup.md` steps 3 to 5 are done and `npm run check-deploy` shows no FAIL, and for as long as `PILOT.md` keeps the pilot signed out ("No sign-in while the texts are drafts"). After that they get the same file as the store. Both are the same extension, so either can be unzipped over the other in the same folder; the README's "Update" section says how to replace the files and reload.
 
 ## What to watch after
 

@@ -1,6 +1,6 @@
 import { assessVehicle, DECISION } from './src/classify.js';
-import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, listingStatus, settleDiff, postedBasis, withPostedBasis, markLookDismissed, withWithheld, withheldOffer, acceptWithheld } from './src/rescan.js';
-import { draftPrice, markDraftPosted, draftPriceUpdate, withPriceUpdate, draftPill } from './src/drafts.js';
+import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, listingLine, settleDiff, postedBasis, withPostedBasis, markLookDismissed, withWithheld, withheldOffer, acceptWithheld, scanCar, priceItemWaits } from './src/rescan.js';
+import { draftPrice, markDraftPosted, draftPriceUpdate, withPriceUpdate, draftPill, draftScanCar } from './src/drafts.js';
 import { performScan, keepSeenBasis } from './src/scanRunner.js';
 import { todoCountFor, originsFor } from './src/rescanSchedule.js';
 import { askChrome } from './src/askChrome.js';
@@ -8,7 +8,7 @@ import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile,
 import { capStatus, capCount, logPost, askWhenListed, DEFAULT_DAILY_CAP } from './src/cap.js';
 import { noteTakenDown, stillListedNow } from './src/takenDown.js';
 import { TITLE_STATUSES, CONDITIONS } from './src/listingData.js';
-import { checkClosingLine, cleanClosingLine, CLOSING_LINE_MAX_WORDS } from './src/rewriteTemplate.js';
+import { checkClosingLine, cleanClosingLine, CLOSING_LINE_MAX_WORDS, settingNumberWarning, settingNumberNotice, priceNoteWarning, priceNoteNotice } from './src/rewriteTemplate.js';
 import { createQueue, currentVin, describe as describeQueue } from './src/queue.js';
 import { FORM_MAP, applyOverrides } from './facebook/formMap.js';
 import { listingLink } from './facebook/detectPost.js';
@@ -411,14 +411,15 @@ function empty(text) {
 // "Post" opens the guided flow in the side panel (only for ready cars). "Mark
 // posted" is for a listing the salesperson made by hand, or published from a
 // draft: the draft's pill shows the price it was filled with, and says so
-// when the website's price moved or the car is not ready any more.
+// when the website's price moved (on a scan taken since the draft was
+// filled: src/drafts.js draftScanCar) or the car is not ready any more.
 function postButton(vin, { canPost = true } = {}) {
   const theirs = colleagueEntry(vin);
   if (theirs) return `<span class="pill" title="A colleague's listing: theirs to update or take down">Posted by ${byWhom(theirs)}</span>`;
   if (state.posted[vin]) return `<button type="button" class="small" data-action="unpost" data-vin="${esc(vin)}" title="Click to unmark. A post recorded today still counts toward today's cap.">Posted ✓</button>`;
   if (state.markAsk === vin) return markChoice(vin);
   if (state.drafts[vin]) {
-    const pill = draftPill(state.drafts[vin], state.snapshot?.vehicles?.[vin], { basis: state.settings?.basis, ready: canPost });
+    const pill = draftPill(state.drafts[vin], draftScanCar(state.drafts[vin], state.snapshot, vin), { basis: state.settings?.basis, ready: canPost });
     return `<span class="actions"><span class="pill ${pill.tone}" title="${esc(pill.title)}">${esc(pill.text)}</span><button type="button" class="small go" data-action="post" data-vin="${esc(vin)}">Mark posted</button></span>`;
   }
   const capReached = dailyCap().reached;
@@ -522,16 +523,22 @@ function viewTodo(l) {
   const updates = d?.priceUpdates || [];
   if (updates.length) {
     parts.push(
-      section('Update price', 'warn', updates.map((p) =>
-        row(p, {
-          sub: (p.yours ? 'Your listing' : colleagueEntry(p.vin) ? `Posted by ${byWhom(colleagueEntry(p.vin))}` : 'Not marked as posted') + (p.stock ? ' · Stock ' + esc(p.stock) : ''),
-          right: `${money(p.from)} → <b>${money(p.to)}</b> <span class="${p.change < 0 ? 'down' : 'up'}">${signedMoney(p.change)}</span>`,
-          action: p.yours
-            ? `<span class="actions"><button type="button" class="small go" data-action="upkeep" data-kind="price" data-vin="${esc(p.vin)}" data-price="${p.to}" title="Opens your listing with the new price ready to fill in; you click Update">Open &amp; update price</button><button type="button" class="small" data-action="priceUpdated" data-vin="${esc(p.vin)}" data-price="${p.to}">Updated</button></span>`
+      section('Update price', 'warn', updates.map((p) => {
+        // an item worked out on a scan taken before your listing got the price it carries (updated on another
+        // computer since and brought by sync: src/rescan.js priceItemWaits) is the listing and the website as they
+        // were then: as on My listings, its price waits for the next scan, with neither price of that scan named
+        // and nothing to record or fill
+        const entry = state.posted[p.vin];
+        const waits = priceItemWaits(p, entry, d);
+        return row(p, {
+          sub: (waits ? '<span class="pill">Price compared at the next scan</span> ' : '') + (p.yours ? 'Your listing' : colleagueEntry(p.vin) ? `Posted by ${byWhom(colleagueEntry(p.vin))}` : 'Not marked as posted') + (p.stock ? ' · Stock ' + esc(p.stock) : ''),
+          right: waits ? `Listed ${money(entry.price)}` : `${money(p.from)} → <b>${money(p.to)}</b> <span class="${p.change < 0 ? 'down' : 'up'}">${signedMoney(p.change)}</span>`,
+          action: p.yours && !waits
+            ? `<span class="actions"><button type="button" class="small go" data-action="upkeep" data-kind="price" data-vin="${esc(p.vin)}" data-price="${p.to}" title="Opens your listing with the new price ready to fill in; you click Update">Open &amp; update price</button><button type="button" class="small" data-action="priceUpdated" data-vin="${esc(p.vin)}" data-price="${p.to}"${p.basis ? ` data-basis="${esc(p.basis)}"` : ''}>Updated</button></span>`
             : '',
           muted: !p.yours,
-        })
-      ))
+        });
+      }))
     );
   }
   const now = Date.now();
@@ -752,23 +759,24 @@ function viewMine(l) {
     lead +
     rows(
       l.mine.map((p) => {
-        const now = p.now;
-        // the basis this listing was posted at (src/rescan.js postedBasis; an entry with none reads it off the last scan),
-        // so a switch of Price to post is not shown (or recorded) as a change
-        const own = postedBasis(p, state.settings?.basis, now ? [now] : []);
-        const site = now ? basisPrice(now, own) : null;
+        // the line from the last scan (src/rescan.js listingLine): the website price on the basis this listing was
+        // posted at, so a switch of Price to post is not shown (or recorded) as a change. An entry with none reads it
+        // off that scan only when it was taken once the listing had its price (scanCar), as the rescan does. A scan
+        // from before (`compared` false) names no website price, whatever it says about the car, and a price that
+        // differs waits for the next scan, so Updated never records it.
+        // Sold, sale-pending or held back by the pre-owned check come before a price change (listingStatus).
+        const { now, basis: own, compared, site, status } = listingLine(p, state.snapshot, p.vin, state.settings?.basis);
         const other = own !== postedBasis(null, state.settings?.basis) ? ` · posted at ${own === 'beforeFees' ? 'the lower second price' : "the website's main price"}; your price setting now applies to new posts` : '';
-        // sold, sale-pending or held back by the pre-owned check come before a price change (src/rescan.js listingStatus)
-        const status = listingStatus(now, p.price, site);
-        const pill = `<span class="pill ${status.tone}">${esc(status.text)}</span>`;
-        const extra = status.priceChanged ? `<button type="button" class="small go" data-action="priceUpdated" data-vin="${esc(p.vin)}" data-price="${site}">Updated</button>` : '';
+        const pill = `<span class="pill${status.tone ? ' ' + status.tone : ''}">${esc(status.text)}</span>`;
+        // Updated records the price with the basis it is on, kept on a listing that carries none (src/rescan.js markPriceUpdated)
+        const extra = status.priceChanged ? `<button type="button" class="small go" data-action="priceUpdated" data-vin="${esc(p.vin)}" data-price="${site}" data-basis="${esc(own)}">Updated</button>` : '';
         const entry = { name: p.name, url: now?.url };
         const link = openListing(p.listingUrl);
         const refused = notShared(p);
         return row(entry, {
           sub: `${pill} ${p.listedBefore ? `Listed before ${esc(day(p.postedAt))}` : `Posted ${esc(when(p.postedAt))}`}${p.updatedAt ? ' · price updated ' + esc(when(p.updatedAt)) : ''}${esc(other)}${link}`,
           line: refused ? `<span class="notShared" style="color: var(--bad)">${notSharedText(refused)}</span>` : '',
-          right: `Listed ${money(p.price)}${now && site !== p.price ? `<br>Website ${money(site)}` : ''}`,
+          right: `Listed ${money(p.price)}${now && compared && site !== p.price ? `<br>Website ${money(site)}` : ''}`,
           action: `${extra}<button type="button" class="small" data-action="takenDown" data-vin="${esc(p.vin)}">Taken down</button>`,
         });
       })
@@ -850,6 +858,63 @@ function viewPilot() {
 
 const field = (label, name, value, attrs = 'type="text"') =>
   `<label class="field"><span class="k">${esc(label)}</span><input name="${name}" value="${esc(value)}" ${attrs} /></label>`;
+// A number in the role or the name, or a dealership name that reads as a
+// price or a mileage, is in every description and keeps the Marketplace form
+// shut for nearly every car (src/rewriteTemplate.js settingNumberWarning).
+// Settings says so under the field, and the input is described by that
+// warning, when the form is drawn and as the person types; Save still saves
+// it. The warning quotes the number and a way to write the value, so it
+// changes on nearly every key; a screen reader is told through a live region
+// of its own beside it (<name>Say), written only when the warning comes or
+// goes, so it is spoken once, not on every key. Set-up's You and address
+// steps say the same (wizard.js).
+// A role or a name whose numbers the dealership's name, city and ZIP all hold
+// passes (the number check reads them as facts), so their warnings follow
+// those fields too: `dealer` is the dealership as the form holds it now.
+const WARNED_FIELDS = Object.freeze({ salespersonName: 'name', salespersonTitle: 'role', dealerName: 'dealer' });
+const DEALER_FIELDS = Object.freeze({ dealerName: 'name', dealerCity: 'city', dealerZip: 'zip' });
+function settingWarningHtml(name, value, dealer) {
+  const text = settingNumberWarning(WARNED_FIELDS[name], value, dealer);
+  return text ? `<div class="banner warn">${esc(text)}</div>` : '';
+}
+const settingNotice = (name, value, dealer) => settingNumberNotice(WARNED_FIELDS[name], value, dealer);
+const settingWarning = (name, value, dealer) => `<div id="${name}Warn">${settingWarningHtml(name, value, dealer)}</div><div id="${name}Say" class="sr" aria-live="polite">${esc(settingNotice(name, value, dealer))}</div>`;
+// A price note that says "not the dealer" may say only where the fees go and
+// what the price includes (src/rewriteTemplate.js priceNoteWarning): Settings
+// says so under the note, read with the dealership's name and city as the
+// form holds them, when the form is drawn and as the note or the dealership
+// is typed; Save still saves it. Its live region (priceNoteSay) leaves out
+// the quoted words, so it is spoken once, when the warning comes or goes.
+// Set-up's price step says the same (wizard.js).
+const noteWarningHtml = (note, dealer) => {
+  const text = priceNoteWarning(note, dealer);
+  return text ? `<div class="banner warn">${esc(text)}</div>` : '';
+};
+const noteWarning = (note, dealer) => `<div id="priceNoteWarn">${noteWarningHtml(note, dealer)}</div><div id="priceNoteSay" class="sr" aria-live="polite">${esc(priceNoteNotice(note, dealer))}</div>`;
+// Typing in one of these fields (or the price note): each warning brought up
+// to date from what the form holds now (the saved Settings for a box it
+// can't read). The warning under a field follows every key; its live region
+// is written only when what it says changes, that is when the warning comes
+// or goes, since a screen reader speaks every write.
+function refreshSettingWarnings(target) {
+  const saved = withDefaults(state.settings || {}, knownSite());
+  const savedValues = { salespersonName: saved.salesperson.name, salespersonTitle: saved.salesperson.title, dealerName: saved.dealer.name, dealerCity: saved.dealer.city, dealerZip: saved.dealer.zip, priceNote: saved.priceNote };
+  const box = (name) => (target.form && target.form.elements && typeof target.form.elements.namedItem === 'function' ? target.form.elements.namedItem(name) : null);
+  const now = (name) => (name === target.name ? target.value : (box(name) || { value: savedValues[name] }).value);
+  const dealer = Object.fromEntries(Object.entries(DEALER_FIELDS).map(([name, key]) => [key, now(name)]));
+  for (const name of Object.keys(WARNED_FIELDS)) {
+    const shown = $(`${name}Warn`);
+    if (shown) shown.innerHTML = settingWarningHtml(name, now(name), dealer);
+    const say = $(`${name}Say`);
+    const notice = settingNotice(name, now(name), dealer);
+    if (say && say.textContent !== notice) say.textContent = notice;
+  }
+  const noteShown = $('priceNoteWarn');
+  if (noteShown) noteShown.innerHTML = noteWarningHtml(now('priceNote'), dealer);
+  const noteSay = $('priceNoteSay');
+  const noteNotice = priceNoteNotice(now('priceNote'), dealer);
+  if (noteSay && noteSay.textContent !== noteNotice) noteSay.textContent = noteNotice;
+}
 const choices = (list, current) =>
   `<option value="" ${current === '' ? 'selected' : ''}>Leave blank</option>` + list.map((o) => `<option value="${esc(o)}" ${o === current ? 'selected' : ''}>${esc(o)}</option>`).join('');
 
@@ -965,9 +1030,11 @@ function viewSettings() {
   return `<form id="settings" class="settings">
     ${versionHtml()}
     <fieldset><legend>You</legend>
-      ${field('Your name', 'salespersonName', s.salesperson.name, 'type="text" placeholder="Your first name"')}
-      ${field('Your role', 'salespersonTitle', s.salesperson.title, 'type="text"')}
-      <p class="hint">Every description ends with "I'm [name], [role] at [dealership]". Posing as a private seller isn't allowed.</p>
+      ${field('Your name', 'salespersonName', s.salesperson.name, 'type="text" placeholder="Your first name" aria-describedby="salespersonNameWarn"')}
+      ${settingWarning('salespersonName', s.salesperson.name, s.dealer)}
+      ${field('Your role', 'salespersonTitle', s.salesperson.title, 'type="text" aria-describedby="salespersonTitleWarn"')}
+      ${settingWarning('salespersonTitle', s.salesperson.title, s.dealer)}
+      <p class="hint">Every description is signed "I'm [name], [role] at [dealership]". Posing as a private seller isn't allowed.</p>
       ${field('Your closing line (optional)', 'closingLine', s.salesperson.closingLine, `type="text" maxlength="300" aria-describedby="closingLineHint" placeholder="e.g. Ask for me by name when you come in."`)}
       <p class="hint" id="closingLineHint">Added after that sign-off on every description, in place of "Message me to set up a test drive or ask a question." About you, not the car: no prices or numbers (a phone number is fine), up to ${CLOSING_LINE_MAX_WORDS} words. Follows you to any computer you sign in to Chrome on.</p>
     </fieldset>
@@ -980,7 +1047,8 @@ function viewSettings() {
       <p class="hint">Counted from the in-stock date the website gives for the car, or else from the scan that first saw it. A car you have posted is never marked new. ${MIN_NEW_DAYS} to ${MAX_NEW_DAYS} days; kept for this website only, so it does not follow your profile to another website. The order of the Ready to post list is remembered the same way.</p>
     </fieldset>
     <fieldset><legend>Dealership, named on every listing</legend>
-      ${field('Dealership name', 'dealerName', s.dealer.name, state.snapshot ? undefined : 'type="text" placeholder="Filled in from the website at the first scan"')}
+      ${field('Dealership name', 'dealerName', s.dealer.name, `type="text"${state.snapshot ? '' : ' placeholder="Filled in from the website at the first scan"'} aria-describedby="dealerNameWarn"`)}
+      ${settingWarning('dealerName', s.dealer.name, s.dealer)}
       ${field('City', 'dealerCity', s.dealer.city)}
       ${field('State', 'dealerState', s.dealer.state, 'type="text" placeholder="e.g. OH" maxlength="2"')}
       ${field('ZIP', 'dealerZip', s.dealer.zip, 'type="text" placeholder="e.g. 43215" inputmode="numeric"')}
@@ -994,8 +1062,9 @@ function viewSettings() {
       ${basisNote()}`
         : ''}
       ${feeNote}
-      ${field('Price note in every description', 'priceNote', s.priceNote, `type="text" placeholder="${esc(suggested || 'e.g. Tax and tags extra.')}"`)}
-      <p class="hint">Honest prices: the listed price always equals the website price. This note explains what it includes.${suggested ? ` Suggested: "${esc(suggested)}"` : ''}</p>
+      ${field('Price note in every description', 'priceNote', s.priceNote, `type="text" placeholder="${esc(suggested || 'e.g. Tax and tags extra.')}" aria-describedby="priceNoteWarn priceNoteHint"`)}
+      ${noteWarning(s.priceNote, s.dealer)}
+      <p class="hint" id="priceNoteHint">Honest prices: the listed price always equals the website price. This note explains what it includes.${suggested ? ` Suggested: "${esc(suggested)}"` : ''}</p>
     </fieldset>
     <fieldset><legend>Listing defaults</legend>
       <label class="field"><span class="k">Title status</span><select name="defaultTitleStatus">${choices(TITLE_STATUSES, s.defaults.titleStatus)}</select></label>
@@ -1218,7 +1287,9 @@ async function onPanelClick(ev) {
       if (btn.dataset.action === 'post') setStatus(`Recorded as posted today: Lot Current filled the form for ${entry.name || 'this car'} today or recorded it earlier today, so it counts toward today's posts.`);
       else if (before) setStatus(`Recorded as listed before today: rescans watch ${entry.name || 'it'}, and it doesn't count toward today's posts.`);
       if (draft) {
-        const gap = draftPriceUpdate(draft, entry, basis);
+        // compared with the last scan only when it was taken once the listing had its price (the draft filled: the entry's
+        // draftSavedAt, src/rescan.js scanCar), as My listings compares it: a scan from before names no price to update
+        const gap = draftPriceUpdate(draft, scanCar(state.posted[vin], state.snapshot, vin), basis);
         if (gap) {
           await update('diff', (d) => withPriceUpdate(d, gap)); // on To do now; every rescan lists it too until the listing is updated
           setStatus(`Recorded at ${money(gap.from)}, the price the draft was filled with. The website now shows ${money(gap.to)}: update the price on the listing (To do, Update price).`, 'error');
@@ -1409,7 +1480,8 @@ async function onPanelClick(ev) {
       break;
     }
     case 'priceUpdated':
-      if (!(await update('posted', (p) => markPriceUpdated(p || {}, vin, Number(btn.dataset.price))))) break;
+      // the price, and the basis it was worked out on for a listing that carries none (the item's, or My listings' line)
+      if (!(await update('posted', (p) => markPriceUpdated(p || {}, vin, Number(btn.dataset.price), undefined, btn.dataset.basis)))) break;
       if (!(await notePilot((p) => resolveFlag(p, vin, 'price', { how: 'manual' })))) break;
       if (!(await update('diff', (d) => withoutVin(d, vin, ['priceUpdates'])))) break;
       syncInBackground();
@@ -1752,8 +1824,13 @@ async function init() {
     if (ev.target.id === 'pickAll' || ev.target.classList.contains('pick')) onPickChange(ev.target);
     else if (ev.target.id === 'readySort') changeReadySort(ev.target.value);
   });
-  // the Ready tab's search box: filters as you type, Escape clears it
+  // the Ready tab's search box: filters as you type, Escape clears it; in
+  // Settings, the warning under the name, role, dealership name or price note follows the typing
   $('panel').addEventListener('input', (ev) => {
+    if (Object.hasOwn(WARNED_FIELDS, ev.target.name) || Object.hasOwn(DEALER_FIELDS, ev.target.name) || ev.target.name === 'priceNote') {
+      refreshSettingWarnings(ev.target);
+      return;
+    }
     if (ev.target.id !== 'readySearch') return;
     state.readyFilter = ev.target.value;
     renderReadyBody();
