@@ -2129,11 +2129,12 @@ function fieldsTable() {
   if (need.exterior || need.interior) {
     const rw = state.settings.rewrite;
     const cg = state.colorGuess;
+    const rwOff = !(rw.enabled && rw.endpoint);
     const which = [need.exterior && 'exterior', need.interior && 'interior'].filter(Boolean).join(' and ');
     const status = cg && cg.error ? `Photo guess failed: ${esc(cg.error)}.` : cg && (cg.exterior || cg.interior) ? `Guessed from the photos with ${esc(cg.confidence)} confidence.` : '';
     colorHint = `<p class="hint" id="colorHint">The website gives no usable ${which} color. ${status}
-      <button type="button" class="copy" id="guessColors" ${rw.enabled && rw.endpoint ? '' : 'disabled title="Turn on the rewrite service in Settings first"'}>${cg && (cg.exterior || cg.interior) ? 'Guess again from the photos' : 'Guess from the photos'}</button>
-      ${rw.enabled && rw.endpoint ? '' : ' (needs the rewrite service; otherwise pick it on the form)'}</p>`;
+      <button type="button" class="copy" id="guessColors" ${rwOff ? 'aria-disabled="true" aria-describedby="guessOffHint"' : ''}>${cg && (cg.exterior || cg.interior) ? 'Guess again from the photos' : 'Guess from the photos'}</button>
+      ${rwOff ? ' <span id="guessOffHint">(needs the rewrite service; otherwise pick it on the form)</span>' : ''}</p>`;
   }
   return `<table class="fields">${rows}<tr><td>Photos</td><td id="photoCount">${l.photos.length} picked from the website</td></tr></table>${locationHint}${colorHint}`;
 }
@@ -2355,6 +2356,7 @@ function viewReview() {
   const waits = Boolean(state.brandingRun) && !formOff;
   const waitsOff = waits ? ' disabled' : '';
   const rw = state.settings.rewrite;
+  const rwOff = !(rw.enabled && rw.endpoint);
   return `${relistHtml()}${carCard()}${readAgainHtml()}
   <section>
     <h3 id="descriptionLabel">Description ${sourcePill()}</h3>
@@ -2362,10 +2364,11 @@ function viewReview() {
     <textarea id="description" spellcheck="true" aria-labelledby="descriptionLabel">${esc(state.description)}</textarea>
     ${checksHtml(state.guardrails, state.descriptionSource)}
     <div class="actions">
-      <button type="button" class="plain" id="rewrite" ${rw.enabled && rw.endpoint ? '' : 'disabled title="Turn on the rewrite service in Settings first"'}>Rewrite with Claude</button>
+      <button type="button" class="plain" id="rewrite" ${rwOff ? 'aria-disabled="true" aria-describedby="rewriteOffHint"' : ''}>Rewrite with Claude</button>
       <button type="button" class="plain" id="resetTemplate">Reset to template</button>
       <button type="button" class="plain" id="copyDescription">Copy</button>
     </div>
+    ${rwOff ? `<p class="hint" id="rewriteOffHint">Rewrite with Claude and Guess from the photos need the rewrite service, which is off. Click the Lot Current icon in Chrome's toolbar, then Settings, and turn it on.</p>` : ''}
     <p class="hint">Edit anything you like; your edits are kept. Facts only: every number is checked against the website.</p>
     ${highlightsHtml()}
   </section>
@@ -3071,6 +3074,7 @@ async function copy(text) {
 async function onClick(ev) {
   const btn = ev.target.closest('button');
   if (!btn) return;
+  if (btn.ariaDisabled === 'true') return undefined; // drawn off (the reason is under the buttons)
   if (btn.dataset.copy !== undefined) return copy(btn.dataset.copy);
   if (promptOpen) return undefined; // Chrome's prompt is open: its answer comes first
   // Every Chrome prompt for photo servers is asked from here, first thing in

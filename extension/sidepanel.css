@@ -72,3 +72,4 @@ fieldset.highlights { border: 1px solid var(--line); border-radius: var(--radius
 fieldset.highlights legend { font-weight: 600; padding: 0 4px; }
 .featureList { max-height: 200px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; margin-bottom: 6px; }
 label.feature { display: flex; gap: 6px; align-items: baseline; font-size: 12px; }
+button[aria-disabled="true"] { opacity: 0.55; cursor: default; }
