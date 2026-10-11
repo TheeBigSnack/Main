@@ -341,7 +341,7 @@ function renderTabs(l) {
     .map(([id, label]) => {
       const c = counts[id];
       const badge = c === undefined ? '' : `<span class="count${id === 'todo' && c ? ' hot' : ''}">${c}</span>`;
-      return `<button type="button" role="tab" data-view="${id}" aria-selected="${state.view === id}">${esc(label)}${badge}</button>`;
+      return `<button type="button" role="tab" id="tab-${id}" data-view="${id}" aria-selected="${state.view === id}">${esc(label)}${badge}</button>`;
     })
     .join('');
 }
@@ -1176,15 +1176,16 @@ function render() {
   $('scan').disabled = Boolean(state.scanning); // disabled in popup.html until the first render after start-up, and while a scan runs
   $('settingsBtn').setAttribute('aria-pressed', String(state.view === 'settings'));
   const l = lists();
-  renderTabs(l);
-  const views = { todo: viewTodo, ready: viewReady, notReady: viewNotReady, otherStores: viewOtherStores, review: viewReview, mine: viewMine, pilot: viewPilot, settings: viewSettings };
-  if (state.view === 'otherStores' && !l.otherStores.length) state.view = 'todo';
+  if (state.view === 'otherStores' && !l.otherStores.length) state.view = 'todo'; // before the tabs, so the selected one is marked
   // A redraw the person did not ask for (the service worker's 3-hourly
   // rescan, a colleague's sync) must not take the caret out of the box they
-  // are typing in: the focused control comes back by its id, caret and all.
+  // are typing in, and a tab chosen from the keyboard keeps the focus: the
+  // focused control comes back by its id, caret and all.
   const panel = $('panel');
   const active = document.activeElement;
-  const focus = active && active.id && panel.contains(active) ? { id: active.id, start: active.selectionStart, end: active.selectionEnd } : null;
+  const focus = active && active.id && (panel.contains(active) || $('tabs').contains(active)) ? { id: active.id, start: active.selectionStart, end: active.selectionEnd } : null;
+  renderTabs(l);
+  const views = { todo: viewTodo, ready: viewReady, notReady: viewNotReady, otherStores: viewOtherStores, review: viewReview, mine: viewMine, pilot: viewPilot, settings: viewSettings };
   panel.innerHTML = (views[state.view] || viewTodo)(l);
   const again = focus && $(focus.id);
   if (again) {
