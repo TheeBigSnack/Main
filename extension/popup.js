@@ -416,7 +416,7 @@ function empty(text) {
 // draft: the draft's pill shows the price it was filled with, and says so
 // when the website's price moved (on a scan taken since the draft was
 // filled: src/drafts.js draftScanCar) or the car is not ready any more.
-function postButton(vin, { canPost = true } = {}) {
+function postButton(vin, { canPost = true, capReached = null } = {}) {
   const theirs = colleagueEntry(vin);
   if (theirs) return `<span class="pill" title="A colleague's listing: theirs to update or take down">Posted by ${byWhom(theirs)}</span>`;
   if (state.posted[vin]) return `<button type="button" class="small" data-action="unpost" data-vin="${esc(vin)}" title="Click to unmark. A post recorded today still counts toward today's cap.">Posted ✓</button>`;
@@ -425,9 +425,9 @@ function postButton(vin, { canPost = true } = {}) {
     const pill = draftPill(state.drafts[vin], draftScanCar(state.drafts[vin], state.snapshot, vin), { basis: state.settings?.basis, ready: canPost });
     return `<span class="actions"><span class="pill ${pill.tone}" title="${esc(pill.title)}">${esc(pill.text)}</span><button type="button" class="small go" data-action="post" data-vin="${esc(vin)}">Mark posted</button></span>`;
   }
-  const capReached = dailyCap().reached;
+  const reached = capReached ?? dailyCap().reached; // a list passes its one reading: the cap is the same for every row
   const post = canPost
-    ? `<button type="button" class="small go" data-action="openPost" data-vin="${esc(vin)}" ${capReached ? 'disabled' : ''} title="${capReached ? 'Daily post cap reached; it resets tomorrow' : 'Pre-fill the Marketplace form in the side panel. You click Publish.'}">Post</button>`
+    ? `<button type="button" class="small go" data-action="openPost" data-vin="${esc(vin)}" ${reached ? 'disabled' : ''} title="${reached ? 'Daily post cap reached; it resets tomorrow' : 'Pre-fill the Marketplace form in the side panel. You click Publish.'}">Post</button>`
     : '';
   return `<span class="actions">${post}<button type="button" class="small" data-action="post" data-vin="${esc(vin)}" title="Already listed it yourself? Mark it posted so rescans watch it.">Mark posted</button></span>`;
 }
@@ -634,7 +634,7 @@ function readyBodyHtml(l, cap) {
     : '';
   if (!shown.length) return toolbar + empty('No cars match');
   const now = Date.now();
-  return toolbar + rows(shown.map((e) => row(e, { sub: facts(e), line: whenLine(e, now), tag: newPill(e, now), right: money(price(e)), action: postButton(e.vin), pick: queueable(e) && !cap.reached })));
+  return toolbar + rows(shown.map((e) => row(e, { sub: facts(e), line: whenLine(e, now), tag: newPill(e, now), right: money(price(e)), action: postButton(e.vin, { capReached: cap.reached }), pick: queueable(e) && !cap.reached })));
 }
 
 // Ticks that no longer apply: a car that left the Ready list or was posted
