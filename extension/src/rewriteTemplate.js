@@ -505,6 +505,8 @@ const capitalize = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 // The title with its first letter a capital, past any bracket, quote or emoji
 // before it ("(BDC) rep", "“Internet” sales"); a letter whose capital is
 // more than one letter ("ß") is kept, so the title is still said as typed.
+// the text with one full stop at its end: a name that already ends in "Inc." or "Ltd." is not given a second
+const endedSentence = (s) => (/[.!?]$/.test(s) ? s : `${s}.`);
 const sentenceCase = (s) => s.replace(/[\p{L}\p{N}]/u, (c) => (c.toUpperCase().length === c.length ? c.toUpperCase() : c));
 // The sign-off, the line the template puts right after the price note: with
 // no name, the title starts it, so a title the note's sentence check would
@@ -514,9 +516,9 @@ const sentenceCase = (s) => s.replace(/[\p{L}\p{N}]/u, (c) => (c.toUpperCase().l
 // rewrite prompts ask for the same line (backend/rewritePrompt.js).
 export function signOffLine(person, title, dealerName) {
   const at = dealerName ? ` at ${dealerName}` : '';
-  if (person) return `I'm ${person}, ${title}${at}.`;
-  const line = `${sentenceCase(title)}${at}.`;
-  return startsOwnSentence(line, true) ? line : `I'm the ${title}${at}.`;
+  if (person) return endedSentence(`I'm ${person}, ${title}${at}`);
+  const line = endedSentence(`${sentenceCase(title)}${at}`);
+  return startsOwnSentence(line, true) ? line : endedSentence(`I'm the ${title}${at}`);
 }
 
 // The salesperson's role as a description must name it: their title from
@@ -558,7 +560,7 @@ export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson 
     { id: 'features', keep: 'always', site: true, text: features.length ? `Highlights: ${features.join(', ')}.` : '' },
     { id: 'colors', keep: 'optional', site: true, text: colors.length ? `${capitalize(colors.join(', '))}.` : '' },
     { id: 'mech', keep: 'optional', site: true, text: mech.length ? `${mech.join(', ')}.` : '' },
-    { id: 'where', keep: 'always', text: lot ? `Pre-owned and on the lot at ${lot}.` : '' },
+    { id: 'where', keep: 'always', text: lot ? endedSentence(`Pre-owned and on the lot at ${lot}`) : '' },
     { id: 'carfax', keep: 'filler', text: v.carfaxUrl ? 'Carfax report available, just ask.' : '' },
     { id: 'stock', keep: 'filler', text: v.stock ? `Stock number ${v.stock}.` : '' },
     { id: 'vin', keep: 'always', text: v.vin ? `VIN ${String(v.vin).toUpperCase().replace(/[^A-Z0-9]/g, '')}.` : '' },
@@ -569,7 +571,7 @@ export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson 
     // which then comes back only when the text runs short (the closing line is not counted)
     { id: 'cta', keep: closing ? 'filler' : 'optional', text: 'Message me to set up a test drive or ask a question.' },
     { id: 'more', keep: 'filler', text: 'Happy to send more photos or answer any questions.' },
-    { id: 'visit', keep: 'filler', text: store || dealerName ? `Come take a look in person at ${store || dealerName}.` : '' },
+    { id: 'visit', keep: 'filler', text: store || dealerName ? endedSentence(`Come take a look in person at ${store || dealerName}`) : '' },
     { id: 'reply', keep: 'filler', text: "Message me here on Marketplace and I'll get right back to you." },
     // the last filler names nothing, so a sparse car at a dealership with a short name still reaches the minimum
     { id: 'see', keep: 'filler', text: 'Let me know a good time to come see it.' },

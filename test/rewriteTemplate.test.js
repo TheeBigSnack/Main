@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildTemplateDescription, runGuardrails, pickFeatures, numbersIn, wordCount, ensureVinLine, stripVin, WORD_LIMITS } from '../extension/src/rewriteTemplate.js';
+import { buildTemplateDescription, runGuardrails, pickFeatures, numbersIn, wordCount, ensureVinLine, stripVin, signOffLine, WORD_LIMITS } from '../extension/src/rewriteTemplate.js';
 import { vehicle } from './helpers.js';
 import { assessVehicle, DECISION } from '../extension/src/classify.js';
 
@@ -1469,4 +1469,15 @@ test('a dealership whose own name holds a banned phrase is not blocked by that n
   // a name that is only a word of a phrase does not switch the check off for the phrase's other words
   const short = { ...c, dealer: { ...DEALER, name: 'Best Motors' } };
   assert.ok(codes(buildTemplateDescription(short) + '\nThe best deal in town.', short).includes('banned-phrase'), 'Best Motors does not hide best deal');
+});
+
+test('a dealership name that already ends in a period is not followed by a second one in the sign-off, lot or visit lines', () => {
+  assert.equal(signOffLine('Sam', 'Sales Manager', 'Example Motors Inc.'), "I'm Sam, Sales Manager at Example Motors Inc.");
+  assert.equal(signOffLine('', 'Sales Manager', 'Example Motors Inc.'), 'Sales Manager at Example Motors Inc.');
+  assert.equal(signOffLine('Sam', 'Sales Manager', 'Example Motors'), "I'm Sam, Sales Manager at Example Motors.");
+  const v = vehicle('usedNormal');
+  const inc = { dealer: { ...DEALER, name: 'Example Motors Inc.' } };
+  const text = buildTemplateDescription(ctx(v, inc));
+  assert.equal(text.includes('..'), false, 'no doubled period anywhere in the description');
+  assert.ok(text.includes('Example Motors Inc.'), 'the name is still said as typed');
 });
