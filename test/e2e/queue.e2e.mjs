@@ -29,6 +29,7 @@ import { startMockSite } from './mock-dealer-site.mjs';
 import { startMockMarketplace, INITIAL_LISTINGS } from './mock-marketplace.mjs';
 import { blockFacebook } from './noFacebook.mjs';
 import { closeBounded } from './closeBounded.mjs';
+import { until } from './until.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const shots = join(root, 'test/e2e/screenshots');
@@ -211,10 +212,11 @@ try {
   await dealer.request.get(`${marketOrigin}/prefill?name=none`);
 
   // pause and resume keep the place
+  // the queue's copy is written under its lock before the bar redraws, so each redraw is waited for (until.mjs)
   await panel.click('#queuePause');
-  assert.match(await panel.textContent('#queueBar'), /paused/);
+  await until(panel, () => document.querySelector('#queueBar')?.textContent.includes('paused') === true, null, { what: 'the queue bar says paused' });
   await panel.click('#queueResume');
-  assert.doesNotMatch(await panel.textContent('#queueBar'), /paused/);
+  await until(panel, () => document.querySelector('#queueBar')?.textContent.includes('paused') === false, null, { what: 'the queue bar no longer says paused' });
 
   // Before publishing, the person follows a link from the form page to another car's listing (a
   // Wagoneer Series II, VIN 1C4SJVBT0NS000616): the tab went straight from the form to a listing
