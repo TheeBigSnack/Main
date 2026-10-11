@@ -1025,6 +1025,37 @@ The harness is `scripts/branding-eval/`: `node scripts/branding-eval/run.mjs` (a
 - The attorney packet copies in the project folder predate these disclosures and the new question 12.1 (17 U.S.C. 1202 when an overlay names a photographer or vendor, the dealer's photo-vendor and image-host terms, Marketplace's own rules on overlays); send the current `legal/` texts with it.
 - A queue waits at review for every car with a picked photo cropped, so on a website whose every photo carries a band, a queue stops at each car. That is the decision (the person sees each crop); if it slows the pilot, it is the owner's call.
 
+## 25. The ten-improvements round (2026-10-11, branch `claude/project-thread-ofbx1q`)
+
+The owner's thread asked for the ten improvements Claude could make on its own, ranked, with the reasons and the tests each would need. The list is `/mnt/project-files/plans/2026-10-11-next-ten-improvements.md` (four finders, a refuter for each, five candidates dropped; the runners-up and the drops are in the file). The owner then said "go ahead and implement these". Brandon chose one pull request with ten commits, not ten pull requests, so the work stays on the one designated branch. The base is `claude/fervent-fermi-exkhz9` at `6a80efe` (1847 unit tests). Nothing is merged here.
+
+Each item went in test first: the new test ran red on the code before the change, then green on it. Each commit is one item.
+
+### 25.1 What each commit does
+
+- `4663bf0` **Carried-over cars keep the time they were read.** A car the website still lists but whose page was not read this scan used to be priced from the scan's time, so a listing priced after the old read could be checked against a stale website price. The snapshot now keeps each carried car's own last read (`carriedReadAt`, `snapshotOf` in `src/scanRunner.js`; `scanCar` in `src/rescan.js`). A car carried with no known read time is not priced until it is read again. Entries saved before this change keep the old behaviour until each car is read once more.
+- `409614c` **A home page with no used list is not a complete read.** `isHomeAddress` in `adapters/schemaOrg.js` marks a scan whose list is the home page; `incompleteWarning` in `src/scanRunner.js` says so and names the used inventory page. Valid lists stay complete.
+- `915b330` **`npm run test:branding-eval`** runs `scripts/branding-eval/run.mjs --seeds=1 --no-timing` (about two minutes). The CI demo job runs it, so a crop that cuts a clean photo fails the build (`test/brandingEval.test.js` checks the script and the CI step).
+- `c62d05e` **Dealer Inspire direct search has a 30-second timeout** (`makeDirectSearch` in `adapters/dealerInspire.js`, the same limit the other adapters use). A service that never answers records a failure for its website and no longer holds up the other websites' rescans.
+- `2acd2d7` **Upkeep says when the Price box still shows the old price.** After four fills with the box showing another price, the To do item names what the box holds and asks the person to type the new price and click Update. It is not closed on the old price (`stuck`, `boxShows` and the `priceStuck` banner in `upkeep.js`).
+- `cd2b0f8` **Used links with view or tracking parameters are the used list.** `view`, `per_page`, `layout`, `display`, `page_size`, `limit`, `utm_*`, `fbclid`, `gclid`, `mc_cid` and `mc_eid` no longer make the home page the list. Filter parameters (a make, a zip) still do (`DISPLAY_KEY` in `adapters/schemaOrg.js`).
+- `4f6b452` **The to-do notice survives a worker stop during the sync.** `background.js` creates the desktop notice before the account sync and records the sent count after it. A notice the system refuses is not recorded, so the next scan makes it again (`notifiedAfter` in `src/rescanSchedule.js`).
+- `e598c8c` **The cap pause says what resumes the queue.** It names Resume on the queue bar and says the dealer can change the cap in Settings. It no longer says the queue is "paused until tomorrow", because nothing restarts it by itself (`capPauseText` in `src/queue.js`).
+- `d9d39e3` **A held queued car says why it waits.** The gate `canAutoOpen` is unchanged. `showHoldReason` in `sidepanel.js` names the first reason it holds the car, through `queueHoldReasons` and `holdStatus` in the new pure module `src/queueHold.js`. A unit test compiles the gate and the facts from the panel's source and checks that they agree on every scenario (`test/queueHold.test.js`). The queue browser flow checks the status on the car with an assumed fuel type.
+- `8f28e85` **The popup's tabs keep the keyboard focus.** Tabs have ids; `render()` restores the focus by id from the tab bar as well as the panel; a view with no other stores falls back to To do before the tabs are drawn, so the selected tab is marked on the same render (`renderTabs` and `render` in `popup.js`; the popup browser flow checks it).
+
+### 25.2 How it was checked
+
+- `npm test`: 1876 pass (up 29 from 1847; `README.md` states the count and `test/docs.test.js` checks it).
+- `npm run test:a11y`: no findings.
+- Browser flows: see the results line in the pull request description.
+
+### 25.3 Still open
+
+- Item 5's stop branch (the Price box still shows the old price after four fills) is covered by unit tests only. The mock listing does not keep an old price after a fill, so no browser flow reaches it. A change to the mock listing would cover it.
+- The gate and the status have two implementations: `canAutoOpen` decides, `holdFacts` plus `queueHoldReasons` explain. `test/queueHold.test.js` keeps them in step. A new hold check goes into both, and into that test's scenarios.
+- The runners-up and the drops in the plan file are not built. The Dealer Inspire sold check (one failed VIN batch drops every sold check in a scan with more than 50 missing cars) is the next one worth a look.
+
 ## 11. Quick reference
 ```
 # tests
