@@ -1896,11 +1896,20 @@ async function downloadPhotos() {
   const prefix = state.vehicle.stock || state.vin;
   // the post dropped or another car on screen meanwhile: nothing more is saved for this one, and nothing is said
   const dropped = () => run !== flowRun || state.vin !== vin;
+  // each photo that did not download, with the reason the worker gave (or that its batch got no answer)
+  const failed = [];
   for (let i = 0; i < urls.length; i += 4) {
-    const res = await chrome.runtime.sendMessage({ type: 'downloadPhotos', urls: urls.slice(i, i + 4), offset: i }).catch(() => null);
+    const batch = urls.slice(i, i + 4);
+    const res = await chrome.runtime.sendMessage({ type: 'downloadPhotos', urls: batch, offset: i }).catch(() => null);
     if (dropped()) return;
+    const answers = (res && res.photos) || [];
+    for (const url of batch) {
+      const answer = answers.find((p) => p.url === url);
+      if (!answer) failed.push({ url, reason: 'no answer from the download step; try again' });
+      else if (!answer.ok) failed.push({ url, reason: answer.error || 'not downloaded' });
+    }
     // as they go into the form: cropped where the check found dealer branding and the person kept the crop
-    const files = await forTheForm(((res && res.photos) || []).filter((p) => p.ok), tally);
+    const files = await forTheForm(answers.filter((p) => p.ok), tally);
     if (dropped()) return;
     for (const p of files) {
       const a = document.createElement('a');
@@ -1916,6 +1925,10 @@ async function downloadPhotos() {
   const left = all.length - urls.length - onFacebook.length;
   let note = left ? ` Photos from ${hostList(refused)} were not allowed, so ${left === 1 ? 'one was' : `${left} were`} not downloaded.` : '';
   if (onFacebook.length) note += ` ${onFacebook.length === 1 ? 'One is' : `${onFacebook.length} are`} on Facebook's own servers, which Lot Current doesn't download from.`;
+  // the reasons, once each, with how many photos gave each (one reason: just the reason)
+  const reasons = [...new Set(failed.map((f) => f.reason))].map((r) => [r, failed.filter((f) => f.reason === r).length]);
+  const why = reasons.map(([r, k]) => (reasons.length === 1 || k === 1 ? r : `${r} (${k} photos)`)).join('; ');
+  if (failed.length) note += ` ${failed.length === 1 ? '1 photo was' : `${failed.length} photos were`} not downloaded: ${why}.`;
   if (tally.cropped) note += ` ${tally.cropped} cropped to take off dealer branding.`;
   // as the publish step says it of the form's photos (photosHtml)
   const changed = tally.uncropped.filter((u) => u.why === 'changed').length;

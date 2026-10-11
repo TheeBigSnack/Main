@@ -459,3 +459,56 @@ test('nothing but a click in an extension page asks for a host: never the servic
   assert.deepEqual(askers.sort(), ['popup.js', 'sidepanel.js', 'wizard.js'], 'only the three pages people click in ask Chrome for anything');
   assert.doesNotMatch(stripComments(read('../extension/background.js')), /permissions\.request|askChrome/);
 });
+
+// downloadPhotos says which photos did not download, and why, in its status line:
+// a photo the worker could not get, and every photo of a batch whose message got no answer
+test('downloadPhotos names each photo that did not download, and why', async () => {
+  const src = stripComments(read('../extension/sidepanel.js'));
+  const photos = ['https://img.cdn.example/1.jpg', 'https://img.cdn.example/2.jpg', 'https://img.cdn.example/3.jpg', 'https://other.example/4.jpg'];
+  const runWith = async (answer) => {
+    const status = { text: '' };
+    const panel = {
+      state: { listing: { photos }, vehicle: { photos, stock: 'P1' }, vin: 'V', fill: null, map: { photoLimitDefault: 20 }, fbTabId: 1, photos: null },
+      chrome: { runtime: { sendMessage: answer } },
+      photoList: () => photos,
+      photoPatterns: (urls) => need(urls),
+      refusedPhotoServers: new Set(),
+      patternCovers,
+      isFacebookServer,
+      hostList: (patterns) => patterns.map(patternHost).join(', '),
+      sleep: async () => {},
+      flowRun: 0,
+      forTheForm: async (files) => files.map(({ name, type, dataUrl }) => ({ name, type, dataUrl })),
+      document: { createElement: () => ({ click() {}, remove() {} }), body: { appendChild() {} } },
+      setStatus: (text) => { status.text = text; },
+    };
+    const names = Object.keys(panel);
+    await new Function(...names, `${fnText(src, 'downloadPhotos')}\nreturn downloadPhotos();`)(...names.map((k) => panel[k]));
+    return status.text;
+  };
+  const answerWith = (failures) => async (msg) => ({
+    ok: true,
+    photos: msg.urls.map((url) => (failures[url] ? { url, ok: false, error: failures[url] } : { url, ok: true, name: 'photo.jpg', type: 'image/jpeg', dataUrl: 'data:image/jpeg;base64,AA==' })),
+  });
+
+  const one = await runWith(answerWith({ 'https://img.cdn.example/2.jpg': 'HTTP 403 from img.cdn.example' }));
+  assert.match(one, /^3 of 4 photos downloaded to your Downloads folder\. 1 photo was not downloaded: HTTP 403 from img.cdn.example\.$/);
+
+  const two = await runWith(answerWith({
+    'https://img.cdn.example/1.jpg': 'HTTP 403 from img.cdn.example',
+    'https://img.cdn.example/3.jpg': 'HTTP 403 from img.cdn.example',
+  }));
+  assert.match(two, /^2 of 4 photos downloaded to your Downloads folder\. 2 photos were not downloaded: HTTP 403 from img.cdn.example\.$/);
+
+  const mixed = await runWith(answerWith({
+    'https://img.cdn.example/1.jpg': 'HTTP 403 from img.cdn.example',
+    'https://img.cdn.example/3.jpg': 'HTTP 403 from img.cdn.example',
+    'https://other.example/4.jpg': 'too large (other.example)',
+  }));
+  assert.match(mixed, /^1 of 4 photos downloaded to your Downloads folder\./);
+  assert.match(mixed, / 3 photos were not downloaded: HTTP 403 from img\.cdn\.example \(2 photos\); too large \(other\.example\)\.$/);
+
+  // the message itself failed (no answer for the batch): each photo is named as not answered, so nothing is silently dropped
+  const silent = await runWith(async () => { throw new Error('the worker was asleep'); });
+  assert.match(silent, /^0 of 4 photos downloaded to your Downloads folder\. 4 photos were not downloaded: no answer from the download step; try again\.$/);
+});
