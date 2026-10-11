@@ -89,7 +89,7 @@ const KNOWN_PHOTO_TYPE = /^image\/(?:jpe?g|pjpeg|png|gif|webp|avif)$/;
 // other only when the body is not a page of markup. Anything else (a
 // text/html answer, a missing or octet-stream type over bytes of no photo
 // format, an empty, JSON or text body under a JPEG or PNG type) is no photo.
-export function photoTypeFor(declared, bytes) {
+function photoTypeFor(declared, bytes) {
   const b = bytes || new Uint8Array(0);
   if (!b.length) return null;
   const sniffed = sniffPhotoType(b);
@@ -325,7 +325,7 @@ async function hasPermission(info, adapter) {
 
 export const NO_PERMISSION = 'Lot Current has no permission to read this website in the background. Click Allow automatic rescans in Settings.';
 export const NO_HTTPS_ONLY = 'Chrome allows automatic rescans only for https websites, so this website is checked by hand.';
-export const NO_SETTINGS = 'This website has no settings on this computer (they were cleared, or set-up never finished). Scan it from the popup first.';
+const NO_SETTINGS = 'This website has no settings on this computer (they were cleared, or set-up never finished). Scan it from the popup first.';
 
 // A failed attempt is recorded so the popup can show that the schedule is not
 // working, with what asked for it (the alarm, or the side panel's Rescan).

@@ -138,7 +138,7 @@ export async function resumeWizard(origin) {
   return true;
 }
 
-export async function endWizard() {
+async function endWizard() {
   if (wiz.origin) await chrome.storage.local.remove(key(wiz.origin));
   wiz.active = false;
 }

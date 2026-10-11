@@ -9,7 +9,7 @@ import { sortOrder, newDaysOf } from './readyList.js';
 export const SETTINGS_VERSION = 2;
 export const DEFAULT_SALESPERSON_TITLE = 'sales consultant';
 // A closing line is checked by words (src/rewriteTemplate.js); this only stops a pasted page being kept.
-export const CLOSING_LINE_MAX_CHARS = 300;
+const CLOSING_LINE_MAX_CHARS = 300;
 
 // Every description names the dealership. The name comes from the website
 // (src/scan.js) or a person; a website that gives none leaves it blank until

@@ -84,7 +84,7 @@ export function textOf(value) {
 
 const truthy = (value) => value === true || (typeof value === 'string' && /^(?:true|yes|y|1)$/i.test(value.trim())) || value === 1;
 
-export function vinIn(x) {
+function vinIn(x) {
   if (!isPlain(x)) return '';
   for (const [k, v] of Object.entries(x)) {
     const name = keyName(k);
@@ -370,7 +370,7 @@ function valueIn(x) {
 // The same name test decides whether a field's amount is the price when it
 // reads and whether it is kept when it can't be read.
 const PRICE_ABOUT = /^(?:label|title|caption|heading|name|notes?|disclaimers?|desc|description|type|class|kind|currency|units?|code|id|date|time|history|histories|source|rank|count|format|style|colou?r|rules?|tier|range|drops?|changes?|diff|difference|reduction|delta|reason|status|visible|hidden|enabled|flag)$/;
-export function priceKeyKind(key) {
+function priceKeyKind(key) {
   const n = keyName(key);
   if (/^(?:dprice|offers?)$/.test(n)) return 'list';
   const at = n.lastIndexOf('pric');
@@ -1444,7 +1444,7 @@ export async function scanInventory(search, options, platform) {
 // What a car's own page adds at post time: every photo it carries, its
 // description and a Carfax link, from the page's standard vehicle data when
 // it has some, and the platform's own photo addresses.
-export function pageExtras(html, pageUrl, vin, platform) {
+function pageExtras(html, pageUrl, vin, platform) {
   const out = { photos: [], description: null, carfaxUrl: null };
   if (typeof html !== 'string' || !html) return out;
   try {

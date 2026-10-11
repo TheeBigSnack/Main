@@ -42,7 +42,7 @@ export const DECISION = Object.freeze({
   SKIP: 'skip', // new, demo or loaner: never post
 });
 
-export const LOW_MILES = 100;
+const LOW_MILES = 100;
 
 // What a condition word says. Only ever given short condition text
 // ("Used", "certified used", "Pre-Owned", or a schema.org condition value
@@ -223,7 +223,7 @@ export function checkPreOwned(v) {
   return { verdict: 'pre-owned', reason: 'Pre-owned: ' + preOwned.map((c) => c.label.toLowerCase()).join(', ') + (v.carfaxUrl ? ' and Carfax agree.' : ' agree.'), checks, notes };
 }
 
-export function readyBlockers(v, settings = {}) {
+function readyBlockers(v, settings = {}) {
   const blockers = [];
   if (!v.photoCount) blockers.push({ code: 'no-photos', text: 'No photos on the website yet' });
   if (!v.price) blockers.push({ code: 'no-price', text: `No price on the website (${v.priceLabel || 'call for price'})` });
@@ -236,7 +236,7 @@ export function readyBlockers(v, settings = {}) {
 
 // A vehicle of a kind Lot Current doesn't fill in, with the reason in the
 // website's own words; null for a car, truck or motorcycle.
-export function notACar(v = {}) {
+function notACar(v = {}) {
   const k = readVehicleKind(v);
   if (FORM_KINDS.includes(k.kind)) return null;
   return { kind: k.kind, reason: `The website's ${k.from} makes it ${k.name}. Lot Current fills in only Marketplace's car/truck and motorcycle forms, so it stays off the posting list.` };

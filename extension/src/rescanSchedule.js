@@ -12,7 +12,7 @@ export const RESCAN_PERIOD_MINUTES = 180; // every 3 hours while Chrome is open
 // brake counts the last minute) is tried again a minute later, by a
 // one-shot alarm named after the website: one per website, so a second
 // refusal moves it rather than adding another.
-export const SYNC_RETRY_PREFIX = 'sync-retry:';
+const SYNC_RETRY_PREFIX = 'sync-retry:';
 export const SYNC_RETRY_MINUTES = 1;
 export const syncRetryAlarm = (origin) => SYNC_RETRY_PREFIX + String(origin || '');
 
@@ -62,7 +62,7 @@ export function toldCountAfterChange(told, count) {
 // stored time is when the previous scan finished, which can be a minute or
 // more later on a large lot. The slack only matters for skipping a site the
 // person scanned by hand shortly before the alarm.
-export const DUE_SLACK_MS = 5 * 60 * 1000;
+const DUE_SLACK_MS = 5 * 60 * 1000;
 export function isDue(lastIso, nowIso = new Date().toISOString(), periodMinutes = RESCAN_PERIOD_MINUTES) {
   if (!lastIso) return true;
   const last = Date.parse(lastIso);
