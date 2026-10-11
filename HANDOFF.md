@@ -1133,6 +1133,47 @@ Round 4 (fifty candidates, not built) is in `/mnt/project-files/plans/2026-10-11
 - Round 3's decision-only runners-up (a shared computer's second sign-in, a re-listed car marked posted, the protected-characteristic word list) wait on the owner, as in round 3's plan file.
 - The post e2e memory growth (26.4) is still unisolated.
 
+## 28. The harsh review (2026-10-11, branch `claude/project-thread-ofbx1q-review`)
+
+The owner asked for a harsh review of the whole project after round 3, and for the project to be optimized as far as it can be without a decision from them. The findings are ranked in `/mnt/project-files/reviews/2026-10-11-harsh-review.md`: 26 findings, of which 10 are fixed, one was measured slower and reverted, and 15 are left open with the reason beside each. The branch is cut from round 3 (`claude/project-thread-ofbx1q-round3`, PR #18), so its pull request targets that branch. Nothing is merged here.
+
+### 28.1 What each commit does
+
+- `28535d3` **Every browser flow's close is bounded.** `closeBounded` in `test/e2e/closeBounded.mjs` waits at most 15 s for `context.close()`; all nine flows use it in their `finally`. This is finding 1.
+- `992cdf6` **A zero photo count no longer hides the photos listed.** `dealerInspireNormalize.js` takes the larger of the count and the list, as `inventoryJson.js` does. Finding 18.
+- `2a47ebb` **The suggested doc-fee note keeps its cents.** `suggestedPriceNote` in `src/settings.js`. Finding 19.
+- `fe490d9` and `2780cc6` **Dead names removed.** One unread window constant in `src/sync.js`, and the `export` keyword on 28 names that nothing imports. Findings 21 and 22; no behaviour change.
+- `138d8d1` **The popup's Ready list reads the daily cap once per render.** Finding 15.
+- `5f86e47` **The adapter contract stays out of the packed extension.** `scripts/pack.mjs` skips `adapters/README.md`; the pilot-pack test's expected list skips it the same way and asserts the zip does not carry it. Finding 20.
+- `22da7d8` **A Settings save made while a scan runs is kept.** A scan used to write back the settings it started with. `performScan` now returns `changedSettings` (what it changed against the copy it read), and the popup merges only those onto the settings stored at that moment (`withScanChanges`). The registry's auto-rescan flag is put back to the stored value after the scan. Finding 2.
+- `e250a1c` **A rescan still reading when the website is cleared writes nothing back.** Clear everything removes the registry entry first (`clearWebsiteRecords`, `src/storage.js`), then the records under the diff's lock. The worker saves only while the website is registered, checked under that lock, and its registry writes go through `withSiteFields`, which returns nothing for a website that is no longer registered. Finding 3.
+- `f034322` **The queue bar and the list do not clear a post under way.** "Post next car" is hidden for any post under way, a single car's review included (it used to be offered there, and clicking it cleared the review). Post on a car in the list is refused while a queue is running or paused, with the same line Post the next N gives. The panel test that asserted the button over a single car's review pinned that drop, and now asserts it is absent. Finding 4.
+- `92ac645` **README count 1917** (the static count of test definitions; `test/docs.test.js` pins it).
+
+### 28.2 How it was checked
+
+- `npm test` at `92ac645`: 1917 of 1917 pass, exit 0. The run before the README count was set had two failures, both that count (the nested CHANGELOG layout test fails for the same reason).
+- Red runs, before the fixes: the pilot-pack exclusion assertion failed with the pack change reverted; the two settings helpers were missing; the two worker tests failed (a rescan saved and returned `ok`, and the failure note registered the cleared website again); the panel test showed Post next car over a single car's review and started a post over a running queue.
+- The browser battery at `f034322` (the README commit after it touches no flow), one flow at a time, all exited 0: post (31 s), queue (64 s), popup (5 s), upkeep (39 s), panel (47 s), standard (19 s), platforms (19 s), wizard (4 s), branding (52 s). Then `test:site`, `test:demo` (67 s), `test:a11y` and `test:branding-eval`, which exited 0 with no false crops, no false flags and no lies. Its totals were not compared with a recorded baseline (none is recorded in this file); the photo-branding code is unchanged since round 3.
+- Measured: the pack. Round 3's HEAD packed to 491,179 bytes in 65 files; at `5f86e47` it is 470,733 bytes in 64 files (uncompressed 1,457,469 to 1,398,981). At the branch head, after the later fixes, it is 472,098 bytes in 64 files (uncompressed 1,402,844).
+- Measured and reverted: finding 5 (the branding check's insertion sort). The native typed-array sort was 100 to 115 ms against 70 to 86 ms, so the sort was kept as it was. Nothing else in the review changed a speed or size figure.
+
+### 28.3 Not checked here, and why
+
+- The post flow's memory growth on a failing run (26.4) was not reproduced. `closeBounded` is unit-tested (a close that never exits returns "not closed" within its bound); no flow was made to hang, so the effect on memory is not measured.
+- Finding 15 (the cap once per render) and finding 26 are not timed. The reviewer's estimate was about 2 ms at 120 cars.
+- Findings 14 and 17 (the upkeep "stuck" banner, and queue writes outside the lock) were not re-read by the lead; they are open.
+- The settings, clear and queue fixes are checked by their helpers and the worker and panel tests, and by the browser flows, which pass. The windows they close are a few milliseconds wide, and no live Chrome run reproduced the race.
+
+### 28.4 Still open
+
+- Finding 6 (the dealership address from a publisher node) and findings 7, 8 and 16 (photo downloads, posted-car page re-reads, serial crops) need a live site or a timing.
+- Findings 9 to 12 (test speed: the nested release run, `brandName.test.js` reading every file at load, `pilotPack.test.js` copying the tree per test, `backend.test.js` starting seven servers) change what a test checks or when it fails; each needs its own measured change.
+- Finding 13 (set-up writes its diff and settings without the diff lock) is rare: set-up runs once per website, before any rescan is registered. It needs a fresh read under the lock, a merge in finish, and a wizard test first.
+- Finding 14 (the upkeep banner) and finding 17 (queue writes outside the lock) need a browser test and a re-read.
+- Findings 23 to 26 (duplicated helpers, names only tests use, the dev overrides shipped in `facebook/formMap.js`, the per-keystroke cap in the side panel) are open because each removal touches injected page code or tested names.
+- The round-4 list (`plans/2026-10-11-improvements-round-4.md`) overlaps some review items (the queue button, the dropdown fill, the "Inc.." sign-off); those are not built here, per the owner's instruction.
+
 ## 11. Quick reference
 ```
 # tests
