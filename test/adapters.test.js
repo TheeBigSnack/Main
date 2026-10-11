@@ -1966,3 +1966,15 @@ test('schemaOrg probe: a used-list link with a view, page size or tracking param
   assert.deepEqual(await on('/', { html: home('/used-vehicles/?zip=43215') }), { ...SERVICE, listUrl: O + '/' }, 'a filter by zip');
   assert.deepEqual(await on('/', { html: home('/used-vehicles/?view=grid&amp;make=honda') }), { ...SERVICE, listUrl: O + '/' }, 'a display parameter does not make a make filter a whole list');
 });
+
+test('a car with no description reads as no description (null), not an empty text, on Dealer Inspire and schema.org', () => {
+  const car = records[0];
+  assert.equal(dealerInspire.normalize({ ...car, description: '' }).descriptionRaw, null);
+  assert.equal(dealerInspire.normalize({ ...car, description: '   ' }).descriptionRaw, null);
+  const { description, ...noField } = car;
+  assert.equal(dealerInspire.normalize(noField).descriptionRaw, null);
+  assert.equal(dealerInspire.normalize({ ...car, description: 'Nice car.' }).descriptionRaw, 'Nice car.');
+  const [sample] = standardCars(1);
+  assert.equal(schemaOrg.normalize({ ...standardCarNode(sample), description: '' }).descriptionRaw, null);
+  assert.equal(schemaOrg.normalize({ ...standardCarNode(sample), description: '' }).descriptionRaw === '', false, 'not an empty string');
+});

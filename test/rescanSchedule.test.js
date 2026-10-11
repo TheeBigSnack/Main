@@ -198,3 +198,23 @@ test('items cleared between scans lower the count the website was told about, so
   assert.equal(toldCountAfterChange(0, 0), null);
   assert.equal(toldCountAfterChange(undefined, 0), null);
 });
+
+test('a lot where some cars have no description still lines out its shared disclaimer', async () => {
+  // 14 cars: 4 end with the lot's disclaimer, 3 have no description, 7 have their own text.
+  // The 3 blank cars are not descriptions, so the disclaimer is 4 of 11 described cars.
+  const DISCLAIMER = 'Sample Motors pricing includes all costs.';
+  const lot = Array.from({ length: 14 }, (_, i) => {
+    const description = i < 4 ? `Nice car ${i}.<br>${DISCLAIMER}` : i < 7 ? '' : `Clean car ${i}, one owner.`;
+    return { ...ALL[0], vin: `LOTTEST${String(i).padStart(10, '0')}`, description };
+  });
+  const search = async (body) => {
+    const f = body.filters || {};
+    const list = lot.filter((r) => (!f.type || f.type.includes(r.type)) && (!f.vin || f.vin.includes(r.vin)));
+    return { total_vehicle_count: list.length, listings: list.slice((body.page - 1) * body.perPage, body.page * body.perPage) };
+  };
+  const site = { origin: 'https://x', host: 'x', name: 'Test', title: 't', address: { zip: '15370' }, adapter: 'dealerInspire', service: { search: 's', apiKey: 'k' } };
+  const first = await scanWithSearch({ adapter: dealerInspire, search, site, settings: withDefaults(MY_STORE), prevSnapshot: null, posted: {} });
+  assert.equal(first.ok, true);
+  assert.equal(Object.keys(first.snapshot.vehicles).length, 14);
+  assert.deepEqual([...first.boilerplate], [DISCLAIMER]);
+});
