@@ -461,7 +461,7 @@ export function cleanClosingLine(line) {
 // { ok, problems: [{ code, text }] } for a closing line as typed. An empty
 // line is fine: the description then ends as before.
 export function checkClosingLine(line) {
-  const t = cleanClosingLine(line);
+  const t = foldForGuard(cleanClosingLine(line));
   const problems = [];
   if (!t) return { ok: true, problems };
   const words = wordCount(t);
@@ -1485,10 +1485,28 @@ export const STYLE_PROBLEMS = Object.freeze(['too-short', 'too-long', 'all-caps'
  * Checks a description against the source data. Returns { ok, problems, words }.
  * Every problem has a code and a short plain-English text.
  */
+// The text as the checks read it: NFKC folds the compatibility forms (fullwidth
+// letters and digits, ligatures), invisible characters are read as nothing, and
+// every decimal digit of any script is read as its ASCII value, so "$３１,９９５"
+// and "$٣١,٩٩٥" are the amounts "$31,995", and a zero-width space cannot split
+// "Meta Verified".
+function foldForGuard(s) {
+  return String(s ?? '').normalize('NFKC').replace(NOTE_HIDDEN, '').replace(/\p{Nd}/gu, asciiDigit);
+}
+// A decimal digit's value. Each script's digits are a run of ten starting at zero,
+// so the value is the distance from the start of its run.
+function asciiDigit(ch) {
+  const cp = ch.codePointAt(0);
+  if (cp < 128) return ch;
+  let start = cp;
+  while (start > 0 && /\p{Nd}/u.test(String.fromCodePoint(start - 1))) start -= 1;
+  return String((cp - start) % 10);
+}
+
 export function runGuardrails(text, { vehicle = {}, dealer = {}, salesperson = {}, priceNote = '', price = null, closingLine = '', boilerplate = [] } = {}) {
-  const t = String(text || '');
+  const t = foldForGuard(text);
   // the closing line is the salesperson's, checked on its own (checkClosingLine) wherever the text carries it
-  const closing = cleanClosingLine(closingLine);
+  const closing = foldForGuard(cleanClosingLine(closingLine));
   const hasClosing = Boolean(closing) && closingPattern(closing).test(t);
   const prose = stripVin(hasClosing ? stripClosing(t, closing) : t);
   const problems = [];

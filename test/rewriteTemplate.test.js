@@ -380,6 +380,21 @@ test('a price change claimed in words, with no amount, is flagged in any word or
   assert.ok(!runGuardrails(`${base}\nLower mileage than most in the lot.`, c).problems.some((p) => p.code === 'price-change'), 'the control');
 });
 
+test('the checks read digits and hidden characters as they show: fullwidth or Arabic-Indic digits are the same amounts, and a zero-width space does not split a phrase', () => {
+  const v = { ...vehicle('usedNormal', { features: FEATURES }), descriptionRaw: STALE };
+  const c = { vehicle: v, dealer: EXAMPLE, salesperson: SAM, priceNote: 'Price includes the $490 doc fee; tax and tags extra.', price: 26673 };
+  const base = buildTemplateDescription(c);
+  const codeOf = (line) => runGuardrails(`${base}\n${line}`, c).problems.map((p) => p.code);
+  // the same amount in other digits is still a price the website does not show
+  assert.ok(codeOf('Only $\uff13\uff11\uff0c\uff19\uff19\uff15 on this one.').includes('price-mismatch'), 'fullwidth digits');
+  assert.ok(codeOf('Only $\u0663\u0661,\u0669\u0669\u0665 on this one.').includes('price-mismatch'), 'Arabic-Indic digits');
+  // a zero-width space inside a phrase is still that phrase
+  assert.ok(codeOf('Meta\u200b Verified dealer.').includes('affiliation'), 'zero-width space in Meta Verified');
+  assert.ok(codeOf('Clean\u200b title.').includes('banned-phrase'), 'zero-width space in clean title');
+  // ordinary text is unchanged
+  assert.deepEqual(codeOf('Priced at $26,673 with 20,986 miles.').filter((x) => /price|mileage/.test(x)), [], 'the control');
+});
+
 test('distances, ranges and warranty terms are not read as the mileage', () => {
   assert.deepEqual(mileageClaims('A 3-year/36,000-mile powertrain warranty, 300 miles of range, 30 miles away, within 50 miles, every 5,000 miles, 60 mph.'), []);
   assert.deepEqual(mileageClaims('Only 38,000 miles! Has 38K miles, 41.2k mi and 45 thousand miles.').map((m) => m.value), [38000, 38000, 41200, 45000]);
