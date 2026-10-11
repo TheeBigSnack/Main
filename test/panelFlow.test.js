@@ -3837,3 +3837,11 @@ test('Rewrite and Guess from the photos stay in the keyboard order while the rew
   const css = readFileSync(new URL('../extension/sidepanel.css', import.meta.url), 'utf8');
   assert.match(css, /button\[aria-disabled="true"\] \{ opacity: 0\.55; cursor: default; \}/);
 });
+
+// Each Copy button in the "Couldn't fill" list names the field it copies, as the "Not saved" list's do:
+// a screen-reader person hears "Copy the price", not a bare "Copy" for each row.
+test('the Copy buttons in the Couldn\'t fill list are named for their field, as the Not saved list\'s are', () => {
+  assert.match(src, /function copyBtn\(text, label\) \{\n  return `<button type="button" class="copy" data-copy="\$\{esc\(text\)\}" aria-label="Copy the \$\{esc\(label\.toLowerCase\(\)\)\}">Copy<\/button>`;\n\}/);
+  assert.match(src, /copyBtn\(x\.value, x\.label\)/, 'each row passes its field label');
+  assert.doesNotMatch(src, /copyBtn\(x\.value\)/, 'no call without the label');
+});

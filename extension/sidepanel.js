@@ -2422,8 +2422,8 @@ function viewFilling() {
   return `${carCard()}<p class="lead">${esc(state.message || 'Working…')}</p>`;
 }
 
-function copyBtn(text) {
-  return `<button type="button" class="copy" data-copy="${esc(text)}">Copy</button>`;
+function copyBtn(text, label) {
+  return `<button type="button" class="copy" data-copy="${esc(text)}" aria-label="Copy the ${esc(label.toLowerCase())}">Copy</button>`;
 }
 
 const allowButton = (pattern) => `<button type="button" class="plain" data-allow-photos="${esc(pattern)}">Allow photos from ${esc(patternHost(pattern))}</button>`;
@@ -2521,7 +2521,7 @@ function viewPublish() {
     ${f.partial.length ? `<h3>Needs a click <span class="pill warn">${f.partial.length}</span></h3><ul class="list">${f.partial.map((x) => `<li>${esc(x.label)}: ${esc(x.value)} <span class="why">${esc(x.note || '')}</span></li>`).join('')}</ul>` : ''}
     ${skipped.length ? `<p class="hint">Left alone: ${skipped.map((x) => `${esc(x.label)} (${esc(x.reason)})`).join('; ')}.</p>` : ''}
   </section>
-  ${f.blocked.length ? `<section class="highlight"><h3>Couldn't fill <span class="pill bad">${f.blocked.length}</span></h3><ul class="list">${f.blocked.map((x) => `<li><b>${esc(x.label)}</b>${x.value ? ': ' + esc(x.value).slice(0, 80) + copyBtn(x.value) : ''} <span class="why">${esc(x.reason)}</span>${
+  ${f.blocked.length ? `<section class="highlight"><h3>Couldn't fill <span class="pill bad">${f.blocked.length}</span></h3><ul class="list">${f.blocked.map((x) => `<li><b>${esc(x.label)}</b>${x.value ? ': ' + esc(x.value).slice(0, 80) + copyBtn(x.value, x.label) : ''} <span class="why">${esc(x.reason)}</span>${
     x.candidates && x.candidates.length ? `<div class="why">Similar controls on the page: ${x.candidates.map((c) => `${esc(c.tag)}${c.role ? '[' + esc(c.role) + ']' : ''}${c.type ? '[' + esc(c.type) + ']' : ''}${c.haspopup ? '[popup ' + esc(c.haspopup) + ']' : ''}${c.editable ? '[editable]' : ''} "${esc(c.name || c.near)}"`).join('; ')}</div>` : ''
   }</li>`).join('')}</ul><p class="hint">Copy the report (Copy report on the dry run, or this list) and send it to whoever maintains formMap.js.</p></section>` : ''}
   <section><h3>Photos</h3>${photosHtml()}${photoServersHtml(blockedPatterns())}
