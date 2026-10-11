@@ -1096,7 +1096,10 @@ function viewSettings() {
         ? '<p class="hint">Scan this website once first. Then the permission to read it in the background can be granted here.</p>'
         : state.rescanPermission
           ? `<p class="hint">Permission to read this website in the background: granted. Lot Current then re-reads the website${accountsConfigured() ? " and, while you are signed in to a Lot Current account, sends that rescan's results (your posted list, post records, to-do items and the scan's counts) to your dealership's account" : ''}; it never touches Facebook on its own.</p>`
-          : '<p class="hint">Needs permission to read this website in the background (Chrome will ask). <button type="button" class="small go" data-action="allowRescans">Allow automatic rescans</button></p>'}
+          : !rescanOrigins().length
+            // an http site has nothing Chrome can grant (the optional host permission is https only), so no button
+            ? '<p class="hint" id="rescanHttps">Chrome allows the automatic check only for https sites, so this site is checked by hand. The Scan button still works.</p>'
+            : '<p class="hint">Needs permission to read this website in the background (Chrome will ask). <button type="button" class="small go" data-action="allowRescans">Allow automatic rescans</button></p>'}
     </fieldset>
     ${accountFieldset()}
     <fieldset><legend>Description writer (optional)</legend>

@@ -140,6 +140,28 @@ test('the popup asks Chrome for what originsFor names for the website, and a Fac
   }
 });
 
+// A plain http dealership website has no pattern Chrome can grant (the optional
+// host permission is https only). So the popup and the wizard say why, instead
+// of showing the Allow button, and the worker's record says so too. The offers
+// are drawn by the page, which no unit test here draws, so these read the source.
+test('a plain http website gets the reason, not the Allow button: in the popup, the wizard and the worker\'s record', () => {
+  const HTTP = 'http://www.dealer.test';
+  const state = { origin: HTTP, site: { site: { origin: HTTP }, service: null } };
+  const popupSrc = stripComments(readFileSync(new URL('../extension/popup.js', import.meta.url), 'utf8'));
+  const m = popupSrc.match(/^const rescanOrigins = \(\) => ([^\n]+);$/m);
+  assert.ok(m, 'popup.js defines rescanOrigins on one line: fix this test');
+  const rescanOrigins = (s) => new Function('state', 'originsFor', `return ${m[1]};`)(s, originsFor);
+  assert.deepEqual(rescanOrigins(state), [], 'nothing to ask Chrome for');
+  assert.equal(askableOrigins([]), null, 'and the gate refuses an empty request without a prompt');
+  assert.match(popupSrc, /!rescanOrigins\(\)\.length\s*\?\s*'<p class="hint" id="rescanHttps">Chrome allows the automatic check only for https sites/, 'the popup\'s offer shows the reason when the list is empty, before the Allow button');
+  const wizardSrc = stripComments(readFileSync(new URL('../extension/wizard.js', import.meta.url), 'utf8'));
+  assert.match(wizardSrc, /httpOnlyWebsite\(wiz\.site\?\.origin\)\s*\?\s*'<p class="hint">Chrome allows the automatic check only for https sites/, 'the wizard\'s permission step says it for an http site');
+  const bgSrc = stripComments(readFileSync(new URL('../extension/background.js', import.meta.url), 'utf8'));
+  assert.match(bgSrc, /!grantable && httpOnlyWebsite\(origin\) \? NO_HTTPS_ONLY : NO_PERMISSION/, 'the worker records the https reason for such a site, and "click Allow" otherwise');
+  // an https site, and an http site whose service is https, still get the button (the service is granted)
+  assert.deepEqual(rescanOrigins({ origin: 'https://www.dealer.test', site: { site: { origin: 'https://www.dealer.test' }, service: null } }), ['https://www.dealer.test' + ANY]);
+});
+
 // The wizard's "Allow automatic rescans" click, run as written (wizard.js
 // handleWizardClick) with Chrome and the page replaced by stand-ins: it puts
 // the website to Chrome, and for a site or service on Facebook's servers it

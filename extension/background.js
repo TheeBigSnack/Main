@@ -27,7 +27,7 @@ import { siteKeys, SITES_KEY } from './src/storageKeys.js';
 import { updateKey, withLock, storageErrorText } from './src/storage.js';
 import { settleDiff, withWithheld } from './src/rescan.js';
 import { withDefaults } from './src/settings.js';
-import { RESCAN_ALARM, RESCAN_PERIOD_MINUTES, SYNC_RETRY_MINUTES, syncRetryAlarm, originOfSyncRetryAlarm, todoCountFor, badgeText, notificationFor, notifiedAfter, toldCountAfterChange, isDue, latestOf, originsFor } from './src/rescanSchedule.js';
+import { RESCAN_ALARM, RESCAN_PERIOD_MINUTES, SYNC_RETRY_MINUTES, syncRetryAlarm, originOfSyncRetryAlarm, todoCountFor, badgeText, notificationFor, notifiedAfter, toldCountAfterChange, isDue, latestOf, originsFor, httpOnlyWebsite } from './src/rescanSchedule.js';
 import { recordFlags } from './src/pilot.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { syncOnce, scanFromStored, NOT_CONFIGURED } from './src/accountFlow.js';
@@ -324,6 +324,7 @@ async function hasPermission(info, adapter) {
 }
 
 export const NO_PERMISSION = 'Lot Current has no permission to read this website in the background. Click Allow automatic rescans in Settings.';
+export const NO_HTTPS_ONLY = 'Chrome allows automatic rescans only for https websites, so this website is checked by hand.';
 export const NO_SETTINGS = 'This website has no settings on this computer (they were cleared, or set-up never finished). Scan it from the popup first.';
 
 // A failed attempt is recorded so the popup can show that the schedule is not
@@ -344,7 +345,11 @@ export async function runRescan(origin, { reason = 'alarm' } = {}) {
   if (!info || !info.service) return { ok: false, error: 'This website has not been scanned from the popup yet.' };
   const adapter = adapterById(info.adapter);
   if (!adapter) return noteFailure(origin, info, `No adapter for ${info.adapter}`, reason);
-  if (!(await hasPermission({ ...info, origin }, adapter))) return noteFailure(origin, info, NO_PERMISSION, reason);
+  if (!(await hasPermission({ ...info, origin }, adapter))) {
+    // a plain http site has nothing Chrome can grant, so the panel offers no button: say why, not "click Allow"
+    const grantable = originsFor(info.site || { origin }, adapter.origins(info.service)).length > 0;
+    return noteFailure(origin, info, !grantable && httpOnlyWebsite(origin) ? NO_HTTPS_ONLY : NO_PERMISSION, reason);
+  }
   const k = siteKeys(origin);
   const data = await chrome.storage.local.get([k.settings, k.snapshot, k.posted, k.boilerplate]);
   if (!data[k.settings]) return noteFailure(origin, info, NO_SETTINGS, reason);

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { todoCountFor, badgeText, notificationFor, notifiedAfter, toldCountAfterChange, isDue, latestOf, originsFor, RESCAN_PERIOD_MINUTES, RESCAN_ALARM, SYNC_RETRY_MINUTES, syncRetryAlarm, originOfSyncRetryAlarm } from '../extension/src/rescanSchedule.js';
+import { todoCountFor, badgeText, notificationFor, notifiedAfter, toldCountAfterChange, isDue, latestOf, originsFor, httpOnlyWebsite, RESCAN_PERIOD_MINUTES, RESCAN_ALARM, SYNC_RETRY_MINUTES, syncRetryAlarm, originOfSyncRetryAlarm } from '../extension/src/rescanSchedule.js';
 import { scanWithSearch, siteForSnapshot, performScan, probeTab, UNSUPPORTED_MESSAGE } from '../extension/src/scanRunner.js';
 import dealerInspire from '../extension/adapters/dealerInspire.js';
 import { fixtures, MY_STORE, fakeDealerPage, fakeChrome } from './helpers.js';
@@ -79,6 +79,23 @@ test('the host permissions a site needs never name one of Facebook\'s servers: s
   assert.deepEqual(originsFor({ origin: 'https://www.dealer.test' }, ['https://*.facebook.com' + ANY]), [], 'a wildcard over Facebook');
   // look-alikes are other people's servers, not Facebook's
   assert.deepEqual(originsFor({ origin: 'https://www.notfacebook.com' }, ['https://facebook.com.dealer.test' + ANY]), ['https://www.notfacebook.com' + ANY, 'https://facebook.com.dealer.test' + ANY]);
+});
+
+test('a dealership website on plain http gets no host pattern, because Chrome grants the automatic check only for https sites', () => {
+  const ANY = '/' + '*';
+  const service = { search: 'https://websites-search.api.carscommerce.inc/api/v1/listings/1', apiKey: 'k' };
+  assert.deepEqual(originsFor({ origin: 'http://www.dealer.test' }, []), [], 'the site alone');
+  assert.deepEqual(originsFor({ origin: 'http://www.dealer.test', adapter: 'dealerInspire' }, service), ['https://websites-search.api.carscommerce.inc' + ANY], 'an https service on an http site is still asked');
+  assert.deepEqual(originsFor({ origin: 'http://www.dealer.test' }, ['http://api.dealer.test/x' + ANY]), [], 'an http service pattern is dropped too');
+  assert.deepEqual(originsFor({ origin: 'https://www.dealer.test' }, []), ['https://www.dealer.test' + ANY], 'the https control');
+  // this computer's own address is what the browser tests' mock sites run on; a dealership is never there
+  assert.deepEqual(originsFor({ origin: 'http://localhost:5000' }, []), ['http://localhost:5000' + ANY]);
+  assert.deepEqual(originsFor({ origin: 'http://[::1]:5000' }, []), ['http://[::1]:5000' + ANY]);
+  assert.equal(httpOnlyWebsite('http://www.dealer.test'), true);
+  assert.equal(httpOnlyWebsite('https://www.dealer.test'), false);
+  assert.equal(httpOnlyWebsite('http://127.0.0.1:5000'), false, 'loopback is not a dealership');
+  assert.equal(httpOnlyWebsite(undefined), false);
+  assert.equal(httpOnlyWebsite('not a url'), false);
 });
 
 const ALL = Object.entries(fixtures).filter(([k]) => k !== '_about').map(([, r]) => r);
