@@ -2,7 +2,7 @@ import { assessVehicle, DECISION } from './src/classify.js';
 import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, listingLine, settleDiff, postedBasis, withPostedBasis, markLookDismissed, withWithheld, withheldOffer, acceptWithheld, scanCar, priceItemWaits } from './src/rescan.js';
 import { draftPrice, markDraftPosted, draftPriceUpdate, withPriceUpdate, draftPill, draftScanCar, isOpenDraft, retireDraft } from './src/drafts.js';
 import { performScan, keepSeenBasis } from './src/scanRunner.js';
-import { todoCountFor, originsFor } from './src/rescanSchedule.js';
+import { todoCountFor, originsFor, syncRetryAlarm } from './src/rescanSchedule.js';
 import { askChrome } from './src/askChrome.js';
 import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, basisChangeNote, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE, NO_DEALER_NAME, dealerNameMissing, withScanChanges } from './src/settings.js';
 import { capStatus, capCount, logPost, askWhenListed, DEFAULT_DAILY_CAP } from './src/cap.js';
@@ -1594,6 +1594,8 @@ async function onPanelClick(ev) {
       try {
         const keys = siteKeys(state.origin);
         await clearWebsiteRecords(state.origin, { sitesKey: SITES_KEY, recordKeys: Object.values(keys), diffKey: keys.diff, storage: popupStorage, remove: ownRemove });
+        // and a sync retry the worker has set for it (a 429 asked to wait) is cancelled, not left to fire at nothing
+        try { await chrome.alarms.clear(syncRetryAlarm(state.origin)); } catch { /* no alarms API: the worker skips a website that is no longer registered */ }
         setStatus('Cleared. Scan again, or run set-up, to start over.');
       } catch (e) {
         setStatus(storageErrorText(e), 'error');

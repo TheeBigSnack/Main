@@ -441,8 +441,15 @@ function onAlarm(alarm) {
   if (!alarm) return undefined;
   if (alarm.name === RESCAN_ALARM) return rescanDueSites('alarm');
   const origin = originOfSyncRetryAlarm(alarm.name);
-  if (origin) return syncSite(origin);
+  if (origin) return syncRetryFor(origin);
   return undefined;
+}
+
+// A retry set before its website was cleared finds no website: nothing is synced, so the posted list and sync state
+// the clear removed are not rebuilt from the dealership's listings
+async function syncRetryFor(origin) {
+  const sites = await loadSites();
+  return sites[origin] ? syncSite(origin) : undefined;
 }
 
 chrome.alarms.onAlarm.addListener(onAlarm);

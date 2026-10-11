@@ -15,6 +15,7 @@ import { siteKeys, SITES_KEY, GLOBAL_KEYS } from '../extension/src/storageKeys.j
 import { sessionFromTokenResponse } from '../extension/src/account.js';
 import { noteFlags } from '../extension/src/pilot.js';
 import { STORAGE_FULL } from '../extension/src/storage.js';
+import { syncRetryAlarm } from '../extension/src/rescanSchedule.js';
 
 const ORIGIN = 'https://www.example-motors.test';
 const k = siteKeys(ORIGIN);
@@ -311,3 +312,30 @@ test('upkeep whose to-do flag cannot be saved says why, leaves the item to do an
   }
 });
 
+
+test('a sync retry set before the website was cleared finds no website when it is due, and rebuilds nothing', async () => {
+  const area = localArea({
+    [GLOBAL_KEYS.account]: session(),
+    [k.posted]: { TESTVIN00000000001: { name: 'Car 1', price: 10000, postedAt: new Date().toISOString() } },
+    [SITES_KEY]: { [ORIGIN]: { name: 'Example Motors' } },
+  });
+  globalThis.chrome.storage.local = area;
+  alarms.clear();
+  const server = limitedServer();
+  const fetchBefore = globalThis.fetch;
+  globalThis.fetch = server.fetchImpl;
+  try {
+    // a 429 set the retry a minute ago; the person then cleared the website (its registry entry and records go)
+    const name = syncRetryAlarm(ORIGIN);
+    alarms.set(name, { name, delayInMinutes: 1 });
+    area.data[SITES_KEY] = {};
+    delete area.data[k.posted];
+    delete area.data[k.sync];
+    await fireAlarm({ name });
+    assert.equal(server.sent.length, 0, 'no sync request for a website that is no longer registered');
+    assert.equal(area.data[k.posted], undefined, 'its posted list is not rebuilt');
+    assert.equal(area.data[k.sync], undefined, 'nor its sync state');
+  } finally {
+    globalThis.fetch = fetchBefore;
+  }
+});
