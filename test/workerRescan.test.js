@@ -391,3 +391,44 @@ test('a rescan that fails after the website is cleared does not register it agai
     globalThis.fetch = realFetch;
   }
 });
+
+test('a to-do item found by a rescan from the side panel is not recorded as notified, so the next automatic rescan still tells the person', async () => {
+  for (const key of Object.keys(store)) delete store[key];
+  const cars = standardCars(6);
+  const [sold] = cars;
+  const site = { origin: O, host: 'sample-motors.test', name: 'Sample Motors', title: 'Used', adapter: 'schemaOrg' };
+  const settings = withDefaults({}, site);
+  const options = schemaOrg.scanOptions(SERVICE);
+  const day1 = await scanWithSearch({ adapter: schemaOrg, search: fakeSiteSearch(standardSite({ cars })), site, settings, options });
+  const today = standardSite({ cars: cars.slice(1) });
+  today.set(O + sold.path, httpError(404));
+  Object.assign(store, {
+    [SITES_KEY]: { [O]: { name: 'Sample Motors', adapter: 'schemaOrg', service: SERVICE, site, auto: true } },
+    [k.settings]: settings, [k.snapshot]: day1.snapshot, [k.posted]: { [sold.vin]: { name: 'Sold car', price: sold.price, postedAt: '2020-01-01T12:00:00.000Z' } }, [k.diff]: day1.diff, [k.boilerplate]: day1.boilerplate,
+  });
+  const search = fakeSiteSearch(today);
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const got = await search({ url });
+    return { ok: got.ok, status: got.status, url, redirected: false, headers: { get: (name) => (name.toLowerCase() === 'content-type' ? got.contentType : null) }, text: async () => got.text };
+  };
+  const realCreate = globalThis.chrome.notifications.create;
+  const shown = [];
+  globalThis.chrome.notifications.create = async (id, opts) => { shown.push(opts.message); };
+  try {
+    // the person clicks Rescan in the side panel: the count goes to 1, and no notice is due from that rescan
+    const panel = await runRescan(O, { reason: 'panel' });
+    assert.equal(panel.ok, true, panel.error);
+    assert.equal(panel.count, 1);
+    assert.equal(shown.length, 0, 'the side panel rescan sends no notice');
+    assert.equal(store[SITES_KEY][O].lastNotifiedCount, 0, 'so the count is not recorded as notified');
+    // the automatic rescan a few hours later finds the same item and tells the person
+    const alarm = await runRescan(O, { reason: 'alarm' });
+    assert.equal(alarm.ok, true, alarm.error);
+    assert.equal(shown.length, 1, 'the automatic rescan makes the notice');
+    assert.equal(store[SITES_KEY][O].lastNotifiedCount, 1);
+  } finally {
+    globalThis.fetch = realFetch;
+    globalThis.chrome.notifications.create = realCreate;
+  }
+});
