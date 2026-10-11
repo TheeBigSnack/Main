@@ -800,3 +800,28 @@ test('the popup, the side panel and the worker gate every account call on accoun
   assert.doesNotMatch(config, /service_role|serviceKey|eyJ[A-Za-z0-9_-]{20,}\.eyJ/, 'no service key and no token in src/accountConfig.js');
   assert.match(config, /export const ACCOUNT = Object\.freeze\(\{/);
 });
+
+test('syncOnce: signed out while the request is out writes no colleague listing back on this computer', async () => {
+  let storage;
+  let duringRequest = null; // what the person does while the request is out: sign out here
+  const server = fakeSyncServer({
+    onRequest: async () => {
+      const act = duringRequest;
+      duringRequest = null;
+      if (act) act();
+    },
+  });
+  server.listings.push({ id: 'c', dealership_id: D, user_id: U2, vin: VIN_C, name: '2018 Honda', price: 21495, posted_at: T(2), listing_url: 'https://www.facebook.com/marketplace/item/3/', salesperson: 'Sam', updated_at: null, status: 'listed', taken_down_at: null });
+  const { fetchImpl } = fakeFetch({ sync: server.handler });
+  const sync = () => syncOnce({ origin: ORIGIN, deps: deps({ fetchImpl, storage }) });
+  const posted = markPosted({}, { vin: VIN_A, name: '2019 Ram 1500', price: 28995 }, 'website', T(0));
+  storage = fakeStorage({ [ACCOUNT_KEY]: freshSession(), [K.posted]: posted });
+  duringRequest = () => {
+    delete storage.data[ACCOUNT_KEY]; // the session is forgotten
+    delete storage.data[K.sync]; // and so is this website's sync state, as signOutAll does
+  };
+  const r = await sync();
+  assert.equal(r.ok, true, r.error);
+  assert.equal(storage.data[K.posted] && storage.data[K.posted][VIN_C], undefined, 'the colleague\'s Honda is not written back on a signed-out computer');
+  assert.ok(storage.data[K.posted] && storage.data[K.posted][VIN_A], 'this computer\'s own post is kept');
+});

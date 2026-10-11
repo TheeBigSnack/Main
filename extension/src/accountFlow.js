@@ -422,6 +422,11 @@ export async function syncOnce({ origin = '', scan = null, deps = {} } = {}) {
     // the request was out), everything comes back from the server whole, as
     // after any clear, so a clear is never taken for a take-down.
     await updateKey(k.posted, async (current) => {
+      // signed out while the answer was out: nothing in it is written on a computer with no session, colleagues' listings included
+      if (!(await loadSession(storage))) {
+        held = current || {};
+        return undefined;
+      }
       const cleared = !current || !(await readKey(storage, k.sync));
       const merged = mergeRegistry(current || {}, answer, { since, userId, sent: cleared ? null : body.posted });
       held = merged;
