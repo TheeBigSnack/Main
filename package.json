@@ -36,6 +36,7 @@
     "test:e2e:platforms": "node test/e2e/platforms.e2e.mjs",
     "test:e2e:panel": "node test/e2e/panel.e2e.mjs",
     "test:e2e:branding": "node test/e2e/branding.e2e.mjs",
+    "test:branding-eval": "node scripts/branding-eval/run.mjs --seeds=1 --no-timing",
     "survey": "node scripts/survey.mjs",
     "set-project": "node scripts/set-project.mjs",
     "check-hosting": "node scripts/check-hosting.mjs"
