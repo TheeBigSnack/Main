@@ -301,6 +301,7 @@ Improvements round 3 (2026-10-11): the ten items of `plans/2026-10-11-next-ten-i
 - Fixed: a car whose website calls it "New Certified" (either word order, with a dash or a slash) reads as a new car, so the pre-owned gate skips it instead of reaching Ready (`extension/src/classify.js` `readCondition`; `test/classify.test.js`).
 - Fixed: a price change claimed in words with no amount ("Price just dropped!", "Dropped price, act now.", "Price lowered this week.", "Lower price this week.") is flagged as a price change, as the price drop wording already was (`extension/src/rewriteTemplate.js` `PRICE_CHANGE`; `test/rewriteTemplate.test.js`).
 - Fixed: the affiliation check reads "partnership with Facebook", "Facebook Marketplace partner", "a partner of Meta" and "Partnership with Meta" as a Facebook or Meta partnership claim, as it already read "partnered with" (`extension/src/rewriteTemplate.js` `AFFILIATION_CLAIM`; `test/rewriteTemplate.test.js`).
+- Fixed: the claim check reads "Carfax clean", "AutoCheck is clean" and "a spotless or pristine interior" as the history and condition claims they are, as it already read "clean Carfax" and "pristine condition" (`extension/src/rewriteTemplate.js` `CLAIM_KINDS`; `test/rewriteTemplate.test.js`).
 
 ## 0.5.0 (2026-09-28, toward a sellable product)
 

@@ -943,6 +943,9 @@ test('a draft that invents warranty, financing, certification, history, care, ne
     "It was Grandma's car.": ['unsupported-claim'],
     'Came in on trade from a local customer.': ['unsupported-claim'],
     'A trade-in from a local family.': ['unsupported-claim'],
+    'Carfax clean, ready to go.': ['unsupported-claim'],
+    'AutoCheck is clean.': ['unsupported-claim'],
+    'A spotless or pristine interior.': ['unsupported-claim'],
   };
   for (const [sentence, codes] of Object.entries(invented)) assert.deepEqual(codesAfter(sentence), codes, sentence);
   const c = plainCtx();
