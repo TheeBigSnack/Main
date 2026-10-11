@@ -132,3 +132,11 @@ export function originsFor(site, needs) {
   for (const pattern of Array.isArray(list) ? list : []) add(pattern);
   return facebook ? [] : [...out];
 }
+
+// The registry with one website's entry given these fields. Undefined when the
+// website is not registered any more: a result that lands after Clear
+// everything for this website must not register it again (review U3).
+export function withSiteFields(sites, origin, fields) {
+  if (!sites || !sites[origin]) return undefined;
+  return { ...sites, [origin]: { ...sites[origin], ...fields } };
+}

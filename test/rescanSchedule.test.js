@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { todoCountFor, badgeText, notificationFor, notifiedAfter, toldCountAfterChange, isDue, latestOf, originsFor, httpOnlyWebsite, RESCAN_PERIOD_MINUTES, RESCAN_ALARM, SYNC_RETRY_MINUTES, syncRetryAlarm, originOfSyncRetryAlarm } from '../extension/src/rescanSchedule.js';
+import { todoCountFor, badgeText, notificationFor, notifiedAfter, toldCountAfterChange, isDue, latestOf, originsFor, httpOnlyWebsite, RESCAN_PERIOD_MINUTES, RESCAN_ALARM, SYNC_RETRY_MINUTES, syncRetryAlarm, originOfSyncRetryAlarm, withSiteFields } from '../extension/src/rescanSchedule.js';
 import { scanWithSearch, siteForSnapshot, performScan, probeTab, UNSUPPORTED_MESSAGE } from '../extension/src/scanRunner.js';
 import dealerInspire from '../extension/adapters/dealerInspire.js';
 import { fixtures, MY_STORE, fakeDealerPage, fakeChrome } from './helpers.js';
@@ -234,4 +234,13 @@ test('a lot where some cars have no description still lines out its shared discl
   assert.equal(first.ok, true);
   assert.equal(Object.keys(first.snapshot.vehicles).length, 14);
   assert.deepEqual([...first.boilerplate], [DISCLAIMER]);
+});
+
+// A result for a website that a clear removed meanwhile must not register it
+// again (background.js noteFailure and the success write; review U3).
+test('withSiteFields gives a registered website its new fields, and nothing for a website that was cleared', () => {
+  const sites = { 'https://a.test': { name: 'A', auto: true }, 'https://b.test': { name: 'B', auto: false } };
+  assert.deepEqual(withSiteFields(sites, 'https://a.test', { lastError: 'x' }), { 'https://a.test': { name: 'A', auto: true, lastError: 'x' }, 'https://b.test': { name: 'B', auto: false } });
+  assert.equal(withSiteFields(sites, 'https://gone.test', { lastError: 'x' }), undefined, 'a cleared website is not registered again');
+  assert.equal(withSiteFields(undefined, 'https://a.test', { lastError: 'x' }), undefined);
 });

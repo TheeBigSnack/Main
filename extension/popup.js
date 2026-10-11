@@ -16,7 +16,7 @@ import { recordFlags, resolveFlag, updatePilot, summarizePilot, pilotText, pilot
 import { LEGAL, acceptLegal, legalIsCurrent, legalHosted } from './src/legalLinks.js';
 import { POSTING_RULES } from './src/postingRules.js';
 import { siteKeys, GLOBAL_KEYS, SITES_KEY } from './src/storageKeys.js';
-import { updateKey, withLock, storageErrorText } from './src/storage.js';
+import { updateKey, withLock, storageErrorText, clearWebsiteRecords } from './src/storage.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { signInStart, signInFinish, currentSession, signOutAll, rewriteEndpointFor, describeSync, planText, NOT_CONFIGURED } from './src/accountFlow.js';
 import { clearNumbersKeepingUnsynced } from './src/sync.js';
@@ -1578,24 +1578,19 @@ async function onPanelClick(ev) {
         return;
       }
       Object.assign(state, { snapshot: null, diff: null, posted: {}, postLog: [], takenDown: null, settings: null, settingsFromProfile: false, queue: null, drafts: {}, wizardDone: false, wizardActive: false, site: null, pilot: null, rescanPermission: null, view: 'todo' });
-      await ownRemove(Object.values(siteKeys(state.origin)));
+      // forget the website for background rescans too (its registry entry goes first, so a rescan still reading writes nothing back), and its records under the diff's lock (src/storage.js clearWebsiteRecords)
+      try {
+        const keys = siteKeys(state.origin);
+        await clearWebsiteRecords(state.origin, { sitesKey: SITES_KEY, recordKeys: Object.values(keys), diffKey: keys.diff, storage: popupStorage, remove: ownRemove });
+        setStatus('Cleared. Scan again, or run set-up, to start over.');
+      } catch (e) {
+        setStatus(storageErrorText(e), 'error');
+      }
       // The synced profile is the person's, not this website's data: start
       // again from it, as a popup opened on a website with no settings does,
       // so the next Scan or Settings save puts it back instead of defaults.
       state.settings = settingsFromProfile(await loadProfile(), { origin: state.origin });
       state.settingsFromProfile = Boolean(state.settings);
-      // forget the website for background rescans too, and take its count off the badge
-      try {
-        await updateKey(SITES_KEY, (sites) => {
-          if (!sites || !sites[state.origin]) return undefined;
-          const next = { ...sites };
-          delete next[state.origin];
-          return next;
-        }, popupStorage);
-        setStatus('Cleared. Scan again, or run set-up, to start over.');
-      } catch (e) {
-        setStatus(storageErrorText(e), 'error');
-      }
       chrome.runtime.sendMessage({ type: 'updateBadge' }).catch(() => {});
       clearArmed = false;
       break;

@@ -33,7 +33,7 @@ const { scanWithSearch } = await import('../extension/src/scanRunner.js');
 const { withDefaults } = await import('../extension/src/settings.js');
 const { markTakenDown, markPriceUpdated } = await import('../extension/src/rescan.js');
 const { recordFlags, updatePilot, resolveFlag } = await import('../extension/src/pilot.js');
-const { updateKey } = await import('../extension/src/storage.js');
+const { updateKey, clearWebsiteRecords } = await import('../extension/src/storage.js');
 const { siteKeys, SITES_KEY } = await import('../extension/src/storageKeys.js');
 
 const LIST = O + '/used-vehicles/';
@@ -326,5 +326,68 @@ test('a to-do notice is made for a new sold car after the items were cleared bet
   } finally {
     globalThis.fetch = realFetch;
     globalThis.chrome.notifications.create = realCreate;
+  }
+});
+
+// Clear everything for this website (the popup) while a rescan is still
+// reading: the rescan must not write the website's records back, nor register
+// the website for rescans again (review U3).
+const clearWhileReading = async () => clearWebsiteRecords(O, {
+  sitesKey: SITES_KEY,
+  diffKey: k.diff,
+  recordKeys: Object.values(k),
+  storage: local,
+  remove: async (keys) => { for (const key of keys) delete store[key]; },
+});
+
+async function registeredWebsite() {
+  for (const key of Object.keys(store)) delete store[key];
+  const cars = standardCars(6);
+  const site = { origin: O, host: 'sample-motors.test', name: 'Sample Motors', title: 'Used', adapter: 'schemaOrg' };
+  const settings = withDefaults({}, site);
+  const day1 = await scanWithSearch({ adapter: schemaOrg, search: fakeSiteSearch(standardSite({ cars })), site, settings, options: schemaOrg.scanOptions(SERVICE) });
+  Object.assign(store, {
+    [SITES_KEY]: { [O]: { name: 'Sample Motors', adapter: 'schemaOrg', service: SERVICE, site, auto: true } },
+    [k.settings]: settings, [k.snapshot]: day1.snapshot, [k.posted]: {}, [k.boilerplate]: day1.boilerplate,
+  });
+  // the website has sold one car since, so the rescan has a to-do item to save
+  return standardSite({ cars: cars.slice(1) });
+}
+
+test('a rescan still reading when the website is cleared writes nothing back and does not register the website again', async () => {
+  const today = await registeredWebsite();
+  const search = fakeSiteSearch(today);
+  let cleared = false;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (!cleared) { cleared = true; await clearWhileReading(); }
+    const got = await search({ url });
+    return { ok: got.ok, status: got.status, url, redirected: false, headers: { get: (name) => (name.toLowerCase() === 'content-type' ? got.contentType : null) }, text: async () => got.text };
+  };
+  try {
+    const r = await runRescan(O, { reason: 'alarm' });
+    assert.equal(r.ok, false, 'the read is not saved');
+    assert.match(r.error, /cleared/);
+    assert.equal(store[SITES_KEY][O], undefined, 'the website is not registered again');
+    for (const key of Object.values(k)) assert.equal(store[key], undefined, `${key} is not written back`);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test('a rescan that fails after the website is cleared does not register it again', async () => {
+  await registeredWebsite();
+  let cleared = false;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (!cleared) { cleared = true; await clearWhileReading(); }
+    return { ok: false, status: 503, url, redirected: false, headers: { get: () => null }, text: async () => '' };
+  };
+  try {
+    const r = await runRescan(O, { reason: 'alarm' });
+    assert.equal(r.ok, false);
+    assert.equal((store[SITES_KEY] || {})[O], undefined, 'the failure note does not register the website again');
+  } finally {
+    globalThis.fetch = realFetch;
   }
 });
