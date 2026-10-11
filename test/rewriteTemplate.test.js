@@ -146,6 +146,10 @@ test('a price note quoting a fee amount must match the gap between the two price
   const wrongTied = ctx(v, { priceNote: 'Price includes the $500 doc fee; tax, tags and a $55 title fee extra.' });
   const t3 = runGuardrails(buildTemplateDescription(wrongTied), wrongTied);
   assert.ok(t3.problems.some((p) => p.code === 'price-note-amount' && /\$500/.test(p.text)), JSON.stringify(t3.problems));
+  // a fee typed with a space after the dollar sign ("$ 500") is the same amount, so it is checked too
+  const spaced = ctx(v, { priceNote: 'Price includes the $ 500 doc fee; tax and tags extra.' });
+  const s = runGuardrails(buildTemplateDescription(spaced), spaced);
+  assert.ok(s.problems.some((p) => p.code === 'price-note-amount' && /\$500/.test(p.text)), JSON.stringify(s.problems));
   // no second price on this car: nothing to compare the note with, so it passes
   const single = vehicle('usedNormal', { extra_fields: { lightning: { pricing: { high: false } } } });
   const c = ctx(single, { priceNote: 'Price includes the $500 doc fee; tax and tags extra.' });

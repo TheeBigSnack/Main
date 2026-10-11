@@ -1529,7 +1529,7 @@ export function runGuardrails(text, { vehicle = {}, dealer = {}, salesperson = {
     let tied = amounts.filter((a) => tiedAfter.test(note.slice(a.at + a.text.length)) || tiedBefore.test(note.slice(0, a.at)));
     if (!tied.length && amounts.length === 1) tied = amounts;
     for (const a of tied) {
-      if (a.value !== gap && t.includes(a.text.replace(/\s/g, ''))) problems.push({ code: 'price-note-amount', text: `The price note says $${a.value.toLocaleString('en-US')}, but the website's two prices for this car differ by $${gap.toLocaleString('en-US')}; check the note in Settings` });
+      if (a.value !== gap && t.replace(/\s/g, '').includes(a.text.replace(/\s/g, ''))) problems.push({ code: 'price-note-amount', text: `The price note says $${a.value.toLocaleString('en-US')}, but the website's two prices for this car differ by $${gap.toLocaleString('en-US')}; check the note in Settings` });
     }
   }
   // The note says what the posted price includes or leaves out (a doc fee,
