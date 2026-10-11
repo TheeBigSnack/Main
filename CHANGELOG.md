@@ -307,6 +307,7 @@ Improvements round 3 (2026-10-11): the ten items of `plans/2026-10-11-next-ten-i
 - Fixed: a Dealer Inspire inventory search that never answers (the page's own helper, or the POST) is given up after 20 seconds, so a scan no longer waits on it forever (`extension/adapters/dealerInspire.js` `searchInPage`; `test/adapters.test.js`).
 - Changed: the side panel's stop for a missing dealership name names the route: click the Lot Current icon in Chrome's toolbar, then Settings, and type the name in Dealership name. The panel has no Settings button of its own, so the old "in Settings" line gave no way there (`extension/sidepanel.js` `NO_DEALER_TEXT`; `test/panelFlow.test.js`).
 - Changed: when a scan finds no car links on the inventory page, the message says plainly that some websites load their car list with scripts, and ends with the next step: open that page in this window, scan again, and tell your manager if it still finds no cars. It used to stop at a developer phrase with no step to take (`extension/adapters/schemaOrg.js` `scan`; `test/adapters.test.js`).
+- Changed: when Chrome refuses the set-up wizard's Allow automatic rescans click, the step says rescans stay off, and how to ask again, under the button; before, the step looked the same after a refusal. A yes takes the line away (`extension/src/wizardSteps.js` `GRANT_REFUSED_TEXT`, `extension/wizard.js` `wizGrant`; `test/askChrome.test.js`, `test/wizardSteps.test.js`).
 
 ## 0.5.0 (2026-09-28, toward a sellable product)
 

@@ -203,3 +203,29 @@ test('the wizard\'s Allow automatic rescans click asks Chrome for the website an
     delete globalThis.document;
   }
 });
+
+// When Chrome says no to the wizard's Allow click, the step says rescans stay
+// off and how to ask again, under the button that is still there; a yes takes
+// the line away. The line is a banner from src/wizardSteps.js, so nothing
+// here depends on the click's wording.
+test('the wizard says rescans stay off when Chrome refuses the Allow click, and drops that line once Chrome allows it', async () => {
+  globalThis.document = { getElementById: () => null, querySelector: () => null, querySelectorAll: () => [] };
+  const { wiz, handleWizardClick, wizardHtml } = await import('../extension/wizard.js');
+  const { GRANT_REFUSED_TEXT } = await import('../extension/src/wizardSteps.js');
+  const shown = GRANT_REFUSED_TEXT.replace("'", '&#39;'); // the step writes the line through esc()
+  const click = (answer) => withChrome(answer, async () => {
+    globalThis.chrome.storage = { local: { set: async () => {} } };
+    Object.assign(wiz, { active: true, origin: DEALER, step: 'permission', site: { origin: DEALER }, service: null, settings: {}, granted: false, refused: false, error: '' });
+    await handleWizardClick('wizGrant', { render: () => {}, setStatus: () => {} });
+  });
+  try {
+    await click(false);
+    assert.match(wizardHtml(), /id="wizGrant"/, 'the Allow button is still there to ask again');
+    assert.ok(wizardHtml().includes(shown), 'the step says rescans stay off');
+    await click(true);
+    assert.equal(wizardHtml().includes(shown), false, 'a yes takes the line away');
+    assert.match(wizardHtml(), /Permission granted\. Automatic rescans are on\./);
+  } finally {
+    delete globalThis.document;
+  }
+});
