@@ -49,3 +49,9 @@ test('the summary says how many are picked, the limit when it bites, and that on
   assert.match(pickSummary([], PHOTOS, 3), /needs at least one/);
   assert.match(pickSummary(null, [], 3), /no photos/);
 });
+
+test('a car with 25 usable photos and no pick, under the 20-photo limit, says 20 of 25 and that the form takes 20', () => {
+  const photos = Array.from({ length: 25 }, (_, n) => `https://img.example.test/a/${n + 1}.jpg`);
+  assert.equal(pickSummary(null, photos, 20), '20 of 25 photos picked; the form takes 20.');
+  assert.equal(pickSummary(null, photos, 0), '25 of 25 photos picked.', 'with no limit known the summary is what the caller passes');
+});

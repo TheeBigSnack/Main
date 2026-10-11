@@ -461,6 +461,8 @@ const photoLimitNow = () => (state.fill && state.fill.photoLimit && state.fill.p
 const pickLimit = () => (state.photoPick === null && !(state.fill && state.fill.photoLimit) ? 0 : photoLimitNow());
 // The photos the salesperson picked for this car, in order (src/photoPick.js).
 const pickedPhotos = () => (state.vehicle ? settlePick(state.photoPick, state.vehicle.photos, pickLimit()) : []);
+// The pick as the review shows it: cut to the limit attachPhotos takes now (the form's, once a fill has read it, else the map's default). The listing keeps its uncut list until then (pickedPhotos), so a form that takes more than the default still gets every photo it can take.
+const shownPick = () => (state.vehicle ? settlePick(state.photoPick, state.vehicle.photos, photoLimitNow()) : []);
 // Every photo unticked while the website has some: the form would open with none.
 const noPhotosPicked = () => Boolean(state.vehicle) && !pickedPhotos().length && usablePhotos(state.vehicle.photos).length > 0;
 const NO_PHOTOS_TEXT = 'No photos are ticked. Marketplace needs at least one: tick the photos to post first.';
@@ -2188,7 +2190,7 @@ function photoPickHtml() {
   const all = usablePhotos(state.vehicle.photos);
   const onFacebook = (state.vehicle.photos || []).filter((u) => typeof u === 'string' && isFacebookServer(u)).length;
   const limit = photoLimitNow();
-  const pick = pickedPhotos();
+  const pick = shownPick();
   const items = all.map((url, i) => {
     const at = pick.indexOf(url);
     const place = at === 0 ? ', cover' : at > 0 ? `, attached ${ordinal(at + 1)}` : '';
@@ -2210,7 +2212,7 @@ function photoPickHtml() {
   const isDefault = state.photoPick === null;
   return `<section id="photoPick" aria-labelledby="photoPickLabel">
     <h3 id="photoPickLabel">Photos</h3>
-    <p class="hint" id="photoPickSummary">${esc(pickSummary(state.photoPick, state.vehicle.photos, pickLimit()))}</p>
+    <p class="hint" id="photoPickSummary">${esc(pickSummary(state.photoPick, state.vehicle.photos, photoLimitNow()))}</p>
     ${all.length ? `<ul class="thumbs">${items}</ul>
     <div class="actions"><button type="button" class="plain" id="photosDefault" ${isDefault ? 'aria-pressed="true"' : 'aria-pressed="false"'}>Use the website's order</button><button type="button" class="plain" id="photosNone">Untick all</button></div>
     <p class="hint">Tick the photos to put on the listing. They are attached in the order shown by their numbers; the cover is the one Marketplace shows first.${all.length > limit ? ` The form takes up to ${limit}${state.fill && state.fill.photoLimit && state.fill.photoLimit.verified ? '' : ' (not yet checked on the form)'}.` : ''}</p>` : ''}
@@ -2949,9 +2951,9 @@ function redraw(id, html, focusId = null) {
 async function afterPhotoPick(focusId) {
   state.listing = null;
   redraw('photoPick', photoPickHtml(), focusId);
-  setStatus(pickSummary(state.photoPick, state.vehicle.photos, pickLimit())); // said aloud: the status line is the panel's live region
+  setStatus(pickSummary(state.photoPick, state.vehicle.photos, photoLimitNow())); // said aloud: the status line is the panel's live region
   const count = $('photoCount');
-  if (count) count.textContent = `${pickedPhotos().length} picked from the website`;
+  if (count) count.textContent = `${shownPick().length} picked from the website`;
   // which photo servers Chrome will be asked about follows the pick
   const servers = $('photoServers');
   if (servers) servers.innerHTML = photoServersHtml();
