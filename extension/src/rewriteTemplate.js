@@ -316,7 +316,7 @@ export function mileageClaims(text) {
 
 // Wording that claims a price change. Prices only ever mirror the website,
 // and a listing's price drop reaches buyers through the listing itself.
-const PRICE_CHANGE = /\b(?:price (?:drop(?:ped)?|reduced|reduction|cut)|reduced price|just reduced|marked down|(?:reduced|dropped|lowered|slashed|cut) from(?= \$?\d)|was \$|now (?:just |only )?\$)/i;
+const PRICE_CHANGE = /\b(?:price (?:(?:just|has|recently|now|again|also) )*(?:drop(?:ped)?|reduced|reduction|cut|lowered|came down|went down)|(?:dropped|lowered|reduced|slashed|cut) (?:the |our )?price|lower price|just reduced|marked down|(?:reduced|dropped|lowered|slashed|cut) from(?= \$?\d)|was \$|now (?:just |only )?\$)/i;
 const CHANGE_LEAD = /^(?:was|now|reduced to|dropped to)\b/i;
 function priceChangeSaid(text) {
   const m = PRICE_CHANGE.exec(text);

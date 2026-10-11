@@ -368,6 +368,18 @@ test('a stale price, price drop or mileage in a draft fails the checks, though t
   assert.ok(runGuardrails(`${base}\n$26,673.`, { ...c, price: null }).problems.some((p) => p.code === 'price-mismatch'));
 });
 
+test('a price change claimed in words, with no amount, is flagged in any word order', () => {
+  const v = { ...vehicle('usedNormal', { features: FEATURES }), descriptionRaw: STALE };
+  const c = { vehicle: v, dealer: EXAMPLE, salesperson: SAM, priceNote: 'Price includes the $490 doc fee; tax and tags extra.', price: 26673 };
+  const base = buildTemplateDescription(c);
+  assert.deepEqual(runGuardrails(base, c).problems, [], 'the template passes');
+  for (const line of ['Price just dropped!', 'Dropped price, act now.', 'Price lowered this week.', 'Lower price this week.', 'Price has dropped.']) {
+    assert.ok(runGuardrails(`${base}\n${line}`, c).problems.some((p) => p.code === 'price-change'), line);
+  }
+  // a comparison about mileage is not a price change
+  assert.ok(!runGuardrails(`${base}\nLower mileage than most in the lot.`, c).problems.some((p) => p.code === 'price-change'), 'the control');
+});
+
 test('distances, ranges and warranty terms are not read as the mileage', () => {
   assert.deepEqual(mileageClaims('A 3-year/36,000-mile powertrain warranty, 300 miles of range, 30 miles away, within 50 miles, every 5,000 miles, 60 mph.'), []);
   assert.deepEqual(mileageClaims('Only 38,000 miles! Has 38K miles, 41.2k mi and 45 thousand miles.').map((m) => m.value), [38000, 38000, 41200, 45000]);
