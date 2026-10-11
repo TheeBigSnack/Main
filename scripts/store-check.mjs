@@ -41,6 +41,7 @@ import { join, posix, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inflateRawSync, inflateSync } from 'node:zlib';
 import { PILOT_CONFIG_PATH, pilotAccountConfig, accountsOffProblems } from './pilot-config.mjs';
+import { SKIP } from './packSkip.mjs';
 
 export const LIMITS = Object.freeze({
   name: 75,
@@ -58,8 +59,8 @@ export const PROMO = Object.freeze([
   Object.freeze({ file: 'promo-marquee-1400x560.png', width: 1400, height: 560, required: false }),
 ]);
 
-// Files a packed extension must not carry (kept equal to scripts/pack.mjs).
-export const SKIP = /(^|\/)(\.DS_Store|Thumbs\.db|desktop\.ini|.*\.swp|.*~)$/;
+// Files a packed extension must not carry: the same rule the pack uses (scripts/packSkip.mjs).
+export { SKIP };
 
 export function pngSize(buf) {
   const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);

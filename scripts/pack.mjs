@@ -20,6 +20,7 @@ import { join, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { deflateRawSync } from 'node:zlib';
 import { PILOT_CONFIG_PATH, pilotAccountConfig, accountsOffProblems } from './pilot-config.mjs';
+import { SKIP } from './packSkip.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const src = join(root, 'extension');
@@ -32,9 +33,6 @@ if (pkg.version !== manifest.version) {
 const out = join(root, 'dist', `lot-current-extension-${manifest.version}.zip`);
 const pilotOut = join(root, 'dist', `lot-current-extension-${manifest.version}-pilot.zip`);
 
-// Files a packed extension must not carry: editor and OS leftovers, and the adapter
-// contract (a developer's document that no shipped code reads).
-const SKIP = /(^|\/)(\.DS_Store|Thumbs\.db|desktop\.ini|.*\.swp|.*~)$|^adapters\/README\.md$/;
 
 function walk(dir, base = dir) {
   const files = [];
