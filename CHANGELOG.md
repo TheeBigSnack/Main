@@ -295,6 +295,7 @@ Improvements round 3 (2026-10-11): the ten items of `plans/2026-10-11-next-ten-i
 - Fixed: a price flag stays open while its car is in Needs a look (the website no longer shows its price), so the pilot numbers do not record a price change as cleared by the website before it was fixed. Only a take-down flag was protected before (`noteFlags` in `src/pilot.js`).
 - Fixed: "Lienholder" and "liens" in a website's words make the title branded, so the clean-title box is not ticked for a car with a lien. The pattern had only the word lien, which the wording never matched (`brandedTitleSignal` in `src/listingData.js`).
 - Changed: Skip, next car on a queued car's publish step says the car stays Ready, and that a publish on Facebook after the skip is recorded by Mark posted on the Ready tab. A skip records nothing, and the note now says so beside the button (`skipPublishNote` in `src/queue.js`, shown in `sidepanel.js`). The record itself is unchanged: the case needs the owner's decision on how a skip is recorded.
+- Fixed: a typed make, model or location takes the suggestion that is exactly what was typed, when the form also lists a longer one that contains it. Typing Grand Cherokee was filled as Grand Cherokee L when the form listed L first, and the report said it filled (`typeahead` in `facebook/fillForm.js`).
 
 ## 0.5.0 (2026-09-28, toward a sellable product)
 
