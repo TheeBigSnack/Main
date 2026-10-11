@@ -1761,8 +1761,8 @@ export async function getDetails(search, vin, options = {}) {
     const r = await carFromPage(site, wanted, own.href);
     if (r.error) return pageFailed(r);
     if (r.record) return done(r.record);
-    if (r.gone) return done(null);
-    pageWithoutData = true;
+    // a kept address that answers 404 says nothing about the car: the list decides, as it does when the address is not known
+    if (!r.gone) pageWithoutData = true;
   }
   const start = onSite(opts.listUrl, null, origin);
   if (!start) {

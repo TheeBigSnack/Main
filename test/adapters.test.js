@@ -1384,7 +1384,8 @@ test('schemaOrg getDetails: the car\'s own page from the address the last scan k
   assert.equal(schemaOrg.normalize(d2.record).descriptionRaw.length > 0, true, 'read from its page, description included');
   assert.deepEqual(viaList.calls, [LIST, LIST + '?page=2', O + cars[5].path]);
   siteMap.set(O + cars[5].path, httpError(404));
-  assert.deepEqual((await schemaOrg.getDetails(fakeSiteSearch(siteMap), cars[5].vin, { ...schemaOrg.scanOptions(SERVICE), url: O + cars[5].path })).record, null, 'its page is gone: so is the car');
+  // its page is gone, but the list still shows the car, so the list decides: it is not called gone (the car gone from both is below)
+  assert.equal(schemaOrg.normalize((await schemaOrg.getDetails(fakeSiteSearch(siteMap), cars[5].vin, { ...schemaOrg.scanOptions(SERVICE), url: O + cars[5].path })).record).vin, cars[5].vin, 'the list still shows it');
   siteMap.set(O + cars[5].path, httpError(429));
   const blocked = await schemaOrg.getDetails(fakeSiteSearch(siteMap), cars[5].vin, { ...schemaOrg.scanOptions(SERVICE), url: O + cars[5].path });
   assert.equal(blocked.ok, false);
@@ -1987,4 +1988,18 @@ test('schemaOrg scan: a list whose own count is higher than the car pages it lin
   const site = standardSite({ cars, perPage: 24, numberOfItems: 108 });
   const res = await schemaOrg.scan(fakeSiteSearch(site), schemaOrg.scanOptions(SERVICE));
   assert.deepEqual([res.ok, res.total, res.complete], [true, 24, false], 'the 84 cars the list counts but does not link are said to be missing');
+});
+
+test('schemaOrg post-time check: a kept car address that answers 404 is not "gone" until the list is read too', async () => {
+  const cars = standardCars(6);
+  const site = standardSite({ cars, perPage: 6 });
+  // the dealership moved the car after the last scan: its old address answers 404, the list has it at its new one
+  const old = O + '/used-vehicles/moved-car/';
+  site.set(old, { ok: false, status: 404, contentType: 'text/html', text: '<html><head><title>Page not found</title></head><body>Page not found</body></html>' });
+  const found = await schemaOrg.getDetails(fakeSiteSearch(site), cars[0].vin, { origin: O, url: old, listUrl: LIST });
+  assert.equal(found.ok, true);
+  assert.equal(schemaOrg.normalize(found.record).vin, cars[0].vin, 'the list shows the car, so it is not reported gone');
+  // a car on neither the old address nor the list is still reported as not on the website
+  const gone = await schemaOrg.getDetails(fakeSiteSearch(site), 'ZZZZZZZZZZZZZZZZZ', { origin: O, url: old, listUrl: LIST });
+  assert.deepEqual([gone.ok, gone.record], [true, null]);
 });
