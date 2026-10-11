@@ -1353,7 +1353,7 @@ test('the help says what the panel list, a single arrival and a refused page che
   assert.match(panel, /once that website's data was cleared/, 'the help leaves out that a cleared website sends the panel to the most recent scan');
 
   const popup = read('../extension/popup.js');
-  assert.match(popup, /const readyArrivals = \(items\) => items\.filter\(\(n\) => n\.decision === DECISION\.READY && !state\.posted\[n\.vin\]\);/, 'ready arrivals changed: check what the help says a single one shows');
+  assert.match(popup, /const readyArrivals = \(items\) => items\.filter\(\(n\) => n\.decision === DECISION\.READY && queueable\(n\)\);/, 'ready arrivals changed: check what the help says a single one shows');
   assert.match(popup, /if \(isOpenDraft\(state\.drafts\[vin\]\)\) \{\n[^\n]*draftPill[^\n]*\n[^\n]*data-action="post"[^\n]*>Mark posted</, 'a Facebook draft no longer shows Mark posted: check the help');
   const arrivals = help.find((l) => l.startsWith('- On **To do**, **Queue all N ready arrivals**'));
   assert.ok(arrivals, 'docs/help.md no longer explains Queue all N ready arrivals');

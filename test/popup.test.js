@@ -1277,3 +1277,13 @@ test('a car published from a draft and then unmarked goes back to Ready with Pos
   assert.match(p.panel(), new RegExp(`data-action="openPost" data-vin="${car.vin}"`), 'Post is offered');
   assert.equal(p.local[k.drafts][car.vin].name, car.name, 'the draft record stays, for the day\'s count');
 });
+
+test('a car saved as a Facebook draft gets no queue tick on Ready, so Post N cars cannot queue a second form for it', async () => {
+  const car = vehicle('usedNormal');
+  const drafts = { [car.vin]: { name: car.name, savedAt: new Date().toISOString(), price: car.price, basis: 'website' } };
+  const p = await loadPopup({ local: { [k.settings]: { ...MY_STORE }, [k.drafts]: drafts } });
+  await p.scan();
+  await p.tab('ready');
+  assert.match(p.panel(), /Draft on Facebook/, 'the draft shows its pill');
+  assert.equal(p.panel().includes(`class="pick" data-vin="${car.vin}"`), false, 'no tick box for a car whose draft is open');
+});

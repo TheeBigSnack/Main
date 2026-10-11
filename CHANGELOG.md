@@ -285,6 +285,10 @@ Improvements round 2 (2026-10-11): the ten items of `plans/2026-10-11-next-ten-i
 - Fixed: a website with no og:site_name no longer pre-fills its whole page title as the dealership name. The probe takes the one part of the title, split on | or a dash, that is not page words ("Used Vehicles for Sale - Example Motors" gives "Example Motors"; "Used Vehicles | Example Motors" still gives "Example Motors"). When no single part is clearly the name, the name stays blank and the wizard asks for it (`nameFromTitle` in `src/scan.js`).
 - Changed: Download photos says which photos did not download, and why, in its status line ("1 photo was not downloaded: HTTP 403 from img.cdn.example"). A photo the worker could not get is named with the worker's reason, and a batch whose message got no answer is named as such; before, both were dropped without a word (`downloadPhotos` in `sidepanel.js`).
 
+Improvements round 3 (2026-10-11): the ten items of `plans/2026-10-11-next-ten-improvements-round-3.md`, one commit each, stacked on the round-2 branch and its pull request.
+
+- Fixed: a car already saved as a Facebook draft gets no queue tick on Ready, and the queue leaves it out, so "Post N cars" cannot open a second form for it (`queueable` in `popup.js`; the draft is still shown with its pill).
+
 ## 0.5.0 (2026-09-28, toward a sellable product)
 
 Ten tasks were chosen for the three months to a sellable product (PLAN.md M4 to M6). This release carries the first of them; every piece runs against sample data or a mock until the owner creates the accounts.

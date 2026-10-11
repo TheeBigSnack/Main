@@ -394,7 +394,10 @@ function newArrivalItems(now = Date.now()) {
   }
   return sortEntries([...byVin.values()], 'newest', { basis: state.settings?.basis });
 }
-const readyArrivals = (items) => items.filter((n) => n.decision === DECISION.READY && !state.posted[n.vin]);
+// a car the queue may take: not posted, and not saved as a Facebook draft whose form is still open (a second form would list it twice)
+const queueable = (e) => !state.posted[e.vin] && !isOpenDraft(state.drafts[e.vin]);
+
+const readyArrivals = (items) => items.filter((n) => n.decision === DECISION.READY && queueable(n));
 
 function rows(items) {
   return `<ul class="rows">${items.join('')}</ul>`;
@@ -619,9 +622,9 @@ function viewReady(l) {
 function readyBodyHtml(l, cap) {
   const order = readySort();
   const basis = { basis: state.settings?.basis };
-  prunePicks(sortEntries(l.ready.filter((e) => !state.posted[e.vin]), order, basis), cap);
+  prunePicks(sortEntries(l.ready.filter(queueable), order, basis), cap);
   const shown = sortEntries(l.ready.filter((e) => filterText(e, state.readyFilter)), order, basis);
-  const pickable = shown.filter((e) => !state.posted[e.vin]);
+  const pickable = shown.filter(queueable);
   const hidden = state.picked.size - pickable.filter((e) => state.picked.has(e.vin)).length;
   const n = Math.max(0, Math.min(cap.remaining - hidden, pickable.length));
   const posts = `${cap.remaining} more post${cap.remaining === 1 ? '' : 's'} allowed today.`;
@@ -631,7 +634,7 @@ function readyBodyHtml(l, cap) {
     : '';
   if (!shown.length) return toolbar + empty('No cars match');
   const now = Date.now();
-  return toolbar + rows(shown.map((e) => row(e, { sub: facts(e), line: whenLine(e, now), tag: newPill(e, now), right: money(price(e)), action: postButton(e.vin), pick: !state.posted[e.vin] && !cap.reached })));
+  return toolbar + rows(shown.map((e) => row(e, { sub: facts(e), line: whenLine(e, now), tag: newPill(e, now), right: money(price(e)), action: postButton(e.vin), pick: queueable(e) && !cap.reached })));
 }
 
 // Ticks that no longer apply: a car that left the Ready list or was posted
@@ -642,7 +645,7 @@ function prunePicks(ordered, cap) {
 }
 
 // The ticked cars, in the order shown, the ones the search box hides included.
-const pickedVins = () => sortEntries(lists().ready.filter((e) => state.picked.has(e.vin)), readySort(), { basis: state.settings?.basis }).map((e) => e.vin);
+const pickedVins = () => sortEntries(lists().ready.filter((e) => state.picked.has(e.vin) && queueable(e)), readySort(), { basis: state.settings?.basis }).map((e) => e.vin);
 
 const queueLabel = () => (state.picked.size ? `Post ${state.picked.size} car${state.picked.size === 1 ? '' : 's'}` : 'Post selected');
 
