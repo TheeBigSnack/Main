@@ -41,6 +41,7 @@ import { relistNotice } from './src/takenDown.js';
 import { queueHoldReasons, holdStatus } from './src/queueHold.js';
 import { notSavedReport } from './src/notSaved.js';
 import { POSTING_RULES } from './src/postingRules.js';
+import { wizardFocusId } from './src/wizardSteps.js';
 import { siteKeys, GLOBAL_KEYS, REQUEST_KEYS } from './src/storageKeys.js';
 import { updateKey, withLock, storageErrorText } from './src/storage.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
@@ -2584,7 +2585,9 @@ function render() {
   $('site').textContent = state.siteName || '';
   const views = { idle: viewIdle, rules: viewRules, checking: viewChecking, blocked: viewBlocked, review: viewReview, filling: viewFilling, probe: viewProbe, publish: viewPublish, done: viewDone, notSaved: viewNotSaved, queueDone: viewQueueDone, wizard: wizardHtml };
   if (state.step === 'wizard') {
+    const kept = focusNow();
     $('panel').innerHTML = wizardHtml();
+    refocusWizard(kept);
     return;
   }
   if (state.step === 'upkeep') {
@@ -2594,6 +2597,20 @@ function render() {
   const kept = (state.step === 'idle' && $('panelReady')) || state.step === 'publish' ? focusNow() : null; // the list, or the publish step (the Listing link box), redrawn under the person
   $('panel').innerHTML = queueBar() + (views[state.step] || viewIdle)();
   if (kept) refocus(kept);
+}
+
+// The set-up is drawn again on every press, which removes the focused button:
+// the control the step keeps (wizardFocusId) takes the focus, else the heading.
+function refocusWizard(kept) {
+  const drawn = [...$('panel').querySelectorAll('[id]')].map((el) => el.id);
+  const id = wizardFocusId(kept, drawn);
+  const el = id ? $(id) : null;
+  if (el) return el.focus();
+  const heading = $('panel').querySelector('h3');
+  if (heading) {
+    heading.tabIndex = -1;
+    heading.focus();
+  }
 }
 
 // The list part only, after a keystroke in the search box: the box keeps its focus and caret.

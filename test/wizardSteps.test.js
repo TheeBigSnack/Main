@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { wizardSteps, accountStepModel, joinedFrom, joinedText, rewriteAtAccount, termsSummary, addressHint, storeTickReason, ACCOUNT_WORDS, LATER, GRANT_REFUSED_TEXT } from '../extension/src/wizardSteps.js';
+import { wizardSteps, accountStepModel, joinedFrom, joinedText, rewriteAtAccount, termsSummary, addressHint, storeTickReason, ACCOUNT_WORDS, LATER, GRANT_REFUSED_TEXT, wizardFocusId } from '../extension/src/wizardSteps.js';
 import { syncPayload } from '../extension/src/sync.js';
 import { accountsConfigured } from '../extension/src/accountConfig.js';
 import { signInStart } from '../extension/src/accountFlow.js';
@@ -323,4 +323,18 @@ test('set-up writes the scan\'s snapshot and diff under the diff\'s lock, as the
   const src = read('../extension/wizard.js');
   assert.match(src, /await withLock\(k\.diff, \(\) => chrome\.storage\.local\.set\(\{ \[k\.snapshot\]: kept, \[k\.diff\]: diff/, 'the scan\'s write is inside the diff lock');
   assert.match(src, /import \{[^}]*\bwithLock\b[^}]*\} from '\.\/src\/storage\.js';/, 'withLock is imported');
+});
+
+test('a set-up step drawn again gives the keyboard focus back to the control that had it, else to its Next button', () => {
+  assert.equal(wizardFocusId({ id: 'wizNext' }, ['wizBack', 'wizNext']), 'wizNext', 'Next to Next: the same button');
+  assert.equal(wizardFocusId({ id: 'wizBack' }, ['wizBack', 'wizNext']), 'wizBack', 'Back stays where it was');
+  assert.equal(wizardFocusId({ id: 'wizScan' }, ['wizNext', 'wizBack']), 'wizNext', 'Read is gone once the scan is done: Next takes the focus');
+  assert.equal(wizardFocusId({ id: 'wizScan' }, ['wizBack', 'wizQuit']), null, 'no Next on the step: the heading takes it');
+  assert.equal(wizardFocusId(null, ['wizNext']), null, 'nothing had the focus');
+});
+
+test('the side panel gives the set-up focus back on every draw, through wizardFocusId', () => {
+  const sidepanel = readFileSync(new URL('../extension/sidepanel.js', import.meta.url), 'utf8');
+  assert.match(sidepanel, /if \(state\.step === 'wizard'\) \{\n\s+const kept = focusNow\(\);\n\s+\$\('panel'\)\.innerHTML = wizardHtml\(\);\n\s+refocusWizard\(kept\);/, 'the set-up is drawn with the focus kept');
+  assert.match(sidepanel, /function refocusWizard\(kept\) \{[\s\S]*?wizardFocusId\(kept,/, 'refocusWizard asks wizardFocusId which control gets it');
 });
