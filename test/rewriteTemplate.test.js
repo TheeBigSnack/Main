@@ -1453,3 +1453,16 @@ test('guardrails catch a description that claims a Facebook or Meta partnership 
   assert.deepEqual(codes(base + '\nListed on Facebook Marketplace, and sold on Facebook.'), [], 'a plain name and the certified word are not a claim');
   assert.deepEqual(codes(base), []);
 });
+
+test('a dealership whose own name holds a banned phrase is not blocked by that name; the phrase in the text still is', () => {
+  const v = vehicle('usedNoCarfax');
+  const c = ctx(v, { dealer: { ...DEALER, name: 'Best Deal Auto' } });
+  const codes = (text, ctx2 = c) => runGuardrails(text, ctx2).problems.map((p) => p.code);
+  const base = buildTemplateDescription(c);
+  assert.ok(base.includes('Best Deal Auto'), 'the sign-off names the dealership');
+  assert.deepEqual(codes(base).filter((code) => code === 'banned-phrase'), [], 'the name alone is no banned phrase');
+  assert.ok(codes(base + '\nThe best deal in town.').includes('banned-phrase'), 'the same words in the text are still caught');
+  // a name that is only a word of a phrase does not switch the check off for the phrase's other words
+  const short = { ...c, dealer: { ...DEALER, name: 'Best Motors' } };
+  assert.ok(codes(buildTemplateDescription(short) + '\nThe best deal in town.', short).includes('banned-phrase'), 'Best Motors does not hide best deal');
+});
