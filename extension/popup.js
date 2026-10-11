@@ -551,7 +551,7 @@ function viewTodo(l) {
   const arrivals = newArrivalItems(now);
   if (arrivals.length) {
     const ready = readyArrivals(arrivals);
-    const queueAll = ready.length > 1
+    const queueAll = ready.length > 1 && !queueUnderWay()
       ? `<div class="toolbar"><button type="button" class="small go" data-action="queueArrivals">Queue all ${ready.length} ready arrivals</button><span class="hint">Pre-fills them one at a time in the side panel; you click Publish on each.</span></div>`
       : '';
     parts.push(
@@ -574,6 +574,10 @@ function viewTodo(l) {
   if (!parts.length && d && !d.firstScan) html += empty('Nothing changed since the last scan.');
   return html + parts.join('');
 }
+
+// A queue that is still walking (started here or in the side panel): no new queue is built over it, and its Post N and tick boxes wait.
+const QUEUE_UNDER_WAY = 'A queue is already under way: continue it from the bar above, or stop it first.';
+const queueUnderWay = () => Boolean(state.queue && state.queue.status !== 'done');
 
 // The batch queue's state line, shown on the Ready tab while a queue exists.
 function queueStatusHtml() {
@@ -632,12 +636,12 @@ function readyBodyHtml(l, cap) {
   const n = Math.max(0, Math.min(cap.remaining - hidden, pickable.length));
   const posts = `${cap.remaining} more post${cap.remaining === 1 ? '' : 's'} allowed today.`;
   const selectNext = pickable.length > 1 && n > 0;
-  const toolbar = !cap.reached && (pickable.length > 1 || state.picked.size)
+  const toolbar = !cap.reached && !queueUnderWay() && (pickable.length > 1 || state.picked.size)
     ? `<div class="toolbar">${selectNext ? `<label><input type="checkbox" id="pickAll" data-n="${n}" /> <span>Select the next ${n}</span></label>` : ''}<button type="button" class="small go" data-action="queue" id="queueBtn"${state.picked.size ? '' : ' disabled'}>${queueLabel()}</button><span class="hint" id="pickHint">${selectNext ? `Ticks the next ${n} in this order. ` : ''}${hidden ? `${hidden} ticked car${hidden === 1 ? '' : 's'} hidden by the search. ` : ''}${posts}</span></div>`
     : '';
   if (!shown.length) return toolbar + empty('No cars match');
   const now = Date.now();
-  return toolbar + rows(shown.map((e) => row(e, { sub: facts(e), line: whenLine(e, now), tag: newPill(e, now), right: money(price(e)), action: postButton(e.vin, { capReached: cap.reached }), pick: queueable(e) && !cap.reached })));
+  return toolbar + rows(shown.map((e) => row(e, { sub: facts(e), line: whenLine(e, now), tag: newPill(e, now), right: money(price(e)), action: postButton(e.vin, { capReached: cap.reached }), pick: queueable(e) && !cap.reached && !queueUnderWay() })));
 }
 
 // Ticks that no longer apply: a car that left the Ready list or was posted
@@ -1345,6 +1349,14 @@ async function onPanelClick(ev) {
       if (!state.tab) return;
       let queue = state.queue;
       if (btn.dataset.action !== 'continueQueue') {
+        // one started in the side panel meanwhile is picked up, not replaced
+        const key = siteKeys(state.origin).queue;
+        const stored = (await chrome.storage.local.get(key))[key] || null;
+        if (stored && stored.status !== 'done') {
+          state.queue = stored;
+          setStatus(QUEUE_UNDER_WAY, 'error');
+          return render();
+        }
         const vins = btn.dataset.action === 'queue'
           ? pickedVins() // the ticked cars in the order shown, the ones the search box hides included
           : readyArrivals(newArrivalItems()).map((n) => n.vin); // the same cars the To do tab lists, in the same order

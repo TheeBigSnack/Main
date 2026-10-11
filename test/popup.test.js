@@ -1287,3 +1287,21 @@ test('a car saved as a Facebook draft gets no queue tick on Ready, so Post N car
   assert.match(p.panel(), /Draft on Facebook/, 'the draft shows its pill');
   assert.equal(p.panel().includes(`class="pick" data-vin="${car.vin}"`), false, 'no tick box for a car whose draft is open');
 });
+
+test('Queue or Queue all while a queue is under way refuses and keeps that queue, and the Ready toolbar offers no new queue then', async () => {
+  const records = [raw('usedNormal'), raw('usedNormal', { vin: sampleVin(2) })];
+  const running = { vins: [sampleVin(1), sampleVin(2)], index: 0, status: 'running', results: {}, dealerTabId: 3, windowId: 1, startedAt: new Date().toISOString() };
+  const control = await loadPopup({ records, local: { [k.settings]: { ...MY_STORE } } });
+  await control.scan();
+  await control.tab('ready');
+  assert.equal(control.panel().includes('data-action="queue"'), true, 'control: two ready cars offer Post N with no queue');
+  const p = await loadPopup({ records, local: { [k.settings]: { ...MY_STORE }, [k.queue]: running } });
+  await p.scan();
+  await p.tab('ready');
+  assert.equal(p.panel().includes('data-action="queue"'), false, 'no Post N button while the queue runs');
+  await p.click('queue');
+  assert.equal(p.status(), 'A queue is already under way: continue it from the bar above, or stop it first.');
+  assert.deepEqual(p.local[k.queue], running, 'the running queue is not replaced');
+  await p.click('queueArrivals');
+  assert.deepEqual(p.local[k.queue], running, 'Queue all does not replace it either');
+});
