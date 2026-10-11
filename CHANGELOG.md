@@ -275,7 +275,8 @@ Improvements round (2026-10-11): the ten items of `plans/2026-10-11-next-ten-imp
 Improvements round 2 (2026-10-11): the ten items of `plans/2026-10-11-next-ten-improvements-round-2.md`, one commit each, on one branch and one pull request.
 
 - Fixed: a to-do notice is made for a new sold car after the to-do items were cleared between scans. The count a site was last told about now drops with the items handled, so the next new item is compared with what is left, not with the count from before the clear (`toldCountAfterChange` in `src/rescanSchedule.js`, `updateBadge` in `background.js`).
-- Fixed: Fill again no longer calls its own fields "another vehicle". A choice the form shows under one of its labels (Car/Truck for car_truck, Gas for Gasoline) and a number shown with separators (28,995 for 28995) count as the value Lot Current filled (`shownAsOurs` in `facebook/fillForm.js`, from the map's option labels).
+- Fixed: Fill again no longer calls its own fields "another vehicle". A choice the form shows under one of its labels (Car/Truck for car_truck, Gas for Gasoline) and a number shown with separators (28,995 for 28995) count as the value Lot Current filled (`shownAsOurs` in `facebook/fillForm.js`, from the map's option labels). 
+- Fixed: a car with no description is no description on a Dealer Inspire or schema.org lot. It used to read as an empty text and count as a described car, so a lot-wide disclaimer on 4 of 14 cars (3 blank) fell under the 30% share and was not stripped from the drafts. Blank text now reads as null (`normalizeVehicle` in `adapters/dealerInspireNormalize.js` and `adapters/schemaOrgNormalize.js`), and the scan counts only non-blank descriptions (`scanWithSearch` in `src/scanRunner.js`).
 
 ## 0.5.0 (2026-09-28, toward a sellable product)
 

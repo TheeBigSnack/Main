@@ -101,7 +101,7 @@ export async function scanWithSearch({ adapter, search, site, settings, prevSnap
   //    all, so the saved ones stay.
   const notRead = new Set(Array.isArray(res.descriptionsUnread) ? res.descriptionsUnread : []);
   const skipped = vehicles.filter((v) => notRead.has(v.vin)).length + (Array.isArray(res.unread) ? res.unread.length : 0);
-  const read = vehicles.filter((v) => !notRead.has(v.vin)).map((v) => v.descriptionRaw).filter((d) => d !== null && d !== undefined);
+  const read = vehicles.filter((v) => !notRead.has(v.vin)).map((v) => v.descriptionRaw).filter((d) => typeof d === 'string' && d.trim() !== '');
   const saved = Array.isArray(savedBoilerplate) ? savedBoilerplate : [];
   const whole = skipped === 0 && read.length >= MIN_BOILERPLATE_COUNT && res.complete && !diff.unreliable;
   const lot = diff.unreliable ? Math.max(read.length + skipped, (diff.counts && diff.counts.previous) || 0) : read.length + skipped;

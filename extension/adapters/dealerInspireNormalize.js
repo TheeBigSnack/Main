@@ -118,7 +118,7 @@ export function normalizeVehicle(raw) {
     dateInStock: raw.date_in_stock || null,
 
     // Text for the description writer. Not kept in the compact snapshot.
-    descriptionRaw: typeof raw.description === 'string' ? raw.description : '',
+    descriptionRaw: typeof raw.description === 'string' && raw.description.trim() ? raw.description : null, // a blank one is no description, so it does not count in the lot
     features: Array.isArray(raw.features) ? raw.features.filter((f) => typeof f === 'string' && f.trim()).map((f) => f.trim()) : [],
 
     // Details for the eventual listing
