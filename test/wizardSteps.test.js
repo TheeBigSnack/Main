@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { wizardSteps, accountStepModel, joinedFrom, joinedText, rewriteAtAccount, termsSummary, addressHint, storeTickReason, ACCOUNT_WORDS, LATER, GRANT_REFUSED_TEXT, wizardFocusId } from '../extension/src/wizardSteps.js';
+import { wizardSteps, accountStepModel, joinedFrom, joinedText, rewriteAtAccount, termsSummary, addressHint, storeTickReason, ACCOUNT_WORDS, LATER, GRANT_REFUSED_TEXT, wizardFocusId, readyLine } from '../extension/src/wizardSteps.js';
 import { syncPayload } from '../extension/src/sync.js';
 import { accountsConfigured } from '../extension/src/accountConfig.js';
 import { signInStart } from '../extension/src/accountFlow.js';
@@ -337,4 +337,16 @@ test('the side panel gives the set-up focus back on every draw, through wizardFo
   const sidepanel = readFileSync(new URL('../extension/sidepanel.js', import.meta.url), 'utf8');
   assert.match(sidepanel, /if \(state\.step === 'wizard'\) \{\n\s+const kept = focusNow\(\);\n\s+\$\('panel'\)\.innerHTML = wizardHtml\(\);\n\s+refocusWizard\(kept\);/, 'the set-up is drawn with the focus kept');
   assert.match(sidepanel, /function refocusWizard\(kept\) \{[\s\S]*?wizardFocusId\(kept,/, 'refocusWizard asks wizardFocusId which control gets it');
+});
+
+test('the set-up finish says when no car is ready yet, and sends the person to the Not ready tab, where each car\'s reason is', () => {
+  assert.equal(readyLine(0), 'No car is ready yet. Click the Lot Current icon and open <b>Not ready</b> to see why each one is held back.');
+  assert.equal(readyLine(1), '1 car is ready to post. Click the Lot Current icon and open <b>Ready to post</b>.');
+  assert.equal(readyLine(3), '3 cars are ready to post. Click the Lot Current icon and open <b>Ready to post</b>.');
+  // the Ready tab's empty state points to the same tab, as the set-up finish does
+  const popup = readFileSync(new URL('../extension/popup.js', import.meta.url), 'utf8');
+  assert.match(popup, /return lead \+ queueStatusHtml\(\) \+ empty\('No cars are ready right now\. Open <b>Not ready<\/b> to see why each car is held back\.'\);/);
+  // and the finish draws the line from the function
+  const wizard = readFileSync(new URL('../extension/wizard.js', import.meta.url), 'utf8');
+  assert.match(wizard, /<b>Set up\.<\/b> \$\{wiz\.scan \? readyLine\(wiz\.scan\.ready\) : ''\}/);
 });
