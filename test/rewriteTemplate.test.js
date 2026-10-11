@@ -1447,7 +1447,7 @@ test('guardrails catch a description that claims a Facebook or Meta partnership 
   const v = vehicle('usedNoCarfax');
   const base = buildTemplateDescription(ctx(v));
   const codes = (text, c = ctx(v)) => runGuardrails(text, c).problems.map((p) => p.code);
-  for (const line of ['Facebook partner dealership.', 'Meta Verified dealer.', 'Partnered with Meta.', 'Endorsed by Facebook.', 'An approved Facebook seller.', 'Official Facebook dealer.']) {
+  for (const line of ['Facebook partner dealership.', 'Meta Verified dealer.', 'Partnered with Meta.', 'Endorsed by Facebook.', 'An approved Facebook seller.', 'Official Facebook dealer.', 'Facebook Verified dealer.', 'Verified by Meta.', 'Certified by Facebook.', 'Facebook recommended seller.', 'Recognized by Meta.', 'Sanctioned by Facebook.']) {
     assert.ok(codes(base + '\n' + line).includes('affiliation'), line);
   }
   assert.deepEqual(codes(base + '\nListed on Facebook Marketplace, and sold on Facebook.'), [], 'a plain name and the certified word are not a claim');

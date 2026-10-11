@@ -820,8 +820,8 @@ export const priceNoteNotice = (note, dealer) => priceNoteReasons(note, dealer).
 // between, a comma after any but the last), "only one previous owner", "its
 // sole owner", "its first owner", "owned by one family"; not "One-Touch
 // Windows, Owner's Manual"
-// a claim of a Facebook or Meta partnership, approval, endorsement or verification, in either word order ("Meta Verified", "Facebook partner", "approved by Meta")
-const AFFILIATION_CLAIM = /\bmeta[\s-]+verified\b|\b(?:facebook|meta)[\s-]+(?:partners?|partnership|approved|endorsed|authori[sz]ed|official)\b|\b(?:partnered|partners?|endorsed|approved|authori[sz]ed|official)\s+(?:with\s+|by\s+)?(?:facebook|meta)\b/i;
+// a claim of a Facebook or Meta partnership, approval, endorsement or verification, in either word order ("Meta Verified", "Facebook partner", "approved by Meta", "Facebook Verified", "Verified by Meta")
+const AFFILIATION_CLAIM = /\bmeta[\s-]+verified\b|\b(?:facebook|meta)[\s-]+(?:partners?|partnership|approved|endorsed|authori[sz]ed|official|verified|certified|recommended|sanctioned|recognized)\b|\b(?:partnered|partners?|endorsed|approved|authori[sz]ed|official|verified|certified|recommended|sanctioned|recognized)\s+(?:with\s+|by\s+)?(?:facebook|meta)\b/i;
 const ONE_OWNER = /\b(?:(?:one|1|single)[\s-]+(?:(?:(?!(?:new|next|more|other|of|the|a|an|its|your|lucky)\b)[a-z']+,?[\s-]+){0,2}(?!(?:new|next|more|other|of|the|a|an|its|your|lucky)\b)[a-z']+[\s-]+)?owner(?!['\u2019]s[\s-]+(?:manual|guide|handbook|portal|app)\b)|(?:sole|only|first)[\s-]+owner|owned by (?:one|a single))\b/i;
 
 // "Driven by" the engine is what powers the car, not who drove it ("driven
