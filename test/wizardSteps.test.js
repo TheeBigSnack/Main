@@ -312,3 +312,11 @@ test('the store step says which match ticked the store: the website\'s name, its
   assert.doesNotMatch(storeTickReason('site'), /own name/);
   assert.match(storeTickReason('town'), /town of the website's address/);
 });
+
+// Set-up's read writes the snapshot, the diff and the settings the scan found. The diff is the key the background rescan
+// writes under its lock (background.js runRescan), so set-up's write takes that same lock, or a rescan in between is overwritten.
+test('set-up writes the scan\'s snapshot and diff under the diff\'s lock, as the background rescan does', () => {
+  const src = read('../extension/wizard.js');
+  assert.match(src, /await withLock\(k\.diff, \(\) => chrome\.storage\.local\.set\(\{ \[k\.snapshot\]: kept, \[k\.diff\]: diff/, 'the scan\'s write is inside the diff lock');
+  assert.match(src, /import \{[^}]*\bwithLock\b[^}]*\} from '\.\/src\/storage\.js';/, 'withLock is imported');
+});

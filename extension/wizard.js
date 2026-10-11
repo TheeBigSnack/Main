@@ -21,7 +21,7 @@ import { recordFlags } from './src/pilot.js';
 import { LEGAL, acceptLegal, legalHosted } from './src/legalLinks.js';
 import { siteKeys } from './src/storageKeys.js';
 import { withPostedBasis, withWithheld } from './src/rescan.js';
-import { updateKey, storageErrorText, isStorageFull, STORAGE_FULL } from './src/storage.js';
+import { updateKey, withLock, storageErrorText, isStorageFull, STORAGE_FULL } from './src/storage.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { signInStart, signInFinish, currentSession, rewriteEndpointFor } from './src/accountFlow.js';
 import { loadSession, redeemInvite } from './src/account.js';
@@ -251,7 +251,8 @@ async function runScan(ctx) {
   // the Price step judges the same entries Settings does, so the two agree on whether a lower second price is offered
   const scan = { cars: r.vehicles.length, stores, siteName: r.site.name, ready: Object.values(kept.vehicles).filter((v) => v.decision === 'ready').length, warnings: r.diff.warnings || [], price: priceStepModel(Object.values(kept.vehicles)) };
   try {
-    await chrome.storage.local.set({ [k.snapshot]: kept, [k.diff]: diff, [k.boilerplate]: r.boilerplate, [k.settings]: r.settings });
+    // under the diff's lock, the key the background rescan writes under, so a rescan in between is not overwritten
+    await withLock(k.diff, () => chrome.storage.local.set({ [k.snapshot]: kept, [k.diff]: diff, [k.boilerplate]: r.boilerplate, [k.settings]: r.settings }));
   } catch (e) {
     wiz.error = storageErrorText(e); // the quota, most likely: the step says what to clear, and Read the website is there again
     ctx.render();
