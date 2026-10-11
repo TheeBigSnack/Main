@@ -120,9 +120,20 @@ test('local check: the Ram agrees on year and maker; a wrong year or make is fla
   assert.equal(wrongMake.ok, false);
   assert.match(wrongMake.problems[0].detail, /Stellantis, but the website says Chevrolet/);
 
-  const typo = localVinCheck(vehicle('usedNormal', { vin: '1C6RR7FT0KS643298' }));
+  // a check-digit typo: the format row fails, and the year and maker rows still compare what the VIN says
+  const typo = localVinCheck(vehicle('usedNormal', { vin: '1C6RR7FT0KS643298', year: 2018, make: 'Ram' }));
   assert.equal(typo.ok, false);
-  assert.equal(typo.checks[0].ok, false);
+  assert.equal(typo.checks[0].ok, false, 'the format row still fails');
+  assert.equal(typo.checks[1].ok, false, 'the year row is read from the VIN');
+  assert.match(typo.checks[1].detail, /VIN says 2019, the website says 2018/);
+  assert.equal(typo.checks[2].ok, true, 'the maker code is read too');
+  assert.match(typo.checks[2].detail, /Stellantis, website's "Ram" agrees/);
+
+  // a VIN too short to read: the rows say they were not checked, not that the VIN was read and differs
+  const short = localVinCheck({ vin: '1C6RR7FT0KS64329', year: 2019, make: 'Ram' });
+  assert.equal(short.checks[0].ok, false);
+  assert.deepEqual([short.checks[1].ok, short.checks[1].detail], [null, 'not checked: the VIN fails the format check']);
+  assert.deepEqual([short.checks[2].ok, short.checks[2].detail], [null, 'not checked: the VIN fails the format check']);
 });
 
 const nhtsa = (results) => async () => ({ ok: true, status: 200, json: async () => ({ Count: 1, Results: [results] }) });
