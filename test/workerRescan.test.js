@@ -229,3 +229,49 @@ test('a rescan held back as a website hiccup records no price basis, even one th
     globalThis.fetch = realFetch;
   }
 });
+
+test('a to-do notice the system refused to show is made again by the next scan, and a notice shown is not repeated', async () => {
+  for (const key of Object.keys(store)) delete store[key];
+  const cars = standardCars(6);
+  const [sold] = cars;
+  const site = { origin: O, host: 'sample-motors.test', name: 'Sample Motors', title: 'Used', adapter: 'schemaOrg' };
+  const settings = withDefaults({}, site);
+  const options = schemaOrg.scanOptions(SERVICE);
+  const day1 = await scanWithSearch({ adapter: schemaOrg, search: fakeSiteSearch(standardSite({ cars })), site, settings, options });
+  // the website sells the posted car: its page is gone and it is no longer listed
+  const today = standardSite({ cars: cars.slice(1) });
+  today.set(O + sold.path, httpError(404));
+  Object.assign(store, {
+    [SITES_KEY]: { [O]: { name: 'Sample Motors', adapter: 'schemaOrg', service: SERVICE, site, auto: true } },
+    [k.settings]: settings, [k.snapshot]: day1.snapshot, [k.posted]: { [sold.vin]: { name: 'Sold car', price: sold.price, postedAt: '2020-01-01T12:00:00.000Z' } }, [k.diff]: day1.diff, [k.boilerplate]: day1.boilerplate,
+  });
+  const search = fakeSiteSearch(today);
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const got = await search({ url });
+    return { ok: got.ok, status: got.status, url, redirected: false, headers: { get: (name) => (name.toLowerCase() === 'content-type' ? got.contentType : null) }, text: async () => got.text };
+  };
+  const realCreate = globalThis.chrome.notifications.create;
+  const shown = [];
+  let refuse = true;
+  globalThis.chrome.notifications.create = async (id, opts) => {
+    shown.push(opts.message);
+    if (refuse) throw new Error('notifications are blocked');
+  };
+  try {
+    const first = await runRescan(O, { reason: 'alarm' });
+    assert.equal(first.ok, true, first.error);
+    assert.equal(first.count, 1, 'one to-do item for this computer');
+    assert.equal(shown.length, 1, 'the notice was attempted');
+    assert.equal(store[SITES_KEY][O].lastNotifiedCount, 0, 'a notice the system refused is not recorded as sent');
+    refuse = false;
+    await runRescan(O, { reason: 'alarm' });
+    assert.equal(shown.length, 2, 'the next scan makes the same notice');
+    assert.equal(store[SITES_KEY][O].lastNotifiedCount, 1, 'a notice shown is recorded');
+    await runRescan(O, { reason: 'alarm' });
+    assert.equal(shown.length, 2, 'a notice shown is not repeated while the count stays the same');
+  } finally {
+    globalThis.fetch = realFetch;
+    globalThis.chrome.notifications.create = realCreate;
+  }
+});

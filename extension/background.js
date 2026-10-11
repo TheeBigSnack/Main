@@ -27,7 +27,7 @@ import { siteKeys, SITES_KEY } from './src/storageKeys.js';
 import { updateKey, withLock, storageErrorText } from './src/storage.js';
 import { settleDiff, withWithheld } from './src/rescan.js';
 import { withDefaults } from './src/settings.js';
-import { RESCAN_ALARM, RESCAN_PERIOD_MINUTES, SYNC_RETRY_MINUTES, syncRetryAlarm, originOfSyncRetryAlarm, todoCountFor, badgeText, notificationFor, isDue, latestOf, originsFor } from './src/rescanSchedule.js';
+import { RESCAN_ALARM, RESCAN_PERIOD_MINUTES, SYNC_RETRY_MINUTES, syncRetryAlarm, originOfSyncRetryAlarm, todoCountFor, badgeText, notificationFor, notifiedAfter, isDue, latestOf, originsFor } from './src/rescanSchedule.js';
 import { recordFlags } from './src/pilot.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { syncOnce, scanFromStored, NOT_CONFIGURED } from './src/accountFlow.js';
@@ -351,15 +351,14 @@ export async function runRescan(origin, { reason = 'alarm' } = {}) {
   // counted on from the one saved before (withWithheld), for the popup to
   // offer; only the salesperson's click there replaces the snapshot.
   let diff;
-  let before;
   try {
-    ({ diff, before } = await withLock(k.diff, async () => {
+    ({ diff } = await withLock(k.diff, async () => {
       const now = await chrome.storage.local.get([k.posted, k.diff]);
       const settled = withWithheld(settleDiff(out.diff, now[k.posted] || {}), out.snapshot, now[k.diff]);
       const save = { [k.diff]: settled, [k.boilerplate]: out.boilerplate };
       if (!settled.unreliable) save[k.snapshot] = out.snapshot;
       await chrome.storage.local.set(save);
-      return { diff: settled, before: now[k.diff] };
+      return { diff: settled };
     }));
   } catch (e) {
     return noteFailure(origin, info, storageErrorText(e), reason); // the quota, most likely: the popup's To do shows it as the last error
@@ -367,22 +366,26 @@ export async function runRescan(origin, { reason = 'alarm' } = {}) {
   await recordFlags(origin, diff, out.res.fetchedAt).catch(() => null); // pilot numbers: when a to-do item first appeared
   await keepSeenBasis(origin, data[k.snapshot] || null, out.snapshot, diff).catch(() => null); // the price basis this read shows for a listing that has none; none from a held-back read
   const count = todoCountFor(diff);
-  // Compared with the person's outstanding list (the saved diff, which the
-  // popup and upkeep trim as items are handled), not with the last rescan's count.
-  const note = notificationFor(todoCountFor(before), count);
+  // Compared with what the website was last told about (lastNotifiedCount), so
+  // a notice the system refused to show is made again by the next scan.
+  const known = (await loadSites())[origin] || info;
+  const note = notificationFor(known.lastNotifiedCount, count);
+  // The notice goes out before the account sync below, which can take a while
+  // and can be cut short when Chrome stops the worker; it is never waiting on it.
+  let failed = false;
+  if (note && settings.notify !== false && reason === 'alarm') {
+    try {
+      await chrome.notifications.create(`lot-sync-${origin}`, { type: 'basic', iconUrl: 'icons/icon128.png', title: note.title, message: `${note.message} (${info.name || origin})`, priority: 0 });
+    } catch (e) { failed = true; /* notifications may be blocked; the badge still shows, and the next scan makes the notice again */ }
+  }
   try {
-    await updateSites((sites) => ({ ...sites, [origin]: { ...(sites[origin] || info), photoOrigins: out.photoOrigins, lastScan: out.res.fetchedAt, lastAttempt: now, lastError: null, lastReason: reason, lastNotifiedCount: count } }));
+    await updateSites((sites) => ({ ...sites, [origin]: { ...(sites[origin] || info), photoOrigins: out.photoOrigins, lastScan: out.res.fetchedAt, lastAttempt: now, lastError: null, lastReason: reason, lastNotifiedCount: notifiedAfter(known.lastNotifiedCount, count, failed) } }));
   } catch (e) {
     return noteFailure(origin, info, storageErrorText(e), reason);
   }
   await updateBadge();
   // the dealership's shared registry, once accounts exist: recorded on the site entry, never a reason for the rescan to fail
   if (accountsConfigured()) await syncSite(origin, { scan: scanFromStored({ snapshot: out.snapshot, diff }) });
-  if (note && settings.notify !== false && reason === 'alarm') {
-    try {
-      await chrome.notifications.create(`lot-sync-${origin}`, { type: 'basic', iconUrl: 'icons/icon128.png', title: note.title, message: `${note.message} (${info.name || origin})`, priority: 0 });
-    } catch (e) { /* notifications may be blocked; the badge still shows */ }
-  }
   return { ok: true, count, warnings: diff.warnings, cars: Object.keys(out.snapshot.vehicles).length };
 }
 

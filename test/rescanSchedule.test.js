@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { todoCountFor, badgeText, notificationFor, isDue, latestOf, originsFor, RESCAN_PERIOD_MINUTES, RESCAN_ALARM, SYNC_RETRY_MINUTES, syncRetryAlarm, originOfSyncRetryAlarm } from '../extension/src/rescanSchedule.js';
+import { todoCountFor, badgeText, notificationFor, notifiedAfter, isDue, latestOf, originsFor, RESCAN_PERIOD_MINUTES, RESCAN_ALARM, SYNC_RETRY_MINUTES, syncRetryAlarm, originOfSyncRetryAlarm } from '../extension/src/rescanSchedule.js';
 import { scanWithSearch, siteForSnapshot, performScan, probeTab, UNSUPPORTED_MESSAGE } from '../extension/src/scanRunner.js';
 import dealerInspire from '../extension/adapters/dealerInspire.js';
 import { fixtures, MY_STORE, fakeDealerPage, fakeChrome } from './helpers.js';
@@ -169,4 +169,19 @@ test('performScan on a Dealer Inspire look-alike: neutral probe, the adapter\'s 
   } finally {
     delete globalThis.chrome;
   }
+});
+
+test('a notice that failed to show is not counted as sent, so the next scan makes it again', () => {
+  // told about 2; the count falls to 0 and rises to 2 again: a new notice
+  const told = notifiedAfter(2, 0, false);
+  assert.equal(told, 0);
+  assert.deepEqual(notificationFor(told, 2), { title: 'Lot Current', message: '2 of your listings need attention' });
+  // a notice the system refused: the count is not recorded, so the same two are told about next scan
+  const failed = notifiedAfter(0, 2, true);
+  assert.equal(failed, 0);
+  assert.deepEqual(notificationFor(failed, 2), { title: 'Lot Current', message: '2 of your listings need attention' });
+  // a notice that showed, or no notice due: the count is recorded
+  assert.equal(notifiedAfter(0, 2, false), 2);
+  assert.equal(notificationFor(notifiedAfter(0, 2, false), 2), null);
+  assert.equal(notifiedAfter(2, 1, false), 1, 'an item handled: the count it is told from drops with it');
 });
