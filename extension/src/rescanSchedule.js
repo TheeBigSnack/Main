@@ -48,6 +48,15 @@ export function notifiedAfter(previous, count, failed) {
   return failed ? (Number(previous) || 0) : count;
 }
 
+// The count a site was told about, lowered when to-do items are handled
+// between scans (the popup, the side panel or Upkeep clear them, and the
+// badge follows). Without this, a car sold after the clear is compared with
+// the old, higher count and its notice is never shown. Null when there is
+// nothing to lower: a rise is recorded by the scan, not here.
+export function toldCountAfterChange(told, count) {
+  return count < (Number(told) || 0) ? count : null;
+}
+
 // Due when a period has passed since the last attempt, less five minutes of
 // slack: the alarm fires a whole period after the previous firing, but the
 // stored time is when the previous scan finished, which can be a minute or

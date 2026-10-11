@@ -27,7 +27,7 @@ globalThis.chrome = {
   notifications: { create: async () => {} },
 };
 
-const { runRescan } = await import('../extension/background.js');
+const { runRescan, updateBadge } = await import('../extension/background.js');
 const schemaOrg = (await import('../extension/adapters/schemaOrg.js')).default;
 const { scanWithSearch } = await import('../extension/src/scanRunner.js');
 const { withDefaults } = await import('../extension/src/settings.js');
@@ -270,6 +270,59 @@ test('a to-do notice the system refused to show is made again by the next scan, 
     assert.equal(store[SITES_KEY][O].lastNotifiedCount, 1, 'a notice shown is recorded');
     await runRescan(O, { reason: 'alarm' });
     assert.equal(shown.length, 2, 'a notice shown is not repeated while the count stays the same');
+  } finally {
+    globalThis.fetch = realFetch;
+    globalThis.chrome.notifications.create = realCreate;
+  }
+});
+
+test('a to-do notice is made for a new sold car after the items were cleared between scans', async () => {
+  for (const key of Object.keys(store)) delete store[key];
+  const cars = standardCars(6);
+  const [a, b, c, d] = cars;
+  const site = { origin: O, host: 'sample-motors.test', name: 'Sample Motors', title: 'Used', adapter: 'schemaOrg' };
+  const settings = withDefaults({}, site);
+  const options = schemaOrg.scanOptions(SERVICE);
+  const day1 = await scanWithSearch({ adapter: schemaOrg, search: fakeSiteSearch(standardSite({ cars })), site, settings, options });
+  const posted = (list) => Object.fromEntries(list.map((car) => [car.vin, { name: 'Posted car', price: car.price, postedAt: '2020-01-01T12:00:00.000Z' }]));
+  // a website with the given cars listed, and the given ones sold (their pages are gone)
+  const website = (listed, sold = []) => {
+    const s = standardSite({ cars: listed });
+    for (const car of sold) s.set(O + car.path, httpError(404));
+    return s;
+  };
+  Object.assign(store, {
+    [SITES_KEY]: { [O]: { name: 'Sample Motors', adapter: 'schemaOrg', service: SERVICE, site, auto: true } },
+    [k.settings]: settings, [k.snapshot]: day1.snapshot, [k.posted]: posted([a, b, c, d]), [k.diff]: day1.diff, [k.boilerplate]: day1.boilerplate,
+  });
+  let search = null;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const got = await search({ url });
+    return { ok: got.ok, status: got.status, url, redirected: false, headers: { get: (name) => (name.toLowerCase() === 'content-type' ? got.contentType : null) }, text: async () => got.text };
+  };
+  const realCreate = globalThis.chrome.notifications.create;
+  const shown = [];
+  globalThis.chrome.notifications.create = async (id, opts) => { shown.push(opts.message); };
+  try {
+    // the website sells the first two posted cars: two to-do items, one notice
+    search = fakeSiteSearch(website(cars.slice(2), [a, b]));
+    const first = await runRescan(O, { reason: 'alarm' });
+    assert.equal(first.count, 2, first.error);
+    assert.equal(shown.length, 1);
+    // the salesperson handles both: the to-do items are cleared and the two cars leave the posted list
+    store[k.diff] = { ...store[k.diff], takeDown: [], priceUpdates: [], needsALook: [] };
+    store[k.posted] = posted([c, d]);
+    await updateBadge();
+    assert.equal(badge, '', 'the badge shows no to-do items');
+    assert.equal(store[SITES_KEY][O].lastNotifiedCount, 0, 'the items handled lower the count the website was told about');
+    // then a posted car sells: the next scan announces it
+    search = fakeSiteSearch(website(cars.slice(3), [c]));
+    const second = await runRescan(O, { reason: 'alarm' });
+    assert.equal(second.ok, true, second.error);
+    assert.equal(second.count, 1);
+    assert.equal(shown.length, 2, 'the new sold car is announced');
+    assert.match(shown[1], /^1 of your listings needs attention/);
   } finally {
     globalThis.fetch = realFetch;
     globalThis.chrome.notifications.create = realCreate;

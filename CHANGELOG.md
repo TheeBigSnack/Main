@@ -272,6 +272,10 @@ Improvements round (2026-10-11): the ten items of `plans/2026-10-11-next-ten-imp
 - Changed: a queued car held at review says why it waits: the status line names the first reason (the description, a take-down, a VIN check, a photo check still running or a cropped photo, a blank field, an assumed value, a branded title, a photo server Chrome has not been allowed to read, or the day's cap) and that the queue carries on after this car once the form is opened (`showHoldReason` in `sidepanel.js` calls `queueHoldReasons` and `holdStatus` in `src/queueHold.js`. The gate, `canAutoOpen`, is unchanged; a test compiles it and the reasons from the panel's source and checks that they agree on every scenario).
 - Fixed: the popup's tabs keep the keyboard focus after a tab is chosen with Enter or a click: the tab bar is drawn again on every render, and the focus used to drop to the page body. Tabs now have ids, the focus is restored by id as the panel's fields already are, and a view with no other stores falls back to To do before the tabs are drawn, so the selected tab is marked right on that render (`renderTabs` and `render` in `popup.js`; `test/e2e/popup.e2e.mjs`).
 
+Improvements round 2 (2026-10-11): the ten items of `plans/2026-10-11-next-ten-improvements-round-2.md`, one commit each, on one branch and one pull request.
+
+- Fixed: a to-do notice is made for a new sold car after the to-do items were cleared between scans. The count a site was last told about now drops with the items handled, so the next new item is compared with what is left, not with the count from before the clear (`toldCountAfterChange` in `src/rescanSchedule.js`, `updateBadge` in `background.js`).
+
 ## 0.5.0 (2026-09-28, toward a sellable product)
 
 Ten tasks were chosen for the three months to a sellable product (PLAN.md M4 to M6). This release carries the first of them; every piece runs against sample data or a mock until the owner creates the accounts.

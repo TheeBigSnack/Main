@@ -27,7 +27,7 @@ import { siteKeys, SITES_KEY } from './src/storageKeys.js';
 import { updateKey, withLock, storageErrorText } from './src/storage.js';
 import { settleDiff, withWithheld } from './src/rescan.js';
 import { withDefaults } from './src/settings.js';
-import { RESCAN_ALARM, RESCAN_PERIOD_MINUTES, SYNC_RETRY_MINUTES, syncRetryAlarm, originOfSyncRetryAlarm, todoCountFor, badgeText, notificationFor, notifiedAfter, isDue, latestOf, originsFor } from './src/rescanSchedule.js';
+import { RESCAN_ALARM, RESCAN_PERIOD_MINUTES, SYNC_RETRY_MINUTES, syncRetryAlarm, originOfSyncRetryAlarm, todoCountFor, badgeText, notificationFor, notifiedAfter, toldCountAfterChange, isDue, latestOf, originsFor } from './src/rescanSchedule.js';
 import { recordFlags } from './src/pilot.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { syncOnce, scanFromStored, NOT_CONFIGURED } from './src/accountFlow.js';
@@ -291,7 +291,22 @@ export async function updateBadge() {
   const origins = Object.keys(sites);
   const data = await chrome.storage.local.get(origins.map((o) => siteKeys(o).diff));
   let count = 0;
-  for (const o of origins) count += todoCountFor(data[siteKeys(o).diff]);
+  const counts = {};
+  for (const o of origins) {
+    counts[o] = todoCountFor(data[siteKeys(o).diff]);
+    count += counts[o];
+  }
+  // Items handled since the last notice lower what the website was told
+  // about, so the next new item is announced (rescanSchedule.js).
+  const lower = (all) => {
+    const out = { ...all };
+    for (const o of origins) {
+      const next = out[o] && toldCountAfterChange(out[o].lastNotifiedCount, counts[o]);
+      if (next !== null && next !== undefined) out[o] = { ...out[o], lastNotifiedCount: next };
+    }
+    return out;
+  };
+  if (origins.some((o) => toldCountAfterChange(sites[o].lastNotifiedCount, counts[o]) !== null)) await updateSites(lower).catch(() => null);
   await chrome.action.setBadgeBackgroundColor({ color: '#9f1d1d' });
   await chrome.action.setBadgeText({ text: badgeText(count) });
   return count;

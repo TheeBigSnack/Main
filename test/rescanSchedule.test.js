@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { todoCountFor, badgeText, notificationFor, notifiedAfter, isDue, latestOf, originsFor, RESCAN_PERIOD_MINUTES, RESCAN_ALARM, SYNC_RETRY_MINUTES, syncRetryAlarm, originOfSyncRetryAlarm } from '../extension/src/rescanSchedule.js';
+import { todoCountFor, badgeText, notificationFor, notifiedAfter, toldCountAfterChange, isDue, latestOf, originsFor, RESCAN_PERIOD_MINUTES, RESCAN_ALARM, SYNC_RETRY_MINUTES, syncRetryAlarm, originOfSyncRetryAlarm } from '../extension/src/rescanSchedule.js';
 import { scanWithSearch, siteForSnapshot, performScan, probeTab, UNSUPPORTED_MESSAGE } from '../extension/src/scanRunner.js';
 import dealerInspire from '../extension/adapters/dealerInspire.js';
 import { fixtures, MY_STORE, fakeDealerPage, fakeChrome } from './helpers.js';
@@ -184,4 +184,17 @@ test('a notice that failed to show is not counted as sent, so the next scan make
   assert.equal(notifiedAfter(0, 2, false), 2);
   assert.equal(notificationFor(notifiedAfter(0, 2, false), 2), null);
   assert.equal(notifiedAfter(2, 1, false), 1, 'an item handled: the count it is told from drops with it');
+});
+
+test('items cleared between scans lower the count the website was told about, so the next new item is announced', () => {
+  // told about 2; both handled outside a scan: the count it is compared with falls to 0 now
+  assert.equal(toldCountAfterChange(2, 0), 0);
+  assert.equal(toldCountAfterChange(2, 1), 1);
+  // the count it is compared with is then the one a new item is announced against
+  assert.deepEqual(notificationFor(toldCountAfterChange(2, 0), 1), { title: 'Lot Current', message: '1 of your listings needs attention' });
+  // nothing lowered when the count did not fall, or nothing was told yet: null means no write
+  assert.equal(toldCountAfterChange(1, 1), null);
+  assert.equal(toldCountAfterChange(1, 2), null, 'a rise is recorded by the scan, not here');
+  assert.equal(toldCountAfterChange(0, 0), null);
+  assert.equal(toldCountAfterChange(undefined, 0), null);
 });
