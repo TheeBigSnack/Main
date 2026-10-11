@@ -3809,3 +3809,11 @@ test('Post on a car in the list is refused while a queue is under way, and allow
   assert.deepEqual((await scenario({ vins: ['BBB'], index: 1, status: 'done' })).started, ['AAA'], 'a finished queue does not stop a post');
   assert.deepEqual((await scenario(null)).started, ['AAA'], 'nor does none saved');
 });
+
+// Pause, Resume, Stop, Skip and Clear write the side panel's copy of the queue (saveQueue). Every other write of the queue
+// takes the queue's lock (updateKey, storage.js); this one must too, or a write made in between is overwritten.
+test('the side panel writes its queue copy under the queue\'s lock, as the queue\'s other writes do', () => {
+  const body = src.slice(src.indexOf('const saveQueue = async () => {'), src.indexOf('const saveQueue = async () => {') + 500);
+  assert.match(body, /withLock\(key, write\)/, 'saveQueue writes under withLock on the queue key');
+  assert.doesNotMatch(body.slice(0, body.indexOf('\n};')), /await ownSet\(\{ \[key\]: state\.queue \}\);\n\s+else/, 'no bare write outside the lock');
+});

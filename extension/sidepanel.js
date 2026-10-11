@@ -183,9 +183,10 @@ async function loadSaved() {
 
 const saveQueue = async () => {
   const key = siteKeys(state.origin).queue;
+  const write = () => (state.queue ? ownSet({ [key]: state.queue }) : ownRemove([key]));
   try {
-    if (state.queue) await ownSet({ [key]: state.queue });
-    else await ownRemove([key]);
+    // under the queue's own lock, as advance() and the other queue writes are (updateKey takes the same lock), so a write in between is not overwritten
+    await withLock(key, write);
   } catch (e) {
     setStatus(storageErrorText(e), 'error');
   }
