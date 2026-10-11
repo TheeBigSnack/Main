@@ -1,6 +1,6 @@
 import { assessVehicle, DECISION } from './src/classify.js';
 import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, listingLine, settleDiff, postedBasis, withPostedBasis, markLookDismissed, withWithheld, withheldOffer, acceptWithheld, scanCar, priceItemWaits } from './src/rescan.js';
-import { draftPrice, markDraftPosted, draftPriceUpdate, withPriceUpdate, draftPill, draftScanCar } from './src/drafts.js';
+import { draftPrice, markDraftPosted, draftPriceUpdate, withPriceUpdate, draftPill, draftScanCar, isOpenDraft, retireDraft } from './src/drafts.js';
 import { performScan, keepSeenBasis } from './src/scanRunner.js';
 import { todoCountFor, originsFor } from './src/rescanSchedule.js';
 import { askChrome } from './src/askChrome.js';
@@ -418,7 +418,7 @@ function postButton(vin, { canPost = true } = {}) {
   if (theirs) return `<span class="pill" title="A colleague's listing: theirs to update or take down">Posted by ${byWhom(theirs)}</span>`;
   if (state.posted[vin]) return `<button type="button" class="small" data-action="unpost" data-vin="${esc(vin)}" title="Click to unmark. A post recorded today still counts toward today's cap.">Posted ✓</button>`;
   if (state.markAsk === vin) return markChoice(vin);
-  if (state.drafts[vin]) {
+  if (isOpenDraft(state.drafts[vin])) {
     const pill = draftPill(state.drafts[vin], draftScanCar(state.drafts[vin], state.snapshot, vin), { basis: state.settings?.basis, ready: canPost });
     return `<span class="actions"><span class="pill ${pill.tone}" title="${esc(pill.title)}">${esc(pill.text)}</span><button type="button" class="small go" data-action="post" data-vin="${esc(vin)}">Mark posted</button></span>`;
   }
@@ -1286,6 +1286,8 @@ async function onPanelClick(ev) {
       const basis = state.settings?.basis;
       const extra = before ? { listedBefore: true } : {};
       if (!(await update('posted', (p) => (draft ? markDraftPosted(p || {}, entry, draft, basis, at, extra) : markPosted(p || {}, entry, basis, at, extra))))) break;
+      // the draft is retired, not deleted: an unmarked car goes back to Ready with Post (src/drafts.js isOpenDraft)
+      if (draft) await update('drafts', (d) => (d && d[vin] ? { ...d, [vin]: retireDraft(d[vin], at) } : undefined));
       // the day's log for the cap, which a take-down or an unmark leaves alone; a car unmarked today and marked again counts once.
       // A listing made before today is not one of today's posts, so it stays off the log.
       if (!before) await update('postLog', (log) => logPost(log, vin, at, undefined, { alreadyLive: true }));
