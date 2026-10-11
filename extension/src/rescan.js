@@ -122,7 +122,11 @@ export function scanCar(entry, snap, vin) {
   if (!car) return null;
   const priced = pricedAt(entry);
   if (priced === null) return car;
-  const taken = msOf(snap.takenAt);
+  // A car carried over from an earlier scan (its page not read this time) is
+  // as of the time its details were read (carriedReadAt, scanRunner.js); a car
+  // the scan read is as of the scan. A carried car with no read time is not priced.
+  const carried = snap.carriedReadAt && typeof snap.carriedReadAt === 'object' && Object.prototype.hasOwnProperty.call(snap.carriedReadAt, vin) ? snap.carriedReadAt[vin] : undefined;
+  const taken = carried !== undefined ? msOf(carried) : msOf(snap.takenAt);
   return taken !== null && taken >= priced ? car : null;
 }
 

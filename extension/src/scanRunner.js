@@ -158,9 +158,21 @@ function snapshotOf({ site, res, vehicles, assessments, carry }) {
     if (readNow.has(vin)) entry.pageReadAt = res.fetchedAt;
     else if (typeof before === 'string') entry.pageReadAt = before;
   }
+  // A car carried over unread keeps the time its details were last read, on
+  // the snapshot (carriedReadAt), so scanCar does not date it from this scan:
+  // the time it was read before (carriedReadAt of the previous snapshot), else
+  // its last page read. null when neither is known, so it is not priced until
+  // it is read again. The car itself is kept as it was.
+  const carriedReadAt = {};
+  const priorCarried = (carry.previous && carry.previous.carriedReadAt) || {};
   for (const vin of Array.isArray(carry.unread) ? carry.unread : []) {
-    if (carry.last[vin] && !snapshot.vehicles[vin]) snapshot.vehicles[vin] = carry.last[vin];
+    const last = carry.last[vin];
+    if (last && !snapshot.vehicles[vin]) {
+      snapshot.vehicles[vin] = last;
+      carriedReadAt[vin] = Object.prototype.hasOwnProperty.call(priorCarried, vin) ? priorCarried[vin] : typeof last.pageReadAt === 'string' ? last.pageReadAt : null;
+    }
   }
+  if (Object.keys(carriedReadAt).length) snapshot.carriedReadAt = carriedReadAt;
   const missingPages = {};
   const missingSeen = {};
   const seenBefore = (carry.previous && carry.previous.missingSeen) || {};

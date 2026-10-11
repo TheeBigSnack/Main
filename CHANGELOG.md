@@ -259,6 +259,10 @@ Owner steps before release
 - Refresh the attorney packet in the project folder (outside the repository) from the current legal drafts and questions before it is sent.
 - Until `docs/production-setup.md` steps 3 to 5 are done, and for as long as `PILOT.md` keeps the pilot signed out, give testers the pilot zip (`npm run pack -- --pilot`), never the normal one.
 
+Improvements round (2026-10-11): the ten items of `plans/2026-10-11-next-ten-improvements.md`, one commit each, all on one branch and one pull request.
+
+- Fixed: a car the website's list still shows but whose page was not read this scan keeps the time its details were last read, so a listing priced after that reading is not priced from the scan that carried it (`scanCar` in `src/rescan.js`, `snapshotOf` in `src/scanRunner.js`). A car carried over with no known read time is not priced until it is read again. Entries saved before this change keep the old behaviour until each car is read once more.
+
 ## 0.5.0 (2026-09-28, toward a sellable product)
 
 Ten tasks were chosen for the three months to a sellable product (PLAN.md M4 to M6). This release carries the first of them; every piece runs against sample data or a mock until the owner creates the accounts.
