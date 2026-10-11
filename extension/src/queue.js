@@ -60,3 +60,9 @@ export function describe(queue) {
   const progress = s.status === 'done' ? `Queue finished: ${s.total} car${s.total === 1 ? '' : 's'}` : `Car ${s.position} of ${s.total}${s.status === 'paused' ? ' (paused)' : ''}`;
   return bits.length ? `${progress} · ${bits.join(', ')}` : progress;
 }
+
+// What the side panel says when the daily cap stops a queue. Nothing resumes
+// a paused queue by itself, so the text says the person clicks Resume.
+export function capPauseText(count) {
+  return `Daily post cap reached (${count}). The queue is paused. When the cap resets tomorrow, click Resume on the queue bar to carry on. The dealer can change the cap in Settings.`;
+}

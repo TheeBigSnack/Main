@@ -26,7 +26,7 @@ import { samplePhoto, cropPhoto } from './src/photoCanvas.js';
 import { buildListingData, listingChanges, normalizeColor, COLORS } from './src/listingData.js';
 import { capStatus, capCount, logPost } from './src/cap.js';
 import { withDefaults, loadProfile, settingsFromProfile } from './src/settings.js';
-import { createQueue, currentVin, advance, pause as pauseQueue, resume as resumeQueue, describe as describeQueue } from './src/queue.js';
+import { createQueue, currentVin, advance, pause as pauseQueue, resume as resumeQueue, describe as describeQueue, capPauseText } from './src/queue.js';
 import { wiz, startWizard, resumeWizard, wizardHtml, handleWizardClick, handleWizardChange, handleWizardInput } from './wizard.js';
 import { up, startUpkeep, endUpkeep, upkeepHtml, handleUpkeepClick, namesakesOf } from './upkeep.js';
 import { localVinCheck, decodeVinOnline, compareVin, compareSummary, NHTSA_ORIGIN } from './src/vin.js';
@@ -1035,7 +1035,7 @@ async function startNextInQueue() {
     state.queue = pauseQueue(q);
     await saveQueue();
     await clearFlow();
-    setStatus(`Daily post cap reached (${capCount(cap)}). The queue is paused until tomorrow; the dealer can change the cap in Settings.`, 'error');
+    setStatus(capPauseText(capCount(cap)), 'error');
     render();
     return;
   }
