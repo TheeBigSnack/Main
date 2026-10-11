@@ -290,6 +290,7 @@ Improvements round 3 (2026-10-11): the ten items of `plans/2026-10-11-next-ten-i
 - Fixed: a car already saved as a Facebook draft gets no queue tick on Ready, and the queue leaves it out, so "Post N cars" cannot open a second form for it (`queueable` in `popup.js`; the draft is still shown with its pill).
 - Fixed: a Dealer Inspire car shown with only an MSRP or Was line has no price. Such a line was taken as the selling price, so the car could be posted at the reference price; now it is "Call for price" and goes to To do (`websitePrice` in `adapters/dealerInspireNormalize.js`).
 - Fixed: "Certified New" is read as a new car, so the gate keeps it out of posting. The word "certified" alone was read as pre-owned, and a new car sold under a certified new-car program could reach Ready as used (`readCondition` in `src/classify.js`).
+- Fixed: a description that claims a Facebook or Meta partnership, approval, endorsement or verification ("Meta Verified dealer", "Facebook partner") is stopped by the guardrails, so the form does not fill with it. The check sat only in the copy tests before (`AFFILIATION_CLAIM` and the `affiliation` code in `src/rewriteTemplate.js`).
 
 ## 0.5.0 (2026-09-28, toward a sellable product)
 

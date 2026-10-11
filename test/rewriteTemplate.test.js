@@ -1442,3 +1442,14 @@ test('a line is left out for shouting only when it shouts itself, and the websit
   assert.doesNotMatch(rk.text, /BIG truck/);
   assert.deepEqual(rk.guardrails.problems, []);
 });
+
+test('guardrails catch a description that claims a Facebook or Meta partnership or approval; a plain mention of Facebook is fine', () => {
+  const v = vehicle('usedNoCarfax');
+  const base = buildTemplateDescription(ctx(v));
+  const codes = (text, c = ctx(v)) => runGuardrails(text, c).problems.map((p) => p.code);
+  for (const line of ['Facebook partner dealership.', 'Meta Verified dealer.', 'Partnered with Meta.', 'Endorsed by Facebook.', 'An approved Facebook seller.', 'Official Facebook dealer.']) {
+    assert.ok(codes(base + '\n' + line).includes('affiliation'), line);
+  }
+  assert.deepEqual(codes(base + '\nListed on Facebook Marketplace, and sold on Facebook.'), [], 'a plain name and the certified word are not a claim');
+  assert.deepEqual(codes(base), []);
+});
