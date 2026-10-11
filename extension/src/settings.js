@@ -211,3 +211,24 @@ export function defaultSettings(site, vehicles) {
   const mine = matchStore(site, storeNames(vehicles)); // one store at most (normalize.js); none when nothing stands out
   return withDefaults({ myStores: mine ? [mine] : [] }, site);
 }
+
+// The top-level settings a scan changed against the stored copy it read: keys
+// that were there and now hold another value (a first scan's stores and dealer
+// name). A key the copy did not have is not named: the worker fills it in on
+// every read anyway.
+export function settingsChanges(from, to) {
+  const out = {};
+  for (const key of Object.keys(to || {})) {
+    if (!from || !(key in from)) continue;
+    if (JSON.stringify(from[key] ?? null) !== JSON.stringify(to[key] ?? null)) out[key] = to[key];
+  }
+  return out;
+}
+
+// What a scan writes to the stored settings: its changes on top of what is
+// stored now, so a save made while the scan ran is kept. Undefined when there
+// is nothing to write. With nothing stored yet, the scan's settings are written.
+export function withScanChanges(stored, changes, settings) {
+  if (!stored) return settings;
+  return Object.keys(changes || {}).length ? { ...stored, ...changes } : undefined;
+}

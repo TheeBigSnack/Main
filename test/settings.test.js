@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { withDefaults, defaultSettings, feeGap, suggestedPriceNote, priceStepModel, profileFrom, settingsFromProfile, showsLowerPrice, chooseBasis, basisChangeNote, loadProfile, saveProfile, PROFILE_KEY, SETTINGS_VERSION, DEFAULT_SALESPERSON_TITLE } from '../extension/src/settings.js';
+import { withDefaults, defaultSettings, feeGap, suggestedPriceNote, priceStepModel, profileFrom, settingsFromProfile, showsLowerPrice, chooseBasis, basisChangeNote, loadProfile, saveProfile, PROFILE_KEY, SETTINGS_VERSION, DEFAULT_SALESPERSON_TITLE, settingsChanges, withScanChanges } from '../extension/src/settings.js';
 import { LEGAL, acceptLegal, legalIsCurrent, legalHosted, isPlaceholderUrl } from '../extension/src/legalLinks.js';
 import { locationQuery } from '../extension/src/listingData.js';
 import { buildTemplateDescription } from '../extension/src/rewriteTemplate.js';
@@ -347,4 +347,37 @@ test('Settings saves a price note the checks would refuse: the warning under it 
   assert.equal(r.saved.length, 1);
   assert.equal(r.saved[0][1].priceNote, note);
   assert.equal(r.note, 'Saved. Click Rescan website to apply.');
+});
+
+// A scan works from the settings it started with and writes back only what it
+// changed (a first scan's store choice and dealer name). A Settings save made
+// while the scan ran must survive that write (review U1).
+test('settingsChanges names only the top-level settings a scan changed', () => {
+  const from = withDefaults({ myStores: [] }, { name: 'Ron Lewis' });
+  const to = { ...from, myStores: ['Waynesburg'], storesChosen: true };
+  assert.deepEqual(settingsChanges(from, to), { myStores: ['Waynesburg'], storesChosen: true });
+  assert.deepEqual(settingsChanges(from, from), {}, 'nothing changed, nothing named');
+  assert.deepEqual(settingsChanges({}, { dailyCap: 10 }), {}, 'a key the copy did not have is filled in on read, not named');
+  assert.deepEqual(settingsChanges({ dealer: { name: '' } }, { dealer: { name: 'Ron Lewis' } }), { dealer: { name: 'Ron Lewis' } }, 'a first scan names the dealership it fills in');
+});
+
+test('a scan that changed nothing writes nothing, so a Settings save made while it ran is kept', () => {
+  const started = withDefaults({ myStores: ['Waynesburg'] }, { name: 'Ron Lewis' });
+  const savedWhileRunning = { ...started, dailyCap: 5 };
+  assert.equal(withScanChanges(savedWhileRunning, {}, started), undefined);
+});
+
+test('a scan that chose stores adds the choice to what is stored now and keeps the daily cap saved meanwhile', () => {
+  const started = withDefaults({ myStores: [] }, { name: 'Ron Lewis' });
+  const savedWhileRunning = { ...started, dailyCap: 5 };
+  const changes = { myStores: ['Waynesburg'], storesChosen: true };
+  const out = withScanChanges(savedWhileRunning, changes, { ...started, ...changes });
+  assert.equal(out.dailyCap, 5, 'the cap the person saved stays');
+  assert.deepEqual(out.myStores, ['Waynesburg']);
+  assert.equal(out.storesChosen, true);
+});
+
+test('with nothing stored yet, the scan\'s settings are what is written', () => {
+  const scanned = withDefaults({ myStores: ['Waynesburg'] }, { name: 'Ron Lewis' });
+  assert.equal(withScanChanges(undefined, {}, scanned), scanned);
 });

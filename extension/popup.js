@@ -4,7 +4,7 @@ import { draftPrice, markDraftPosted, draftPriceUpdate, withPriceUpdate, draftPi
 import { performScan, keepSeenBasis } from './src/scanRunner.js';
 import { todoCountFor, originsFor } from './src/rescanSchedule.js';
 import { askChrome } from './src/askChrome.js';
-import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, basisChangeNote, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE, NO_DEALER_NAME, dealerNameMissing } from './src/settings.js';
+import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, basisChangeNote, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE, NO_DEALER_NAME, dealerNameMissing, withScanChanges } from './src/settings.js';
 import { capStatus, capCount, logPost, askWhenListed, DEFAULT_DAILY_CAP } from './src/cap.js';
 import { noteTakenDown, stillListedNow } from './src/takenDown.js';
 import { TITLE_STATUSES, CONDITIONS } from './src/listingData.js';
@@ -254,7 +254,6 @@ async function scan() {
       setStatus(r.message, 'error');
       return;
     }
-    state.settings = r.settings;
     state.settingsFromProfile = false;
     state.boilerplate = r.boilerplate;
     if (!r.diff.unreliable) state.snapshot = r.snapshot; // keep the last good scan if this one looks broken
@@ -269,9 +268,13 @@ async function scan() {
       const stored = await chrome.storage.local.get([postedKey, diffKey]);
       state.posted = stored[postedKey] || {};
       state.diff = withWithheld(settleDiff(r.diff, state.posted), r.snapshot, stored[diffKey]);
-      return save('snapshot', 'diff', 'settings', 'boilerplate');
+      return save('snapshot', 'diff', 'boilerplate');
     });
     if (!saved) return; // the status says why (the quota); the read stays on screen
+    // the settings the scan changed (a first scan's stores and dealer name) go onto what is stored now, never over it: a Settings save made while the scan ran is kept (src/settings.js withScanChanges)
+    if (!(await update('settings', (stored) => withScanChanges(stored, r.changedSettings, r.settings)))) return;
+    state.settings = withDefaults(state.settings, state.snapshot?.site || {}); // as loadSaved reads them
+    await setSiteAuto(state.settings.autoRescan); // the scan's registry entry took the auto setting it started with; the one stored now is what the worker must read
     // the price basis this read shows for a listing that has none, kept on it unless the read was held back (src/scanRunner.js keepSeenBasis)
     state.posted = (await keepSeenBasis(state.origin, last, r.snapshot, r.diff, popupStorage).catch(() => undefined)) || state.posted;
     state.pilot = await recordFlags(state.origin, state.diff, state.diff.takenAt).catch(() => state.pilot); // pilot numbers: when a to-do item first appeared
