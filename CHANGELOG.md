@@ -262,6 +262,7 @@ Owner steps before release
 Improvements round (2026-10-11): the ten items of `plans/2026-10-11-next-ten-improvements.md`, one commit each, all on one branch and one pull request.
 
 - Fixed: a car the website's list still shows but whose page was not read this scan keeps the time its details were last read, so a listing priced after that reading is not priced from the scan that carried it (`scanCar` in `src/rescan.js`, `snapshotOf` in `src/scanRunner.js`). A car carried over with no known read time is not priced until it is read again. Entries saved before this change keep the old behaviour until each car is read once more.
+- Fixed: a scan whose list is the website's home page (no used-inventory link was found) is never a complete read, since the home page may show only some of the cars. The scan says so and names the used inventory page to scan instead (`isHomeAddress` in `adapters/schemaOrg.js`, `incompleteWarning` in `src/scanRunner.js`). A used list, or any other page, is read as before.
 
 ## 0.5.0 (2026-09-28, toward a sellable product)
 

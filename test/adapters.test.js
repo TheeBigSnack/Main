@@ -1910,3 +1910,19 @@ test('schemaOrg limits: list pages, car pages, sitemaps, the page size and the r
     mock.timers.reset();
   }
 });
+
+test('a scan that reads the home page as the list says the read is partial, since the home page may show only some of the cars', async () => {
+  const cars = LOT.slice(0, 6);
+  const site = standardSite({ cars, perPage: cars.length });
+  site.set(O + '/', site.get(LIST));
+  const home = await scanSite(site, { listUrl: O + '/' });
+  assert.equal(home.ok, true, home.message);
+  assert.equal(home.complete, false, 'the home page is not a full list of the lot');
+  assert.equal(home.homeOnly, true);
+  assert.match(incompleteWarning(home), /home page/);
+  assert.match(incompleteWarning(home), /used inventory page/);
+  // the used list itself is complete as before
+  const list = await scanSite(site);
+  assert.equal(list.complete, true);
+  assert.equal(list.homeOnly, undefined);
+});

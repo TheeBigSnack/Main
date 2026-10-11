@@ -198,6 +198,7 @@ function snapshotOf({ site, res, vehicles, assessments, carry }) {
 // page limit left for the next scan (res.leftForLater) were never asked
 // for, so they are not called unreadable.
 export function incompleteWarning(res) {
+  if (res.homeOnly) return "This website's home page was read as its used list, and it may show only some of the cars. Open the website's used inventory page and scan there.";
   const kept = Array.isArray(res.unread) ? res.unread.length : 0;
   const found = res.records.length + kept;
   const left = Number(res.leftForLater) || 0;

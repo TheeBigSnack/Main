@@ -1297,6 +1297,12 @@ async function firstListPage(site, startHref, origin, maxPages) {
  *   time; leftForLater the number of car pages the page limit left for the
  *   next scan.
  */
+// The website's home page: an address with no path (or index.html) and no query.
+const isHomeAddress = (href) => {
+  const u = new URL(href);
+  return /^\/(?:index\.(?:html?|php|aspx))?$/i.test(u.pathname) && !u.search;
+};
+
 export async function scan(search, options = {}) {
   const opts = { listUrl: null, origin: null, confirmVins: [], confirmUrls: {}, postedVins: [], lastSeen: null, sitemap: undefined, maxListPages: MAX_LIST_PAGES, maxCarPages: MAX_CAR_PAGES, ...options };
   const origin = originOf(opts.origin) || originOf(opts.listUrl);
@@ -1304,6 +1310,8 @@ export async function scan(search, options = {}) {
   const fail = (error, message) => ({ ok: false, error, message, requests: site.requests });
   const start = onSite(opts.listUrl, null, origin);
   if (!start) return fail('no-list', "Lot Current doesn't know this website's used inventory page yet. Open that page and click Scan website there.");
+  // the home page read as the list may show only some of the cars, so it is never a complete read
+  const homeOnly = isHomeAddress(start.href);
 
   // 1. the list from its first page, and its rel=next pages
   const first = await firstListPage(site, start.href, origin, opts.maxListPages);
@@ -1661,7 +1669,7 @@ export async function scan(search, options = {}) {
   const shapeInDoubt = shapeLeftOut > 0 && (notCarPages > 0 || noneShown > carsFound);
   const total = cars.size - notCarPages;
   // a lot that counted cars and gave none is never a complete read of it
-  const complete = listClean && sitemapClean && readErrors === 0 && untried === 0 && leftForLater === 0 && !shapeInDoubt && !(total > 0 && records.size === 0);
+  const complete = !homeOnly && listClean && sitemapClean && readErrors === 0 && untried === 0 && leftForLater === 0 && !shapeInDoubt && !(total > 0 && records.size === 0);
   const out = { ok: true, fetchedAt: new Date().toISOString(), total, complete, requests: site.requests, records: [...records.values()], confirm };
   if (unread.size) out.unread = [...unread];
   const readCars = [...pagesRead].filter((vin) => records.has(vin));
@@ -1669,6 +1677,7 @@ export async function scan(search, options = {}) {
   const notDescribed = [...records].filter(([, r]) => r.carried).map(([vin]) => vin);
   if (notDescribed.length) out.descriptionsUnread = notDescribed;
   if (leftForLater) out.leftForLater = leftForLater;
+  if (homeOnly) out.homeOnly = true;
   return out;
 }
 
