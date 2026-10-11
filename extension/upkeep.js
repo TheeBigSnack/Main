@@ -208,9 +208,11 @@ function pageOf(url) {
 // matched.
 export function onListing(seen, { id = '', yourListingsUrl = '', namesakes = 0 } = {}) {
   if (!seen) return false;
-  if (id) return Boolean(seen.matchesId);
-  if (yourListingsUrl && pageOf(seen.url) === pageOf(yourListingsUrl)) return false;
+  // a known id must be in the address, and the page must still be this car: its VIN, or its name and price when no namesake shares the name
+  if (id && !seen.matchesId) return false;
+  if (!id && yourListingsUrl && pageOf(seen.url) === pageOf(yourListingsUrl)) return false;
   if (namesakes !== 0 && !seen.matchesVin) return false;
+  if (id && seen.matchesVin) return true;
   return Boolean(seen.matchesName && seen.matchesPrice);
 }
 

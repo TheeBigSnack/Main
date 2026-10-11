@@ -66,6 +66,7 @@ function readPage({ url, title = 'Marketplace', texts = [], dialog = [], priceBo
 }
 
 const LIMITED = '2019 Jeep Grand Cherokee Limited';
+const LIMITED_VIN = '1C4RJFBG5KC123456';
 const LAREDO = '2019 Jeep Grand Cherokee Laredo';
 const YOURS = FORM_MAP.yourListingsUrl;
 const at = (id, edit = false) => (edit ? `https://www.facebook.com/marketplace/edit/?listing_id=${id}` : `https://www.facebook.com/marketplace/item/${id}/`);
@@ -102,7 +103,11 @@ test('upkeep finds this car\'s own listing by its id, or with no link by its who
   // the saved link's id in the address: the item page and its edit form
   const known = { id: '111', name: LIMITED, prices: [31995, 30995] };
   assert.equal(decide(readPage({ url: at(111), texts: [LIMITED, '$31,995'] }, known), '111'), true);
-  assert.equal(decide(readPage({ url: at(111, true), texts: ['Edit listing'], priceBox: { value: '31995' } }, known), '111'), true);
+  // the edit form: its description box carries the car's VIN, which is what makes it this car's page
+  const limitedKnown = { ...known, vin: LIMITED_VIN };
+  assert.equal(decide(readPage({ url: at(111, true), texts: ['Edit listing'], priceBox: { value: '31995' }, boxes: [{ value: `VIN ${LIMITED_VIN}` }] }, limitedKnown), '111'), true);
+  // an id in the address is not enough on its own: a page with neither the VIN nor the name is not this car's listing
+  assert.equal(decide(readPage({ url: at(111, true), texts: ['Edit listing'], priceBox: { value: '31995' } }, known), '111'), false);
 
   // no link: its own page, by the full name and the price it was listed at
   const noLink = { id: '', name: LIMITED, prices: [31995, 30995] };
