@@ -33,7 +33,8 @@ export function feeGap(entries) {
 
 export function suggestedPriceNote(gap, basis = 'website') {
   if (!gap) return '';
-  const fee = '$' + Math.round(gap).toLocaleString('en-US');
+  // cents are kept when the gap has them: the note is typed into the listing as it reads
+  const fee = '$' + (gap % 1 === 0 ? gap.toLocaleString('en-US') : gap.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
   return basis === 'beforeFees' ? `Price is before the ${fee} doc fee; tax and tags extra.` : `Price includes the ${fee} doc fee; tax and tags extra.`;
 }
 
