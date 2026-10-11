@@ -252,7 +252,13 @@ function page(lang) {
       setCombo('year', p.year);
       document.getElementById('makeWrap').hidden = false;
       for (const id of ['make', 'model', 'vin', 'mileage', 'description']) document.getElementById(id).value = p[id] || '';
-      if (typeof p.cleanTitle === 'boolean') document.getElementById('cleanTitle').checked = p.cleanTitle;
+      if (typeof p.cleanTitle === 'boolean') {
+        const box = document.getElementById('cleanTitle');
+        const wasTicked = box.checked;
+        box.checked = p.cleanTitle;
+        // a draft can also land on the box a second after Lot Current ticks it: once, and only when the restore found it unticked
+        if (!wasTicked) box.addEventListener('change', () => { if (box.checked) setTimeout(() => { box.checked = p.cleanTitle; }, 1000); }, { once: true });
+      }
       document.body.dataset.prefilled = '1';
     };
     if (p.late) setTimeout(apply, Number(p.late));
