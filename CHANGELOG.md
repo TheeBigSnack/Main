@@ -288,6 +288,7 @@ Improvements round 2 (2026-10-11): the ten items of `plans/2026-10-11-next-ten-i
 Improvements round 3 (2026-10-11): the ten items of `plans/2026-10-11-next-ten-improvements-round-3.md`, one commit each, stacked on the round-2 branch and its pull request.
 
 - Fixed: a car already saved as a Facebook draft gets no queue tick on Ready, and the queue leaves it out, so "Post N cars" cannot open a second form for it (`queueable` in `popup.js`; the draft is still shown with its pill).
+- Fixed: a Dealer Inspire car shown with only an MSRP or Was line has no price. Such a line was taken as the selling price, so the car could be posted at the reference price; now it is "Call for price" and goes to To do (`websitePrice` in `adapters/dealerInspireNormalize.js`).
 
 ## 0.5.0 (2026-09-28, toward a sellable product)
 

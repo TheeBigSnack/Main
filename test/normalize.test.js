@@ -208,3 +208,17 @@ test('conditionWordFromPath reads every Dealer Inspire address in the fixtures a
   assert.ok(urls.length >= 25);
   for (const url of urls) assert.equal(conditionWordFromPath(url), conditionWordFromUrl(url), url);
 });
+
+test('a Dealer Inspire reference price (MSRP, Was) is never the selling price: with no selling line the car has no price', () => {
+  const display = (pricing) => ({ extra_fields: { lightning: { pricing } } });
+  // only an MSRP line, or a Was line, is shown: no selling price, so none is posted
+  assert.deepEqual(websitePrice(display({ low: false, high: { label: 'MSRP', value: '$31,995' } })), { value: null, label: 'Call for price' });
+  assert.deepEqual(websitePrice(display({ low: { label: 'Price', value: 'Please call for price' }, high: { label: 'MSRP', value: '$31,995' } })), { value: null, label: 'Call for price' });
+  assert.deepEqual(websitePrice(display({ low: false, high: { label: 'Was', value: '$26,673' } })), { value: null, label: 'Call for price' });
+  // a selling price line still wins over a reference line beside it
+  assert.deepEqual(websitePrice(display({ low: { label: 'Price', value: '$24,995' }, high: { label: 'MSRP', value: '$26,673' } })), { value: 24995, label: 'Price' });
+  // and a car with an MSRP-only record is not priced, so it is not posted at the MSRP
+  const raw = structuredClone(fixtures.usedNormal);
+  raw.extra_fields.lightning.pricing = { low: false, high: { label: 'MSRP', value: '$31,995' } };
+  assert.equal(normalizeVehicle(raw).price, null);
+});
