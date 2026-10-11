@@ -11,9 +11,9 @@
 // Facebook's real pages are not verified (listingSigns.js says so); these
 // pages only stand in for the shapes the reader looks at.
 
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { readListingInPage } from '../extension/facebook/fillForm.js';
+import { readListingInPage, fillPriceInPage } from '../extension/facebook/fillForm.js';
 import { LISTING_SIGNS } from '../extension/facebook/listingSigns.js';
 import { FORM_MAP } from '../extension/facebook/formMap.js';
 import { onListing, listingIdFrom, startUpkeep, endUpkeep, up, namesakesOf, namesakesNow, offTargetNote, upkeepHtml, handleUpkeepClick } from '../extension/upkeep.js';
@@ -424,4 +424,87 @@ test('a price update whose Price box keeps another price after Lot Current\'s fi
   Object.assign(up, { stuck: false, boxShows: '', fills: 0 });
   assert.match(upkeepHtml(), /id="priceWaiting"/);
   endUpkeep();
+});
+
+// The price update's poll, driven on node's fake timers (the side panel's 1.5 s
+// interval): the tab shows rig.page to the in-page reads, every fill is refused
+// (the form keeps its own price), and each tick() runs one poll. Call endRig()
+// in a finally and await rig.started after it.
+const WANT_PRICE = 18500;
+const LISTED_PAGE = { url: at('111'), matchesId: true, sold: false, unavailable: false, matchesVin: false, vinInText: false, matchesName: true, matchesPrice: true, prices: ['20000'], formOnPage: true, hasPriceBox: true, priceBoxValue: '20000' };
+async function priceRig(page) {
+  const rig = { page: { ...page }, fills: 0 };
+  const flush = async () => { for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve)); };
+  rig.tick = async () => { mock.timers.tick(1500); await flush(); };
+  globalThis.chrome = {
+    ...fakeChrome({}, {}),
+    tabs: { create: async () => ({ id: 9 }), get: async (id) => ({ id, url: rig.page.url }) },
+    runtime: { sendMessage: async () => ({}) },
+    scripting: {
+      executeScript: async ({ func }) => {
+        if (func === readListingInPage) return [{ result: { ...rig.page } }];
+        if (func === fillPriceInPage) {
+          rig.fills += 1;
+          return [{ result: { ok: false, reason: 'The Price box did not take the price.' } }];
+        }
+        throw new Error('an unexpected in-page script');
+      },
+    },
+  };
+  mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+  const ctx = { render: () => {}, map: () => FORM_MAP, priceNow: async () => ({ ok: true, price: WANT_PRICE, basis: 'website' }) };
+  rig.started = startUpkeep({ origin: 'https://www.example-motors.test', vin: 'aaa', kind: 'price', price: WANT_PRICE, listingUrl: LISTED_PAGE.url, name: 'Car A', listedPrice: 20000 }, ctx);
+  await flush();
+  await rig.tick(); // the wait before the first poll ends
+  return rig;
+}
+function endRig() {
+  mock.timers.reset();
+  endUpkeep();
+  delete globalThis.chrome;
+}
+// the listing after Update: this car's page with its price shown and no edit form
+const UPDATED_PAGE = { ...LISTED_PAGE, hasPriceBox: false, formOnPage: false, priceBoxValue: '', prices: [String(WANT_PRICE)] };
+
+// Once Lot Current has filled four times and the Price box still keeps another
+// price, the banner says so and stops filling. A price the person then types
+// into the box by hand must clear that banner and make the item filled, so that
+// Update closes it once the listing shows the new price.
+test('a price typed by hand after Lot Current stops filling clears the stuck banner, and Update then closes the item', async () => {
+  const rig = await priceRig(LISTED_PAGE);
+  try {
+    for (let i = 0; i < 5; i++) await rig.tick(); // four fills, then the box is seen to keep its price
+    assert.equal(rig.fills, 4, 'Lot Current fills four times');
+    assert.equal(up.stuck, true, 'then the banner says the box keeps another price');
+    assert.equal(up.status, 'waiting', 'and nothing was filled, so the item is still waiting');
+    rig.page.priceBoxValue = String(WANT_PRICE); // the person types the price into the box by hand
+    await rig.tick();
+    assert.equal(up.stuck, false, 'a price typed by hand clears the stuck banner');
+    assert.equal(up.status, 'filled', 'and the item is filled, so Update can close it');
+    assert.match(upkeepHtml(), /id="priceFilled"/);
+    assert.equal(rig.fills, 4, 'no further fill: the box has the price');
+    rig.page = { ...UPDATED_PAGE }; // the person clicks Update
+    await rig.tick();
+    assert.equal(up.status, 'done', 'the listing shows the new price, so the item closes');
+    assert.equal(up.error, '');
+  } finally {
+    endRig();
+    await rig.started;
+  }
+});
+
+// The same when the person types the price before Lot Current has filled at all.
+test('a price typed by hand before any fill is filled, and Update closes the item', async () => {
+  const rig = await priceRig({ ...LISTED_PAGE, priceBoxValue: String(WANT_PRICE) });
+  try {
+    await rig.tick(); // the first poll reads the box with the price in it
+    assert.equal(rig.fills, 0, 'no fill: the box has the price');
+    assert.equal(up.status, 'filled', 'the item is filled, so Update can close it');
+    rig.page = { ...UPDATED_PAGE };
+    await rig.tick();
+    assert.equal(up.status, 'done', 'the listing shows the new price, so the item closes');
+  } finally {
+    endRig();
+    await rig.started;
+  }
 });

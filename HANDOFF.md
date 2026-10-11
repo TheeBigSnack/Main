@@ -1212,7 +1212,7 @@ The owner's instruction was to build the round-4 list (`plans/2026-10-11-improve
 
 ### 29.3 How it was checked
 
-- `npm test`: 1939 tests, all pass, at `e518857` and after the later commits (the README count moves with each commit; `test/docs.test.js` pins it).
+- `npm test`: 1939 tests, all pass, at `e518857` and after the later commits; 1941 after the row-14 commit (the README count moves with each commit; `test/docs.test.js` pins it).
 - Browser flows, one at a time, all exit 0: post, queue, panel, popup, upkeep, standard, platforms, wizard, branding. The queue flow needed one change: its pause and resume checks now wait for the bar (`until.mjs`), because the queue's copy is written under the lock before the bar redraws. The check was failing on the immediate read.
 - `npm run test:demo`, `npm run test:a11y` (no findings) and `npm run test:site` (no website findings) pass.
 - `npm run test:stack` was not run here: it needs a local Supabase stack. CI's stack job runs it.
@@ -1224,7 +1224,7 @@ The owner's instruction was to build the round-4 list (`plans/2026-10-11-improve
 - Rows 7, 8 and 16 (photo download batches, the re-read of every posted car's page, serial crops): each needs a timing on real photo servers or a live survey.
 - Rows 9 to 12 (test speed): each changes which tests share state or when they fail; each needs its own measured change.
 - Row 13, the rest: set-up's finish settings copy (see 29.2).
-- Row 14 (the upkeep banner stays "stuck" after a hand-typed price, and Update does not close the item): the fix is identified. In `poll`, when the box shows the wanted price, set the status to filled, clear `stuck`, and render, so the existing filled path closes after Update. Not built: testing it needs the upkeep poll driven with a stubbed tab and script, which the unit harness does not do yet, and the upkeep e2e flow does not cover a hand-typed price.
+- Row 14 is listed under the fixed rows above. The rest of this section's open list stands.
 - Rows 23 and 24 (copied helpers, names only the tests import): merging touches injected page code and tested names.
 - Row 25 (the test hook `devOverrides` ships in the extension): the e2e flows point the form at the mock marketplace through it. Removing it from the shipped zip is a packaging decision for the owner.
 - Row 26 (the cap per keystroke in the side panel's list): about 2 ms at 120 cars; not worth a change yet.

@@ -257,6 +257,14 @@ async function poll(ctx) {
     if (up.kind === 'price') {
       const want = String(Math.round(up.price));
       const boxHasIt = seen.hasPriceBox && seen.priceBoxValue.replace(/\D/g, '') === want;
+      if (boxHasIt && (up.status === 'waiting' || up.stuck)) {
+        // the person typed the price into the box by hand, so it is filled: Update closes the item, and a stuck banner clears
+        up.status = 'filled';
+        up.filledShown = seen.priceBoxValue;
+        up.note = '';
+        up.stuck = false;
+        ctx.render();
+      }
       if (seen.hasPriceBox && !boxHasIt && up.fills < MAX_FILLS && (up.status === 'waiting' || up.status === 'filled')) {
         up.fills += 1;
         const [inj] = await chrome.scripting.executeScript({ target: { tabId: up.tabId }, func: fillPriceInPage, args: [map, up.price] });
