@@ -324,6 +324,15 @@ test('"New" in a model name is not read as a new car', () => {
   assert.equal(a.decision, DECISION.READY);
 });
 
+test('a car the website marks sold is not called a sale pending: the blocker says it is marked sold', () => {
+  // the schema.org reader sets statusLabel "Sold" on a SoldOut or OutOfStock offer (schemaOrgNormalize.js)
+  const sold = assessVehicle({ ...vehicle('usedNormal'), statusLabel: 'Sold' }, MY_STORE);
+  assert.deepEqual(sold.blockers.map((b) => b.code), ['sale-pending']);
+  assert.equal(sold.blockers[0].text, 'Marked sold on the website');
+  const pending = assess('usedNormal', { status: 'pend-sale' });
+  assert.equal(pending.blockers[0].text, 'Sale pending');
+});
+
 test('sale pending and in-transit used cars are not ready', () => {
   assert.deepEqual(assess('usedNormal', { status: 'pend-sale' }).blockers.map((b) => b.code), ['sale-pending']);
   assert.deepEqual(
