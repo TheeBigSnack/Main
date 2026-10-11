@@ -173,6 +173,9 @@ try {
   // car 2's fuel is assumed (a mild hybrid listed as Hybrid), so the queue waits at review with it shown
   await panel.waitForSelector('#openForm', { timeout: 60000 });
   assert.match(await panel.textContent('#assumed'), /Fuel type[\s\S]*Hybrid[\s\S]*the website says "Gasoline\/Mild Electric Hybrid": a mild hybrid/);
+  // the status names the first reason the car waits, and that the queue carries on after it (written just after the review draws)
+  await panel.waitForFunction(() => /^Assumed: Fuel type is Hybrid/.test(document.getElementById('status')?.textContent || ''), null, { timeout: 10000 });
+  assert.equal(await panel.textContent('#status'), 'Assumed: Fuel type is Hybrid (the website says "Gasoline/Mild Electric Hybrid": a mild hybrid; change it on the form if you list mild hybrids as Gasoline). Check it on the form. Click Open the Marketplace form when it is right; the queue carries on after this car.');
   assert.equal(await panel.$('#confirmPosted'), null, 'the form was not opened by itself');
   await panel.screenshot({ path: join(shots, 'queue-3-car2-assumed.png'), fullPage: true });
   const fb2Promise = context.waitForEvent('page', { timeout: 40000 });

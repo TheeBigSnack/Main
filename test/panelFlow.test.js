@@ -369,6 +369,7 @@ test('a load for a website the panel has moved away from is dropped, so its cars
 // unless something holds the car at review.
 async function reviewWith(takenDown, { queue = true } = {}) {
   const calls = [];
+  const holds = []; // the status naming why a queued car waits (showHoldReason)
   const state = {
     origin: 'https://www.example-dealer.test', posted: {}, takenDown,
     snapshotVehicles: { AAA: { name: '2020 Make Model' } },
@@ -396,9 +397,10 @@ async function reviewWith(takenDown, { queue = true } = {}) {
     openForm: async () => calls.push('openForm'),
     postElsewhere: async () => '', elsewhereText: never('elsewhereText'),
     checkBranding: async () => {}, // the photo check found nothing to crop (its own tests are in panelBranding.test.js)
+    showHoldReason: () => holds.push('held'),
   });
   await startFlow({ origin: state.origin, vin: 'aaa', dealerTabId: null, queue });
-  return { state, calls };
+  return { state, calls, holds };
 }
 
 test('a car this person took down while the website still listed it reaches review with the notice, and a queue waits there', async () => {
@@ -409,12 +411,14 @@ test('a car this person took down while the website still listed it reaches revi
   assert.equal(held.state.step, 'review');
   assert.deepEqual(held.state.relist, { takenDownAt: ago(2), postedAt: ago(30) });
   assert.deepEqual(held.calls, [], 'the queue does not open the form by itself');
+  assert.deepEqual(held.holds, ['held'], 'and the status says why it waits');
 
   // a car taken down because it sold (and back on the website since), or never taken down: the queue goes on as before
   for (const log of [noteTakenDown(null, { vin: 'AAA', postedAt: ago(30), stillListed: false }, ago(2), ago(2)), null]) {
     const r = await reviewWith(log);
     assert.equal(r.state.relist, null);
     assert.deepEqual(r.calls, ['openForm']);
+    assert.deepEqual(r.holds, [], 'a car that opens by itself holds no status');
   }
 
   // what the review says: when, the rule, and that it is not refused

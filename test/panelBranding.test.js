@@ -578,6 +578,7 @@ test('a queued car\'s form waits for the photo check, and a car whose photos it 
         state.brandingRun = { done: 0, total: 6, stopped: false };
         return new Promise((resolve) => { finish = () => { state.brandingRun = null; state.branding = checked(cropped); resolve(); }; });
       },
+      showHoldReason: () => calls.push('showHoldReason'),
     });
     const started = startFlow({ origin: ORIGIN, vin: 'aaa', dealerTabId: null, queue: true });
     await settle();
@@ -589,7 +590,7 @@ test('a queued car\'s form waits for the photo check, and a car whose photos it 
   const plain = await run([]);
   assert.deepEqual(plain.filter((c) => !c.startsWith('render ') || c === 'render running'), ['checkBranding auto true', 'render running', 'canAutoOpen after', 'openForm'], 'drawn with the check under way; the car opens once it ends with nothing cropped');
   const branded = await run([PHOTOS[0]]);
-  assert.deepEqual(branded.slice(-1), ['canAutoOpen after'], 'cropped photos: the car waits at review for the person');
+  assert.deepEqual(branded.slice(-2), ['canAutoOpen after', 'showHoldReason'], 'cropped photos: the car waits at review for the person, and the status says so');
 });
 
 test('the review, a re-read that changed the photos, a panel brought back and a Settings save each reach the photo check as described', () => {
