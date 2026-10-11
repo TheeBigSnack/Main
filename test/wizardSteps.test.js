@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { wizardSteps, accountStepModel, joinedFrom, joinedText, rewriteAtAccount, termsSummary, addressHint, ACCOUNT_WORDS, LATER } from '../extension/src/wizardSteps.js';
+import { wizardSteps, accountStepModel, joinedFrom, joinedText, rewriteAtAccount, termsSummary, addressHint, storeTickReason, ACCOUNT_WORDS, LATER } from '../extension/src/wizardSteps.js';
 import { syncPayload } from '../extension/src/sync.js';
 import { accountsConfigured } from '../extension/src/accountConfig.js';
 import { signInStart } from '../extension/src/accountFlow.js';
@@ -304,4 +304,11 @@ test('the address step says when no dealership name is set, and Next goes on onl
   assert.equal(r.dealer.name, 'Example Motors');
   assert.deepEqual(r.focused, []);
   assert.equal(r.persisted, 1);
+});
+
+test('the store step says which match ticked the store: the website\'s name, its page title or host, or its town', () => {
+  assert.equal(storeTickReason('name'), "matches the website's own name");
+  assert.match(storeTickReason('site'), /page title/, 'a title or host match is not called a name match');
+  assert.doesNotMatch(storeTickReason('site'), /own name/);
+  assert.match(storeTickReason('town'), /town of the website's address/);
 });

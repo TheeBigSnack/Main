@@ -15,7 +15,7 @@ import { performScan, rememberSite, keepSeenBasis } from './src/scanRunner.js';
 import { withDefaults, saveProfile, loadProfile, settingsFromProfile, DEFAULT_SALESPERSON_TITLE, priceStepModel, suggestedPriceNote, chooseBasis, basisChangeNote, NO_DEALER_NAME, dealerNameMissing } from './src/settings.js';
 import { originsFor, httpOnlyWebsite } from './src/rescanSchedule.js';
 import { askChrome } from './src/askChrome.js';
-import { shortLocation, storeNames, matchStore } from './src/normalize.js';
+import { shortLocation, storeNames, storeMatchRule } from './src/normalize.js';
 import { POSTING_RULES } from './src/postingRules.js';
 import { recordFlags } from './src/pilot.js';
 import { LEGAL, acceptLegal, legalHosted } from './src/legalLinks.js';
@@ -25,7 +25,7 @@ import { updateKey, storageErrorText, isStorageFull, STORAGE_FULL } from './src/
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { signInStart, signInFinish, currentSession, rewriteEndpointFor } from './src/accountFlow.js';
 import { loadSession, redeemInvite } from './src/account.js';
-import { wizardSteps, accountStepModel, joinedFrom, rewriteAtAccount, termsSummary, TERMS_PENDING, addressHint } from './src/wizardSteps.js';
+import { wizardSteps, accountStepModel, joinedFrom, rewriteAtAccount, termsSummary, TERMS_PENDING, addressHint, storeTickReason } from './src/wizardSteps.js';
 import { settingNumberWarning, settingNumberNotice, priceNoteWarning, priceNoteNotice } from './src/rewriteTemplate.js';
 
 const steps = () => wizardSteps(accountsConfigured());
@@ -296,14 +296,15 @@ export function wizardHtml() {
       // out none is ticked and the hint says so, so a person picks. Settings
       // the website or the profile already had keep their own choice, and
       // the hint says that instead.
-      const matched = stores.length ? matchStore(wiz.site, stores) : null;
+      const matchedBy = stores.length ? storeMatchRule(wiz.site, stores) : null;
+      const matched = matchedBy ? matchedBy.store : null;
       const ticked = s.myStores.filter((st) => stores.includes(st));
       const byMatch = matched ? ticked.length === 1 && ticked[0] === matched : !ticked.length;
       const every = s.storesChosen && !s.myStores.length; // chosen before, with the stores in view: every store
       const hint = !stores.length ? ''
         : every ? 'The website lists these stores. None is ticked, as chosen before: every store\'s cars count.'
         : !byMatch ? (ticked.length ? 'The website lists these stores; your earlier choice is ticked.' : 'The website lists these stores. None is ticked: tick yours.')
-        : matched ? `The website lists these stores; ${esc(matched)} matches the website's own name, so it was ticked for you.` : "The website lists these stores. None of them matches the website's own name, so none is ticked: tick yours.";
+        : matched ? `The website lists these stores; ${esc(matched)} ${storeTickReason(matchedBy.rule)}, so it was ticked for you.` : "The website lists these stores. None of them matches the website's own name, so none is ticked: tick yours.";
       return `${progress}<h3>Your store</h3>
         <p class="hint">Only cars at the stores you tick count as ready to post; with none ticked, every store's cars count.${hint ? ' ' + hint : ''}</p>
         ${stores.length ? stores.map((st) => `<label class="block"><input type="checkbox" class="wizStore" value="${esc(st)}" ${s.myStores.includes(st) ? 'checked' : ''} /> ${esc(st)} <span class="why">${esc(shortLocation(st, stores))}</span></label>`).join('') : '<p class="hint">The website does not name stores; every car will count.</p>'}

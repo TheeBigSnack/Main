@@ -140,3 +140,14 @@ export function addressHint(address) {
   const list = missing.length > 1 ? `${missing.slice(0, -1).join(', ')} or ${missing[missing.length - 1]}` : missing[0];
   return `Read from the website (${a.source})${missing.length ? `. It gives no ${list}: type ${missing.length > 1 ? 'them' : 'it'}` : ''}. ${tail}`;
 }
+
+// Why the store step ticked the store it ticked: the rule normalize.js's storeMatchRule used. Only a name match is
+// called a name match; a page title, host or town match says what it matched.
+const TICK_REASON = Object.freeze({
+  name: "matches the website's own name",
+  site: "matches the website's name, page title or address",
+  town: "is in the town of the website's address",
+});
+export function storeTickReason(rule) {
+  return TICK_REASON[rule] || TICK_REASON.name;
+}
