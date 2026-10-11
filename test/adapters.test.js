@@ -744,7 +744,9 @@ test('schemaOrg scan: the list and its rel=next pages to the end, then each car\
   assert.deepEqual([busy.ok, busy.error], [false, 'blocked'], 'a 503 is the website asking to be left alone');
   const drawn = await scanSite(new Map([[LIST, html('<html><head><title>Used</title></head><body><div id="app"></div></body></html>')]]));
   assert.deepEqual([drawn.ok, drawn.error], [false, 'no-cars']);
-  assert.match(drawn.message, /draws its list with scripts/);
+  assert.match(drawn.message, /Some websites load their car list with scripts, and Lot Current can't see those cars\./);
+  assert.match(drawn.message, /Open that page in this window and scan again/, 'the message ends with the next step');
+  assert.match(drawn.message, /If it still finds no cars, tell your manager that Lot Current can't read that page's car list\.$/, 'and what to do when the next step fails');
   const unknown = await schemaOrg.scan(fakeSiteSearch(site), { origin: O, listUrl: null });
   assert.deepEqual([unknown.ok, unknown.error, unknown.requests], [false, 'no-list', 0]);
 });

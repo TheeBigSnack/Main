@@ -306,6 +306,7 @@ Improvements round 3 (2026-10-11): the ten items of `plans/2026-10-11-next-ten-i
 - Changed: a dropdown on Facebook's form that takes a looser option than the one wanted (wanted "Gray", taken "Gray Metallic") is still filled, now with a note naming both values, instead of filled without a word (`extension/facebook/fillForm.js` `applyField`; `test/dropdownReadBack.test.js`).
 - Fixed: a Dealer Inspire inventory search that never answers (the page's own helper, or the POST) is given up after 20 seconds, so a scan no longer waits on it forever (`extension/adapters/dealerInspire.js` `searchInPage`; `test/adapters.test.js`).
 - Changed: the side panel's stop for a missing dealership name names the route: click the Lot Current icon in Chrome's toolbar, then Settings, and type the name in Dealership name. The panel has no Settings button of its own, so the old "in Settings" line gave no way there (`extension/sidepanel.js` `NO_DEALER_TEXT`; `test/panelFlow.test.js`).
+- Changed: when a scan finds no car links on the inventory page, the message says plainly that some websites load their car list with scripts, and ends with the next step: open that page in this window, scan again, and tell your manager if it still finds no cars. It used to stop at a developer phrase with no step to take (`extension/adapters/schemaOrg.js` `scan`; `test/adapters.test.js`).
 
 ## 0.5.0 (2026-09-28, toward a sellable product)
 

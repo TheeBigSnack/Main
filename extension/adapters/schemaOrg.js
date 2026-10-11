@@ -1413,7 +1413,7 @@ export async function scan(search, options = {}) {
   site.cars.known = knownCars;
   site.cars.shape = learnCarAddressShape([...cars.values()]);
   if (!cars.size) {
-    return fail('no-cars', `Lot Current found no links to car pages on the inventory page (${firstList}). A page that draws its list with scripts shows none to Lot Current's plain read of it.`);
+    return fail('no-cars', `Lot Current found no links to car pages on the inventory page (${firstList}). Some websites load their car list with scripts, and Lot Current can't see those cars. Open that page in this window and scan again (Scan website in the popup, or Read the website in set-up). If it still finds no cars, tell your manager that Lot Current can't read that page's car list.`);
   }
 
   // 3. which car pages to read
