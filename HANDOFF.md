@@ -1048,7 +1048,7 @@ Each item went in test first: the new test ran red on the code before the change
 
 - `npm test`: 1876 pass (up 29 from 1847; `README.md` states the count and `test/docs.test.js` checks it).
 - `npm run test:a11y`: no findings.
-- Browser flows: see the results line in the pull request description.
+- Browser flows at `8f28e85` (`npm run test:e2e`, 9 flows one at a time, 282 s): popup, post, queue, wizard, upkeep, standard, platforms, panel and branding all passed. `npm run test:site` (11 pages at 2 widths, redirects, the root files) and `npm run test:demo` passed too. The branding eval (`npm run test:branding-eval`) was run on its own at `915b330`.
 
 ### 25.3 Still open
 
