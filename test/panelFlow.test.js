@@ -2422,7 +2422,7 @@ test('Open the Marketplace form and Check fields are off while the description b
   // no dealership name set in Settings: both drawn off, with the reason above them
   state.settings.dealer = { ...DEALER, name: '  ' };
   assert.deepEqual(drawnOff(), [true, true], 'no dealership name: both drawn off');
-  assert.match(fns.viewReview(), /<div class="banner bad" id="noDealer">Add your dealership's name in Settings first \(Dealership name\)/);
+  assert.match(fns.viewReview(), /<div class="banner bad" id="noDealer">Add your dealership's name first\. Click the Lot Current icon in Chrome's toolbar, then Settings, and type it in Dealership name/);
   state.settings.dealer = DEALER;
   assert.doesNotMatch(fns.viewReview(), /id="noDealer"/);
 
@@ -2577,7 +2577,7 @@ test('Stop this post on the review screen drops a single post; a queued car has 
 });
 
 // ---------- the dealership's name, and the one stop every opening and fill goes through ----------
-const NO_NAME = "Add your dealership's name in Settings first (Dealership name): every description names the dealership.";
+const NO_NAME = "Add your dealership's name first. Click the Lot Current icon in Chrome's toolbar, then Settings, and type it in Dealership name: every description names the dealership.";
 const PAT_SC = { name: 'Pat', title: 'sales consultant' };
 
 test('the Marketplace form is not opened while no dealership name is set: no description could name the dealership', async () => {
