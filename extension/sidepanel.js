@@ -839,7 +839,7 @@ function readIsOld() {
 // What the form would get from the car as it stands: every field but the
 // description (the person's own text), and the photos in order.
 function formValues() {
-  return buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: '', price: state.price, photos: pickedPhotos(), stores: state.settings.myStores, lot: state.snapshotVehicles });
+  return buildListingData(state.vehicle, { boilerplate: state.boilerplate, dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: '', price: state.price, photos: pickedPhotos(), stores: state.settings.myStores, lot: state.snapshotVehicles });
 }
 
 // Before Open the Marketplace form or Fill it in now: with a read older than
@@ -1390,7 +1390,7 @@ async function openForm({ probeOnly = false } = {}) {
   const before = { windowId: state.windowId, listing: state.listing, listingTyped: state.listingTyped, photoOriginals: state.photoOriginals };
   keepShownWhole();
   state.windowId = panelWindowId || state.windowId;
-  state.listing = buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: pickedPhotos(), stores: state.settings.myStores, lot: state.snapshotVehicles });
+  state.listing = buildListingData(state.vehicle, { boilerplate: state.boilerplate, dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: pickedPhotos(), stores: state.settings.myStores, lot: state.snapshotVehicles });
   state.listingTyped = null; // a new form: nothing typed for it yet
   state.step = 'filling';
   state.message = 'Opening the Marketplace form in a new tab…';
@@ -2101,7 +2101,7 @@ function viewBlocked() {
   return `<div class="banner bad" id="blocked">${esc(state.message)}</div><div class="actions">${buttons}</div>`;
 }
 
-const currentListing = () => state.listing || buildListingData(state.vehicle, { dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: pickedPhotos(), stores: state.settings.myStores, lot: state.snapshotVehicles });
+const currentListing = () => state.listing || buildListingData(state.vehicle, { boilerplate: state.boilerplate, dealer: state.settings.dealer, defaults: state.settings.defaults, guesses: state.colorGuess, description: state.description, price: state.price, photos: pickedPhotos(), stores: state.settings.myStores, lot: state.snapshotVehicles });
 
 function fieldsTable() {
   const l = currentListing();

@@ -1,3 +1,4 @@
+import { withoutLotWide, lotWideLines } from './description.js';
 // Turns a normalised vehicle into the values the Facebook Marketplace vehicle
 // form gets, in Lot Current's own canonical words. Facebook's spelling for each
 // option (and how each field is found on the page) lives in
@@ -162,9 +163,10 @@ function floodSalesLine(text, start, end) {
   return !LIGHT_OBJECT.test(sales[1]) || LIGHT_PHRASE_ENDS.test(after.slice(sales[0].length));
 }
 
-export function brandedTitleSignal(v = {}) {
+export function brandedTitleSignal(v = {}, boilerplate = []) {
   // each part read on its own: a denial never reaches from one feature or field into the next
-  const hay = [v.descriptionRaw, ...(Array.isArray(v.features) ? v.features : []), v.name, v.trim, v.siteTitle].filter(Boolean).join(' | ');
+  // the write-up without the lot-wide footer every car carries (the claims read it the same way)
+  const hay = [typeof v.descriptionRaw === 'string' ? withoutLotWide(v.descriptionRaw, lotWideLines(boilerplate)).join('\n') : v.descriptionRaw, ...(Array.isArray(v.features) ? v.features : []), v.name, v.trim, v.siteTitle].filter(Boolean).join(' | ');
   const text = hay.replace(NOT_A_BRAND, (s) => '#'.repeat(s.length));
   let deniedUpTo = -1;
   for (const m of text.matchAll(new RegExp(BRANDED.source, 'gi'))) {
@@ -538,11 +540,11 @@ export function carStore(v = {}, { stores = [], dealer = {}, lot = null } = {}) 
  *   stores are the salesperson's ticked stores (settings.myStores), and lot the website's cars
  *   from the last scan (the snapshot's map by VIN, when known), for carStore
  */
-export function buildListingData(vehicle, { dealer = {}, description = '', photos = null, price = null, defaults = DEFAULT_LISTING_DEFAULTS, guesses = null, stores = [], lot = null } = {}) {
+export function buildListingData(vehicle, { dealer = {}, description = '', photos = null, price = null, defaults = DEFAULT_LISTING_DEFAULTS, guesses = null, stores = [], lot = null, boilerplate = [] } = {}) {
   const v = vehicle || {};
   const d = defaults || {};
   const g = guesses || {};
-  const branded = brandedTitleSignal(v);
+  const branded = brandedTitleSignal(v, boilerplate);
   const conditionDefault = CONDITIONS.includes(d.condition) ? d.condition : '';
   const titleDefault = TITLE_STATUSES.includes(d.titleStatus) ? d.titleStatus : '';
   const kind = readVehicleKind(v);
