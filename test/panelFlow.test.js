@@ -1355,7 +1355,9 @@ test('a form left open when the panel closed comes back before a post request is
   // the queue bar: a single post's form open, so no Post next car
   const queue = { vins: ['BBB', 'CCC'], index: 0, status: 'running' };
   for (const step of ['filling', 'probe', 'publish']) assert.doesNotMatch(requestPanel({ step, queue }).fns.queueBar(), /queueNext/, step);
-  assert.match(requestPanel({ step: 'review', queue }).fns.queueBar(), /id="queueNext"/);
+  // a car under review, a single one included: Post next car would drop its review (startFlow clears it), so none
+  assert.doesNotMatch(requestPanel({ step: 'review', queue }).fns.queueBar(), /queueNext/, 'a single car under review');
+  assert.doesNotMatch(requestPanel({ step: 'review', queueMode: true, queue }).fns.queueBar(), /queueNext/, 'a queued car under review');
   assert.match(requestPanel({ step: 'idle', vin: null, queue }).fns.queueBar(), /id="queueNext"/);
 });
 
@@ -3772,4 +3774,38 @@ test("the form's tab counts as loaded once Chrome says it is, even when Chrome's
   const n = stuck.asked;
   await pause(40);
   assert.equal(stuck.asked, n, 'and the tab is asked no more after the limit');
+});
+
+// Post on a car in the panel's list while a queue is under way: the queue's own
+// bar carries on with its cars, and nothing is started over it (review U2).
+test('Post on a car in the list is refused while a queue is under way, and allowed once the queue is done or none is saved', async () => {
+  const scenario = async (stored) => {
+    const started = [];
+    const statuses = [];
+    let renders = 0;
+    const state = { origin: 'https://www.example-dealer.test', snapshotVehicles: { AAA: { name: 'Car A' } }, posted: {}, queue: null };
+    const fns = compileMany(['postFromList'], {
+      state,
+      askForSite: async () => true,
+      siteKeys: (o) => ({ queue: 'postQueue:' + o }),
+      chrome: { storage: { local: { get: async (k) => ({ [k]: stored }) } } },
+      dailyCap: () => ({ reached: false, remaining: 5 }),
+      capCount: () => '0 of 10',
+      setStatus: (text, kind) => statuses.push([text, kind]),
+      render: () => { renders += 1; },
+      startFlow: async (req) => started.push(req.vin),
+      panelWindowId: 7,
+    }, ['QUEUE_UNDER_WAY']);
+    await fns.postFromList('AAA');
+    return { started, statuses, state, renders };
+  };
+  for (const status of ['running', 'paused']) {
+    const r = await scenario({ vins: ['BBB', 'CCC'], index: 0, status });
+    assert.deepEqual(r.started, [], `${status}: no post is started over the queue`);
+    assert.equal(r.state.queue.status, status, `${status}: the queue is the one the bar shows`);
+    assert.deepEqual(r.statuses[0], ['A queue is already under way: continue it from the bar above, or stop it first.', 'error'], status);
+    assert.equal(r.renders, 1, `${status}: the panel is redrawn`);
+  }
+  assert.deepEqual((await scenario({ vins: ['BBB'], index: 1, status: 'done' })).started, ['AAA'], 'a finished queue does not stop a post');
+  assert.deepEqual((await scenario(null)).started, ['AAA'], 'nor does none saved');
 });
