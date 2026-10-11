@@ -1095,6 +1095,44 @@ Round 3 (ten more, not built) is in `/mnt/project-files/plans/2026-10-11-next-te
 - The post e2e flow (`test/e2e/post.e2e.mjs`) grows native memory when its failing path runs. A failing run was killed by the cgroup OOM twice (exit 137, empty log) on the red commit of item 2 (`923845a`). Passing runs, including every run at `3e0a1b8`, are normal. The suspected cause is the `finally` block awaiting `context.close()` after a failed assertion; it is not isolated. A JS heap cap of 2 GB did not prevent it.
 - Round 3 is not built. Its decision-only runners-up (a shared computer's second sign-in, a re-listed car marked posted, the protected-characteristic word list) wait on the owner.
 
+## 27. The third ten-improvements round (2026-10-11, branch `claude/project-thread-ofbx1q-round3`)
+
+The owner asked for the round-3 list to be built the same way as rounds 1 and 2: one pull request, one commit per item. The list is `/mnt/project-files/plans/2026-10-11-next-ten-improvements-round-3.md`. The branch is cut from `claude/project-thread-ofbx1q-round2` (PR #17, not merged), so its pull request targets that branch. Nothing is merged here.
+
+Round 4 (fifty candidates, not built) is in `/mnt/project-files/plans/2026-10-11-improvements-round-4.md`, written from four read-only finders and a refuter pass.
+
+### 27.1 What each commit does
+
+- `cb0088e` **A car already saved as a Facebook draft is left out of the queue.** `queueable` in `popup.js` keeps it out of Ready's queue tick, the queue and its count; its draft pill is kept. The help line and its pinned test were updated in the same commit (`docs/help.md`, `test/docs.test.js`).
+- `b827e2b` **A Dealer Inspire MSRP or "Was" line is never the selling price.** `websitePrice` in `adapters/dealerInspireNormalize.js` reads a reference-labelled line as no price ("Call for price" or the website's own note).
+- `11f6c63` **"Certified New" is a new car.** `readCondition` in `src/classify.js` reads it as new before the pre-owned check, so the gate keeps it out of posting.
+- `5622173` **A description that claims a Facebook or Meta partnership is stopped.** `AFFILIATION_CLAIM` and the `affiliation` code in `src/rewriteTemplate.js`; the code is in `RULE_PROBLEM_CODES`, so the guardrail list test covers it.
+- `aa7112d` **A dealership named with a banned phrase still gets descriptions.** `runGuardrails` leaves the name out of the banned-phrase check only when it is itself a banned phrase; the same words in the description text are still caught.
+- `df15991` **A price flag stays open while its car is in Needs a look.** `noteFlags` in `src/pilot.js` generalises the take-down protection to every unsettled flag.
+- `38ce1ff` **"Lienholder" and "liens" make a title branded.** `brandedTitleSignal` in `src/listingData.js`; "Lien free" is still read as a denial.
+- `1f461f7` **The publish step's skip note says what a skip leaves recorded.** `skipPublishNote` in `src/queue.js`, shown beside the skip button in `sidepanel.js`. The record itself is unchanged: how a skip is recorded is the owner's decision. The panel's test harness imports the new function (folded in from a fixup).
+- `5ead59d` **A typed make or model takes the exact suggestion.** `typeahead` in `facebook/fillForm.js` prefers a suggestion equal to what was typed; new `test/typeaheadPick.test.js`.
+- `620753d` **An http dealership website gets no automatic-rescan grant it could never get.** `originsFor` and the new `httpOnlyWebsite` in `src/rescanSchedule.js` name only https origins and this computer's own address (the browser tests' mock sites run there). The popup and the wizard say the check is done by hand instead of offering an Allow button, and `background.js` records `NO_HTTPS_ONLY` for such a site. An https service on an http site is still asked for. The manifest is not widened.
+- `89b66a9` **README count 1907.**
+
+### 27.2 How it was checked
+
+- `npm test`: 1907 of 1907, on the tree at `89b66a9`. Before the commits were squashed the same content passed; the final tree has no diff from the one tested.
+- The browser battery at `89b66a9`, one flow at a time, all exited 0: post (32 s), queue (64 s), popup, upkeep (40 s), panel (45 s), standard, platforms, wizard and branding (53 s); then `test:site`, `test:demo`, `test:a11y` and `test:branding-eval` (115 s). The post flow's failing-path memory growth (26.4) was not exercised; only passing runs were.
+- Red runs: item 10's `originsFor` assertions were run against the old code and failed on the http origin before the fix; the new `httpOnlyWebsite` import was missing at first, so that test failed on the import. Item 9's red test failed on the longer suggestion before the fix.
+- The first full `npm test` after item 1 and item 8 found seven failures: the help-text pin for the queue count, and the panel harness not importing `skipPublishNote`. Both were folded into their commits with `git rebase --autosquash`, so each commit's own tests pass.
+
+### 27.3 Not checked here, and why
+
+- Item 10 in a browser: the popup and wizard offers are checked by reading the source, not by drawing them. The e2e mock sites run on `127.0.0.1`, which the rule allows, so no e2e flow sees an http dealership.
+- Item 8: the copy only. The record is the owner's decision.
+- Item 3 and item 4: unit-level on the fixtures. No live dealer site was checked.
+
+### 27.4 Still open
+
+- Round 3's decision-only runners-up (a shared computer's second sign-in, a re-listed car marked posted, the protected-characteristic word list) wait on the owner, as in round 3's plan file.
+- The post e2e memory growth (26.4) is still unisolated.
+
 ## 11. Quick reference
 ```
 # tests
