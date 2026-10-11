@@ -1981,3 +1981,10 @@ test('a car with no description reads as no description (null), not an empty tex
   assert.equal(schemaOrg.normalize({ node: { ...standardCarNode(sample), description: '' }, url }).descriptionRaw, null);
   assert.notEqual(schemaOrg.normalize({ node: standardCarNode(sample), url }).descriptionRaw, null, 'a described car keeps its text');
 });
+
+test('schemaOrg scan: a list whose own count is higher than the car pages it links, with no sitemap, is not a complete read', async () => {
+  const cars = standardCars(24);
+  const site = standardSite({ cars, perPage: 24, numberOfItems: 108 });
+  const res = await schemaOrg.scan(fakeSiteSearch(site), schemaOrg.scanOptions(SERVICE));
+  assert.deepEqual([res.ok, res.total, res.complete], [true, 24, false], 'the 84 cars the list counts but does not link are said to be missing');
+});

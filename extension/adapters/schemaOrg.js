@@ -1670,8 +1670,10 @@ export async function scan(search, options = {}) {
   // don't, one car's page beside them carrying its VIN).
   const shapeInDoubt = shapeLeftOut > 0 && (notCarPages > 0 || noneShown > carsFound);
   const total = cars.size - notCarPages;
+  // the list's own count is higher than the car pages found, even after the sitemap: some cars were not read, so the read is not complete
+  const countShort = listed > cars.size;
   // a lot that counted cars and gave none is never a complete read of it
-  const complete = !homeOnly && listClean && sitemapClean && readErrors === 0 && untried === 0 && leftForLater === 0 && !shapeInDoubt && !(total > 0 && records.size === 0);
+  const complete = !homeOnly && listClean && sitemapClean && readErrors === 0 && untried === 0 && leftForLater === 0 && !shapeInDoubt && !countShort && !(total > 0 && records.size === 0);
   const out = { ok: true, fetchedAt: new Date().toISOString(), total, complete, requests: site.requests, records: [...records.values()], confirm };
   if (unread.size) out.unread = [...unread];
   const readCars = [...pagesRead].filter((vin) => records.has(vin));
