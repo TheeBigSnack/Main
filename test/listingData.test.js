@@ -73,6 +73,11 @@ test('a color guessed from the photos fills only a blank, and is marked as a gue
 
 test('a branded title in the website text switches the clean-title default off', () => {
   assert.equal(brandedTitleSignal({ descriptionRaw: 'Rebuilt title, runs and drives great.<br>Disclaimer.' }), 'Rebuilt');
+  // the hyphen, the space and the short spelling are the same brand; "rebuildable" stays its own word
+  assert.equal(brandedTitleSignal({ descriptionRaw: 'Re-built title, runs and drives great.' }), 'Re-built');
+  assert.equal(brandedTitleSignal({ descriptionRaw: 'Re built title, runs and drives great.' }), 'Re built');
+  assert.equal(brandedTitleSignal({ descriptionRaw: 'Rebuild title, runs and drives great.' }), 'Rebuild');
+  assert.equal(brandedTitleSignal({ descriptionRaw: 'Rebuildable, clean history.' }), 'Rebuildable');
   assert.equal(brandedTitleSignal({ features: ['Salvage Title'] }), 'Salvage');
   assert.equal(brandedTitleSignal({ descriptionRaw: 'Fog lights, flood lights on the rack, one owner.' }), '');
   assert.equal(brandedTitleSignal({}), '');

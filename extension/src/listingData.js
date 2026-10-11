@@ -72,7 +72,7 @@ const BRANDED = new RegExp(
   '\\b(' +
     [
       'salvag\\w*',
-      'rebuil(?:t|dable)',
+      're[\\s-]?built|rebuild(?:able)?',
       'reconstructed',
       'branded[\\s-]+title',
       'title (?:is |was )?branded',
