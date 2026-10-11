@@ -1481,3 +1481,12 @@ test('a dealership name that already ends in a period is not followed by a secon
   assert.equal(text.includes('..'), false, 'no doubled period anywhere in the description');
   assert.ok(text.includes('Example Motors Inc.'), 'the name is still said as typed');
 });
+
+test('a number that only the lot-wide footer of every car carries is not in this car\'s source, so an edit that adds it is caught', () => {
+  // every car's write-up ends with the same footer; the rate is the lot's, not this car's
+  const v = vehicle('usedNormal', { description: 'Clean one owner SUV, well kept.\nAPR 3.9% for 72 months.' });
+  const c = ctx(v, { boilerplate: ['APR 3.9% for 72 months.'] });
+  const edited = buildTemplateDescription(c) + ' A special 3.9% rate for 72 months.';
+  const g = runGuardrails(edited, c);
+  assert.ok(g.problems.some((p) => p.code === 'unknown-number' && /3\.9/.test(p.text)), JSON.stringify(g.problems));
+});

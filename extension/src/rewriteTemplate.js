@@ -231,11 +231,11 @@ export function numbersIn(text) {
 }
 
 // Numbers the website (and the dealer's own settings) actually contain.
-function sourceNumbers({ vehicle = {}, dealer = {}, priceNote = '', price = null } = {}) {
+function sourceNumbers({ vehicle = {}, dealer = {}, priceNote = '', price = null, boilerplate = [] } = {}) {
   const v = vehicle;
   const bits = [
     v.year, v.make, v.model, v.trim, v.name, v.mileage, v.stock, v.engine, v.transmission, v.drivetrain,
-    v.exteriorColor, v.interiorColor, v.bodyType, v.fuelType, v.price, v.priceBeforeFees, v.descriptionRaw,
+    v.exteriorColor, v.interiorColor, v.bodyType, v.fuelType, v.price, v.priceBeforeFees, writeUpText(v.descriptionRaw, boilerplate),
     ...(Array.isArray(v.features) ? v.features : []),
     priceNote, price, dealer.name, dealer.city, dealer.zip, v.location,
   ];
@@ -1496,7 +1496,8 @@ export function runGuardrails(text, { vehicle = {}, dealer = {}, salesperson = {
   if (words < WORD_LIMITS.min) problems.push({ code: 'too-short', text: `${words} words; needs at least ${WORD_LIMITS.min}` });
   if (words > WORD_LIMITS.max) problems.push({ code: 'too-long', text: `${words} words; the limit is ${WORD_LIMITS.max}` });
 
-  const src = sourceNumbers({ vehicle, dealer, priceNote, price });
+  // the write-up without the lot-wide footer, as the claims read it: a rate every car carries is not this car's number
+  const src = sourceNumbers({ vehicle, dealer, priceNote, price, boilerplate });
   const unknownNumbers = (text) => [...numbersIn(text)].filter((n) => !src.has(n)).map((n) => ({ code: 'unknown-number', text: `"${n}" isn't in the website's data for this car` }));
   const amountProblems = (text) => [...priceAndMileageProblems(text, { vehicle, priceNote, price }), ...bareAmountProblems(text, { vehicle, dealer, priceNote, price }, src)];
   const role = roleOf(salesperson);
