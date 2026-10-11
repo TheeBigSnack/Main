@@ -330,3 +330,18 @@ test('the listing reader knows the create form by any field the fill code can fi
   assert.deepEqual([listing.matchesId, listing.formOnPage, listing.hasPriceBox, listing.vinInText], [true, false, false, true]);
   assert.equal(showsPostedCar(listing, { namesakes: 2 }), true, 'the published listing still counts');
 });
+
+// A sold or removed sign counts only as a short label of its own. A sentence in the description
+// ("Not sold separately.", "This item isn't available for trade-in ...") is not a sign, so a
+// take-down cannot close on text read after the first look.
+test('a sold or removed sign is a label of its own: a description sentence with the same words is not one', () => {
+  const expect = { id: '616161', name: '2022 Jeep Wagoneer Series III', prices: [38383] };
+  const url = 'https://www.facebook.com/marketplace/item/616161/';
+  const prose = readPage({ url, texts: ['2022 Jeep Wagoneer Series III', '$38,383', 'Not sold separately.', "This item isn't available for trade-in with other offers, so ask."] }, expect);
+  assert.equal(prose.sold, false, 'Not sold separately is prose');
+  assert.equal(prose.unavailable, false, 'the availability sentence is prose');
+  const labelled = readPage({ url, texts: ['Sold'] }, expect);
+  assert.equal(labelled.sold, true);
+  const removed = readPage({ url, texts: ["This content isn't available right now."] }, expect);
+  assert.equal(removed.unavailable, true);
+});

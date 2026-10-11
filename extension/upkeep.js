@@ -279,7 +279,8 @@ async function poll(ctx) {
       }
       if (up.status === 'filled' && !seen.hasPriceBox && seen.prices.includes(want)) return finish(ctx, 'detected'); // saved: the listing page shows the new price
     } else if (up.kind === 'takeDown') {
-      const changed = (seen.sold && !up.baseline.sold) || (seen.unavailable && !up.baseline.unavailable);
+      // a removed page does not show this car's name; a live page that says "isn't available" in its text still does
+      const changed = (seen.sold && !up.baseline.sold) || (seen.unavailable && !seen.matchesName && !up.baseline.unavailable);
       if (changed) return finish(ctx, 'detected');
     }
   } finally {
