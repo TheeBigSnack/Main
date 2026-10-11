@@ -66,3 +66,7 @@ export function describe(queue) {
 export function capPauseText(count) {
   return `Daily post cap reached (${count}). The queue is paused. When the cap resets tomorrow, click Resume on the queue bar to carry on. The dealer can change the cap in Settings.`;
 }
+
+// Shown beside Skip on a queued car's publish step: a skip records nothing, so the car stays
+// Ready, and a publish made on Facebook after the skip is recorded only by Mark posted
+export const skipPublishNote = () => 'Skipping does not record the car: it stays Ready. If you publish it on Facebook anyway, click Mark posted for it on the Ready tab of the popup, so the daily cap counts it and the queue does not offer it again.';

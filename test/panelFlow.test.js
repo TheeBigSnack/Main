@@ -14,7 +14,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { currentVin, advance, describe as describeQueue } from '../extension/src/queue.js';
+import { currentVin, advance, describe as describeQueue, skipPublishNote } from '../extension/src/queue.js';
 import { markPosted, diffScans } from '../extension/src/rescan.js';
 import { logPost, capStatus, capCount } from '../extension/src/cap.js';
 import { updateKey, withLock } from '../extension/src/storage.js';
@@ -1964,7 +1964,7 @@ async function queueWatch({ queueMode, result, posted = {}, windowId = null, pan
   const state = { step: 'publish', queueMode, fbTabId: 77, map: FORM_MAP, posted, takenDown, snapshotVehicles, detected, windowId, vin: 'AAA', vehicle: { vin: 'AAA', name, price: 21000 }, price: 20000, settings: { basis: 'website' }, fill: null };
   let fns;
   fns = compileMany(['startWatcher', 'postsWindow', 'confirmIfThisCar', 'offeredLink', 'viewPublish', 'onInput'], {
-    state, watcher: null, isNewListingFromForm, showsPostedCar, namesakesOf, basisPrice, panelWindowId, flowRun: 0,
+    state, watcher: null, isNewListingFromForm, showsPostedCar, namesakesOf, basisPrice, panelWindowId, flowRun: 0, skipPublishNote,
     sleep: async () => {}, VERIFY_READS: 6, VERIFY_EVERY_MS: 1500, readListingInPage: 'the listing reader', LISTING_SIGNS: 'the listing signs',
     chrome: {
       scripting: {

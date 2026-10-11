@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createQueue, currentVin, advance, pause, resume, summary, describe, capPauseText } from '../extension/src/queue.js';
+import { createQueue, currentVin, advance, pause, resume, summary, describe, capPauseText, skipPublishNote } from '../extension/src/queue.js';
 
 const VINS = ['1C6RR7FT0KS643289', '1C4SJVDT7NS142834', '2C3CDZC96GH308445'];
 
@@ -70,4 +70,11 @@ test('the daily cap pause says the queue waits for Resume once the cap resets, n
   const text = capPauseText('10 of 10 today');
   assert.equal(text, 'Daily post cap reached (10 of 10 today). The queue is paused. When the cap resets tomorrow, click Resume on the queue bar to carry on. The dealer can change the cap in Settings.');
   assert.doesNotMatch(text, /paused until tomorrow/, 'nothing resumes the queue on its own');
+});
+
+test('Skip on the publish step says the car stays Ready, and that a publish after the skip is recorded by hand', () => {
+  const note = skipPublishNote();
+  assert.match(note, /stays Ready/, 'the car is not recorded by the skip');
+  assert.match(note, /Mark posted/, 'the way to record it by hand');
+  assert.match(note, /publish/i, 'it names the case where the form was published');
 });
