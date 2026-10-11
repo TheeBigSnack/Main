@@ -1947,3 +1947,22 @@ test('a Dealer Inspire direct search that never answers is ended by a timeout, s
   const answers = async (url, init) => ({ ok: true, json: async () => ({ data: { records: [1] } }), signal: init.signal });
   assert.deepEqual(await makeDirectSearch(service, answers, { timeoutMs: 50 })({ page: 1 }), { records: [1] });
 });
+
+test('schemaOrg probe: a used-list link with a view, page size or tracking parameter is the used list; a filter still is not', async () => {
+  const site = standardSite({ cars: LOT });
+  const on = (path, options = {}) => runInPage(fakeStandardPage({ site, path, ...options }), schemaOrg.probeInPage);
+  const cards = LOT.slice(0, 3).map((c) => `<a href="${c.path}">${c.year} ${c.make}</a>`).join(' ');
+  const home = (href) => `<!doctype html><html><head><title>Sample Motors</title></head><body><a href="${href}">Used Cars</a> ${cards}</body></html>`;
+  assert.deepEqual(
+    await on('/', { html: home('/used-vehicles/?view=grid&amp;per_page=24&amp;utm_source=nav') }),
+    { ...SERVICE, listUrl: O + '/used-vehicles/?view=grid&per_page=24&utm_source=nav' },
+    'the used list with display and tracking parameters',
+  );
+  assert.deepEqual(
+    await on('/', { html: home('/used-vehicles/?layout=list&utm_medium=email&fbclid=abc123') }),
+    { ...SERVICE, listUrl: O + '/used-vehicles/?layout=list&utm_medium=email&fbclid=abc123' },
+  );
+  // a filter that narrows the list is not the used list: the home page it is found on stays the list
+  assert.deepEqual(await on('/', { html: home('/used-vehicles/?zip=43215') }), { ...SERVICE, listUrl: O + '/' }, 'a filter by zip');
+  assert.deepEqual(await on('/', { html: home('/used-vehicles/?view=grid&amp;make=honda') }), { ...SERVICE, listUrl: O + '/' }, 'a display parameter does not make a make filter a whole list');
+});

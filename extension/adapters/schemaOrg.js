@@ -146,13 +146,15 @@ export function probeInPage() {
   const usedText = /^\s*(?:(?:shop|view|browse|see|all)\s+)*(?:used|pre-?owned)(?:\s+(?:inventory|vehicles|cars))?\s*$/i;
   // A query that selects nothing but used inventory ("?condition=used",
   // "?type=Pre-Owned", "?condition=used&condition=certified"), or none,
-  // besides a page number or a sort order. Any other value (a make, a price,
-  // certified cars alone) narrows the list.
+  // besides a page number, a sort order, a view or page size, or a tracking
+  // tag (DISPLAY_KEY: how the list looks, not which cars it holds). Any other
+  // value (a make, a price, certified cars alone) narrows the list.
   const ORDER_KEY = /^(?:page|p|pg|start|sort|sortby|sort_by|sortorder|sort_order|order|orderby|order_by|dir|direction)$/i;
+  const DISPLAY_KEY = /^(?:view|layout|display|per_?page|page_?size|limit|utm_[a-z_]+|fbclid|gclid|mc_cid|mc_eid)$/i;
   const valueWords = ([k, v]) => String(v || k).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
   const certifiedWord = (w) => w === 'certified' || w === 'cpo';
   const usedQuery = (u) => {
-    const values = [...u.searchParams.entries()].filter(([k]) => !ORDER_KEY.test(k)).map(valueWords);
+    const values = [...u.searchParams.entries()].filter(([k]) => !ORDER_KEY.test(k) && !DISPLAY_KEY.test(k)).map(valueWords);
     if (!values.every((words) => words.length > 0 && words.every((w) => LIST_WORDS.has(w) || certifiedWord(w)))) return false;
     return !values.some((words) => words.some(certifiedWord)) || values.some((words) => !words.some(certifiedWord) && words.some((w) => /^(?:used|pre|owned|preowned|usedcars|usedvehicles|usedinventory|searchused)$/.test(w)));
   };
