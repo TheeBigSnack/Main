@@ -179,7 +179,8 @@ export function noteFlags(pilot, diff, { at } = {}) {
   const flags = p.flags.map((f) => {
     if (!flagOpen(f)) return f;
     const still = wanted.find((w) => w.vin === f.vin && w.kind === f.kind);
-    if (!still && f.kind === 'takeDown' && unsettled.has(f.vin)) return f;
+    // a car still in Needs a look (or taken down as not sold) keeps its flag open: nothing has settled it
+    if (!still && unsettled.has(f.vin)) return f;
     if (!still) return reliable ? { ...f, doneAt: when, how: 'cleared', hours: hoursBetween(f.flaggedAt, when) } : f;
     if (f.kind === 'price' && still.to !== f.to) return { ...f, from: still.from, to: still.to }; // the website price moved again while the item was open
     return f;
