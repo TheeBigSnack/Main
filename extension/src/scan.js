@@ -44,8 +44,19 @@ export function probeSiteInPage() {
         if (r && (r.zip || r.city)) return Object.assign(out, r, { source: 'structured data' });
       } catch (e) { /* not JSON, try the next one */ }
     }
-    const m = /(\d{1,6}\s+[A-Za-z0-9 .'-]{3,60}?),?\s+([A-Za-z .'-]{2,40}),\s*([A-Z]{2})\s+(\d{5})(?:-\d{4})?\b/.exec(document.body.innerText || '');
-    if (m) Object.assign(out, { street: m[1].trim(), city: m[2].trim(), state: m[3], zip: m[4], source: 'page text' });
+    // a street and its town: with a comma between them, or with the street's own suffix (Street, Ave, Rd ...) ending the street, so
+    // "100 Main Street Waynesburg, PA" reads as street "100 Main Street" and town "Waynesburg"
+    const ADDRESS = /(\d{1,6}\s+[A-Za-z0-9 .'-]{3,60}?),\s*([A-Za-z .'-]{2,40}),\s*([A-Z]{2})\s+(\d{5})(?:-\d{4})?\b|(\d{1,6}\s+[A-Za-z0-9 .'-]{3,60}?\s(?:St|Street|Ave|Avenue|Rd|Road|Dr|Drive|Blvd|Boulevard|Hwy|Highway|Pike|Ln|Lane|Way|Ct|Court|Pl|Place|Pkwy|Parkway|Rt|Route)\.?)\s+([A-Za-z .'-]{2,40}),\s*([A-Z]{2})\s+(\d{5})(?:-\d{4})?\b/g;
+    // a page that gives two or more different addresses (several stores) does not say which is the dealership's, so none is read
+    const addresses = new Map();
+    for (const m of (document.body.innerText || '').matchAll(ADDRESS)) {
+      const parts = m[1] ? [m[1], m[2], m[3], m[4]] : [m[5], m[6], m[7], m[8]];
+      addresses.set(parts.join('|').toLowerCase(), parts);
+    }
+    if (addresses.size === 1) {
+      const [street, city, state, zip] = [...addresses.values()][0];
+      Object.assign(out, { street: street.trim(), city: city.trim(), state, zip, source: 'page text' });
+    }
     return out;
   }
 

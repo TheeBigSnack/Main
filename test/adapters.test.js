@@ -2003,3 +2003,13 @@ test('schemaOrg post-time check: a kept car address that answers 404 is not "gon
   const gone = await schemaOrg.getDetails(fakeSiteSearch(site), 'ZZZZZZZZZZZZZZZZZ', { origin: O, url: old, listUrl: LIST });
   assert.deepEqual([gone.ok, gone.record], [true, null]);
 });
+
+test('probeSiteInPage: a street ending in a word that is also a city is read whole, and a page with two addresses gives none', async () => {
+  // no comma after the street: its suffix ends the street, so "Street" is not the city
+  const suffix = fakeDealerPage({ records: [], withLd: false, bodyText: 'USED CARS\nVisit us at 100 Main Street Waynesburg, PA 15370 today' });
+  assert.deepEqual((await runInPage(suffix, probeSiteInPage)).address, { street: '100 Main Street', city: 'Waynesburg', state: 'PA', zip: '15370', phone: '', source: 'page text' });
+  // two stores' addresses in the page text: whichever comes first is not the dealership's, so the address is left blank
+  const two = fakeDealerPage({ records: [], withLd: false, bodyText: 'Our stores\n200 Main Street, Springfield, OH 43215\n9 Oak Avenue, Columbus, OH 43004' });
+  const blank = (await runInPage(two, probeSiteInPage)).address;
+  assert.ok(!blank.street && !blank.zip && !blank.city, 'no address is read from two');
+});
