@@ -949,7 +949,7 @@ function listedCertified(v = {}) {
 function without(text, names) {
   let out = String(text || '');
   for (const n of names) {
-    const name = oneLine(n);
+    const name = oneLine(foldForGuard(n));
     if (name) out = out.replace(new RegExp(escapeRe(name).replace(/ /g, '\\s+'), 'gi'), ' ');
   }
   return out;
@@ -1481,10 +1481,6 @@ export const settingNumberNotice = (setting, value, dealer) => (settingWarning(s
 // does too until it is added here.
 export const STYLE_PROBLEMS = Object.freeze(['too-short', 'too-long', 'all-caps', 'emoji', 'closing-too-long', 'closing-caps', 'closing-emoji']);
 
-/**
- * Checks a description against the source data. Returns { ok, problems, words }.
- * Every problem has a code and a short plain-English text.
- */
 // The text as the checks read it: NFKC folds the compatibility forms (fullwidth
 // letters and digits, ligatures), invisible characters are read as nothing, and
 // every decimal digit of any script is read as its ASCII value, so "$３１,９９５"
@@ -1503,8 +1499,16 @@ function asciiDigit(ch) {
   return String((cp - start) % 10);
 }
 
+/**
+ * Checks a description against the source data. Returns { ok, problems, words }.
+ * Every problem has a code and a short plain-English text.
+ */
 export function runGuardrails(text, { vehicle = {}, dealer = {}, salesperson = {}, priceNote = '', price = null, closingLine = '', boilerplate = [] } = {}) {
   const t = foldForGuard(text);
+  // the note is read folded like the text, so its words, digits and amounts match the text's; the direction marks
+  // are read from the note as written (noteSteer's last argument, rawNote)
+  const rawNote = priceNote;
+  priceNote = foldForGuard(priceNote);
   // the closing line is the salesperson's, checked on its own (checkClosingLine) wherever the text carries it
   const closing = foldForGuard(cleanClosingLine(closingLine));
   const hasClosing = Boolean(closing) && closingPattern(closing).test(t);
@@ -1575,7 +1579,7 @@ export function runGuardrails(text, { vehicle = {}, dealer = {}, salesperson = {
   for (const [phrase, re] of BANNED_RE) {
     if (re.test(besideNote)) problems.push({ code: 'banned-phrase', text: `Says "${phrase}"` });
     else if (noteSaid && NOTE_BANNED_RE.get(phrase).test(noteSaid)) problems.push({ code: 'banned-phrase', text: noteBanned(phrase) });
-    else if (noteSaid && noteSteer(phrase, noteSaid, dealer, priceNote)) problems.push({ code: 'banned-phrase', text: noteSteer(phrase, noteSaid, dealer, priceNote) });
+    else if (noteSaid && noteSteer(phrase, noteSaid, dealer, rawNote)) problems.push({ code: 'banned-phrase', text: noteSteer(phrase, noteSaid, dealer, rawNote) });
     else if (!re.test(tBanned)) continue;
     else if (!(noteSaid && re.test(noteSaid))) problems.push({ code: 'banned-phrase', text: `Says "${phrase}"` });
     else if (re.test(besideOwnNote)) problems.push({ code: 'banned-phrase', text: `Says "${phrase}" with words joined to your price note's sentence; keep the note as a sentence of its own: end the sentence before it, and start the one after it with a capital letter` });
