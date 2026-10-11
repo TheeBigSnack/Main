@@ -57,8 +57,8 @@ export function readCondition(text) {
   if (/\b(demo|demonstrator|loaner|courtesy)\b/.test(t)) return 'demo';
   if (/\bdamaged\b/.test(t)) return 'damaged';
   if (/\brefurbished\b/.test(t)) return 'refurbished';
-  // "Certified New" is a new car: the certified word belongs to a dealer's new-car program, not to a pre-owned one
-  if (/\bcertified\s+new\b/.test(t)) return 'new';
+  // "Certified New" (either word order, with a space, dash or slash between) is a new car: the certified word belongs to a dealer's new-car program, not to a pre-owned one
+  if (/\bcertified[\s\-\/,]*new\b|\bnew[\s\-\/,]*certified\b/.test(t)) return 'new';
   if (/\b(pre-?\s?owned|used|certified|cpo)\b/.test(t)) return 'pre-owned';
   if (/\bnew\b/.test(t)) return 'new';
   return 'unknown';
