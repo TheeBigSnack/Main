@@ -24,6 +24,7 @@ import { startMockSite, PHOTO_W, PHOTO_H, BAND_ROWS, BAND_COLOUR, BRANDED_VIN, P
 import { startMockMarketplace, INITIAL_LISTINGS } from './mock-marketplace.mjs';
 import { blockFacebook } from './noFacebook.mjs';
 import { until } from './until.mjs';
+import { closeBounded } from './closeBounded.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const shots = join(root, 'test/e2e/screenshots');
@@ -394,8 +395,14 @@ try {
   assert.deepEqual(errors, [], 'no console errors');
   facebook.assertNone();
   console.log('Branding E2E passed. Screenshots in test/e2e/screenshots/');
+} catch (e) {
+  console.error(e); // printed now: a browser that does not exit below must not hide it
+  throw e;
 } finally {
-  await context.close();
+  if (!(await closeBounded(context))) {
+    console.error('The browser did not close within 15 s, so the run ends here.');
+    process.exit(1);
+  }
   for (const d of [profileDir, extDir]) { try { rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); } catch (e) { /* still locked by the closing browser; every run makes its own folders, so a leftover does no harm */ } }
   site.close();
   market.close();
