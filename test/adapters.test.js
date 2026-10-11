@@ -2013,3 +2013,27 @@ test('probeSiteInPage: a street ending in a word that is also a city is read who
   const blank = (await runInPage(two, probeSiteInPage)).address;
   assert.ok(!blank.street && !blank.zip && !blank.city, 'no address is read from two');
 });
+
+// A search that never answers (a page helper or the POST that hangs) gives up at its time limit,
+// so a scan cannot wait on it forever. The page's own helper is stood in with a promise that never settles.
+test('a Dealer Inspire search that never answers gives up at its time limit, and an answer in time is kept', async () => {
+  globalThis.window = { IDPSearchServiceHelper: { getListings: () => new Promise(() => {}) } };
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const pending = searchInPage({ search: 'https://x', apiKey: 'k' }, {});
+    mock.timers.tick(20 * 1000);
+    const r = await Promise.race([pending, new Promise((resolve) => setImmediate(() => resolve('still waiting')))]);
+    assert.notEqual(r, 'still waiting', 'the search is not left waiting');
+    assert.equal(r.ok, false);
+    assert.match(r.error, /took too long/);
+  } finally {
+    mock.timers.reset();
+    delete globalThis.window;
+  }
+  globalThis.window = { IDPSearchServiceHelper: { getListings: async () => ({ data: { listings: [] } }) } };
+  try {
+    assert.deepEqual(await searchInPage({ search: 'https://x', apiKey: 'k' }, {}), { ok: true, data: { listings: [] } });
+  } finally {
+    delete globalThis.window;
+  }
+});

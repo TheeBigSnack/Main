@@ -61,19 +61,24 @@ export function probeInPage() {
 // One search request, made the way the page's own helper makes it (the
 // helper when the page has one, else the same POST the helper would send).
 export async function searchInPage(service, body) {
+  // an answer that does not come in this time is given up, so a scan never waits on a search forever
+  const limit = (p) => new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('the inventory search took too long')), 20 * 1000);
+    p.then((v) => { clearTimeout(timer); resolve(v); }, (e) => { clearTimeout(timer); reject(e); });
+  });
   try {
     const helper = window.IDPSearchServiceHelper;
     if (helper && typeof helper.getListings === 'function') {
-      const r = await helper.getListings(body);
+      const r = await limit(helper.getListings(body));
       return { ok: true, data: (r && r.data) || r || {} };
     }
-    const res = await fetch(String(service.search).replace(/\/+$/, '') + '/search', {
+    const res = await limit(fetch(String(service.search).replace(/\/+$/, '') + '/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'x-api-key': service.apiKey },
       body: JSON.stringify(body),
-    });
+    }));
     if (!res.ok) return { ok: false, error: 'inventory search returned ' + res.status };
-    const json = await res.json();
+    const json = await limit(res.json());
     return { ok: true, data: (json && json.data) || json || {} };
   } catch (e) {
     return { ok: false, error: String((e && e.message) || e) };

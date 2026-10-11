@@ -304,6 +304,7 @@ Improvements round 3 (2026-10-11): the ten items of `plans/2026-10-11-next-ten-i
 - Fixed: the claim check reads "Carfax clean", "AutoCheck is clean" and "a spotless or pristine interior" as the history and condition claims they are, as it already read "clean Carfax" and "pristine condition" (`extension/src/rewriteTemplate.js` `CLAIM_KINDS`; `test/rewriteTemplate.test.js`).
 - Fixed: the description checks read fullwidth and other-script digits as the amounts they are ("$３１,９９５" is $31,995) and a zero-width space no longer splits a banned phrase, "Meta Verified" or "Clean title"; the closing line is checked the same way (`extension/src/rewriteTemplate.js` `foldForGuard`; `test/rewriteTemplate.test.js`).
 - Changed: a dropdown on Facebook's form that takes a looser option than the one wanted (wanted "Gray", taken "Gray Metallic") is still filled, now with a note naming both values, instead of filled without a word (`extension/facebook/fillForm.js` `applyField`; `test/dropdownReadBack.test.js`).
+- Fixed: a Dealer Inspire inventory search that never answers (the page's own helper, or the POST) is given up after 20 seconds, so a scan no longer waits on it forever (`extension/adapters/dealerInspire.js` `searchInPage`; `test/adapters.test.js`).
 
 ## 0.5.0 (2026-09-28, toward a sellable product)
 
