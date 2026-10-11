@@ -1056,6 +1056,45 @@ Each item went in test first: the new test ran red on the code before the change
 - The gate and the status have two implementations: `canAutoOpen` decides, `holdFacts` plus `queueHoldReasons` explain. `test/queueHold.test.js` keeps them in step. A new hold check goes into both, and into that test's scenarios.
 - The runners-up and the drops in the plan file are not built. The Dealer Inspire sold check (one failed VIN batch drops every sold check in a scan with more than 50 missing cars) is the next one worth a look.
 
+## 26. The second ten-improvements round (2026-10-11, branch `claude/project-thread-ofbx1q-round2`)
+
+The owner asked for the round-2 list to be built the same way round 1 was: one pull request, one commit per item. The list is `/mnt/project-files/plans/2026-10-11-next-ten-improvements-round-2.md`. The branch is cut from `claude/project-thread-ofbx1q` at `ec2d5b0` (PR #16, not merged), so its pull request targets that branch. Nothing is merged here.
+
+Round 3 (ten more, not built) is in `/mnt/project-files/plans/2026-10-11-next-ten-improvements-round-3.md`. Four finders produced 17 candidates; the lead re-read the cited lines of each one it ranked.
+
+### 26.1 What each commit does
+
+- `a477254` **A to-do notice comes back after items were cleared.** The count a site was last told about drops with the items handled (`toldCountAfterChange` in `src/rescanSchedule.js`; `updateBadge` in `background.js`).
+- `923845a` (red) and `42bbe46` **Fill again no longer calls its own fields "another vehicle".** A choice shown under one of its labels, and a number shown with separators, count as the value Lot Current filled (`shownAsOurs` in `facebook/fillForm.js`).
+- `4c88b3d` (red), `c4649d9` and `1907a26` (README count 1884) **A car with no description is no description.** Blank text reads as null in `dealerInspireNormalize.js` and `schemaOrgNormalize.js`, and the scan counts only non-blank descriptions, so a lot-wide disclaimer on a lot with blank cars is still found.
+- `f43344a` **The photo pick shows the form's 20-photo limit before a fill.** `shownPick` in `sidepanel.js` shows the limit; the listing keeps its uncut list, so a form that takes more still gets its photos.
+- `d943943` **The draft pill goes once the car is unmarked or taken down.** `isOpenDraft` and `retireDraft` in `src/drafts.js`; Mark posted retires the draft record, which is kept for the day's count and the draft's price.
+- `21edda4` **Colleagues' listings leave the computer at sign-out.** `withoutColleagues` in `src/accountFlow.js`. The salesperson's own listings stay.
+- `c03996e` **The VIN's year and maker rows compare even with a check-digit typo.** `localVinCheck` in `src/vin.js`; only a VIN too short, or with I, O or Q, is marked "not checked".
+- `13d7b83` **The clean-title box is set again when a restored draft unticks it.** `tickHeld` in `facebook/fillForm.js`, and the recheck's checkbox branch.
+- `d55a9c3` **The queue browser flow exercises that restore.** Before this commit the mock's restore landed before the box's turn in the fill, so the recheck had nothing to catch. The mock now unticks the box one second after the first tick that follows a restore that found it unticked. Car 2's clean-title value is `yes`; the empty-value hypothesis was checked and ruled out.
+- `3bd8c3d` **Download photos names each photo that did not download, and why.** Each reason is named once with its count, and a batch whose message got no answer is named as such (`downloadPhotos` in `sidepanel.js`).
+- `d1f600f` **A site with no og:site_name takes its dealership name from the title's dealer part.** `nameFromTitle`, nested in `probeSiteInPage` (`src/scan.js`). The name is blank when no single part is clearly the name, so the wizard asks.
+- `3e0a1b8` **README count 1895.**
+
+### 26.2 How it was checked
+
+- `npm test`: 1895 of 1895.
+- The browser battery at `3e0a1b8`, one flow at a time, all 13 exited 0: post, popup, upkeep, queue, panel, standard, platforms, wizard and branding (`npm run test:e2e:<name>`), then `test:site`, `test:demo`, `test:a11y` and `test:branding-eval`.
+- Red runs were seen before the change for items 3, 9 and 10 (unit tests), and for item 8 (the queue flow's assertion failed on the old fill, then on the fill fix alone, and passed after `d55a9c3`). Item 2's red browser run was OOM-killed (26.4), so its failing test was not seen to fail in the browser; its unit-level check passed after the fix. For the other items the test and the change share a commit.
+
+### 26.3 Not checked here, and why
+
+- Item 8 (the clean-title restore): the browser test sets the restore's timing with a one-second untick after the fill's tick. A real Facebook draft restore has no fixed timing, so a live run on a real form is still needed. No live Facebook account is used in this work (CLAUDE.md).
+- Item 10 (og:site_name): how often real dealer sites lack og:site_name is a live survey question. The mechanism is tested; the frequency is not known.
+- Item 9 names reasons, not photos: a photo that did not download has no file name yet, so the status counts photos per reason and gives the server. A list by photo position would need a different design.
+- Items 2 and 4 are checked on the mock only.
+
+### 26.4 Still open
+
+- The post e2e flow (`test/e2e/post.e2e.mjs`) grows native memory when its failing path runs. A failing run was killed by the cgroup OOM twice (exit 137, empty log) on the red commit of item 2 (`923845a`). Passing runs, including every run at `3e0a1b8`, are normal. The suspected cause is the `finally` block awaiting `context.close()` after a failed assertion; it is not isolated. A JS heap cap of 2 GB did not prevent it.
+- Round 3 is not built. Its decision-only runners-up (a shared computer's second sign-in, a re-listed car marked posted, the protected-characteristic word list) wait on the owner.
+
 ## 11. Quick reference
 ```
 # tests
