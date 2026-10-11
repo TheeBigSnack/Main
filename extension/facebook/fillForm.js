@@ -456,7 +456,8 @@ export async function fillFormInPage(map, data) {
         await sleep(150);
         const after = displayed(el, spec);
         if (after && norm(after).includes(norm(r.chosen))) return { status: 'filled', shown: after };
-        if (!after || after === before) return { status: 'filled', shown: r.chosen, note: "couldn't read it back; check it on the form" };
+        // an empty read cannot be checked here, so the restore re-check looks at it; a form still showing its old value has not taken the choice
+        if (!after) return { status: 'filled', shown: r.chosen, note: "couldn't read it back; check it on the form" };
         last = { chosen: r.chosen, after };
         await sleep(400);
       }
