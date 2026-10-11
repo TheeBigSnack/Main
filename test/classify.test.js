@@ -480,3 +480,13 @@ test('"Certified New" is a new car, not a pre-owned one; "Certified Pre-Owned" s
   assert.equal(readCondition('Certified Pre-Owned 2022 Jeep Wagoneer'), 'pre-owned', 'the control: pre-owned stays pre-owned');
   assert.equal(readCondition('Certified 2022 Jeep Wagoneer'), 'pre-owned');
 });
+
+test('a "Loaner" inventory type is called a loaner in the reason, not a demo', () => {
+  // no loaner flag and no unit word: only the inventory type says it, and the reason names that word
+  const plain = { ...vehicle('usedNormal'), name: '2019 Ram 1500 Big Horn', siteTitle: '', readableType: '', urlConditionWord: '' };
+  const loaner = assessVehicle({ ...plain, inventoryType: 'Loaner' }, MY_STORE);
+  assert.notEqual(loaner.decision, DECISION.READY);
+  assert.equal(loaner.reason, "Loaner unit, sold as new, so it can't go on Marketplace.");
+  const demo = assessVehicle({ ...plain, inventoryType: 'Demo' }, MY_STORE);
+  assert.equal(demo.reason, "Demo unit, sold as new, so it can't go on Marketplace.");
+});
