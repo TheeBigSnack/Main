@@ -216,6 +216,8 @@ export const LABEL_NOTE = String.raw`[(\[]\s*(?:\d{1,3}(?:\s*,\s*\d{1,3}){0,3}|[
 // spaces, a colon or a dash, the marks and the footnotes above.
 const CUE_GAP = String.raw`(?:[\s:\-\u2013\u2014${LABEL_MARKS}]|${LABEL_NOTE})`;
 const REFERENCE_CUE = new RegExp(String.raw`\b(?:was|msrp|m\.s\.r\.p|retail|list|compared? at|original(?:ly)?|reg(?:ular)?|previous(?:ly)?|based on|${GUIDE_PRICE_WORDS}|window sticker|sticker)\b\.?(?:${CUE_GAP}*(?:price|pricing|of|a|the|at|for|value)\b)*${CUE_GAP}*$`, 'i');
+// A reference word right after a figure ("$24,995 MSRP", "$24,995 sticker") marks that figure; a word followed by a figure of its own ("MSRP $24,995") marks that one.
+const AFTER_REFERENCE = new RegExp(String.raw`^${CUE_GAP}*(?:msrp|m\.s\.r\.p|retail|sticker|window sticker|list[-\s]?price)\b(?![\s:\-\u2013\u2014]*(?:USD?\s*)?\$)`, 'i');
 const CUE_END = new RegExp(String.raw`${CUE_GAP}+$`);
 
 // Every dollar amount the page shows: its value, whether it is written with
@@ -226,11 +228,13 @@ function shownPrices(pageText) {
   const out = [];
   for (const m of t.matchAll(AMOUNT)) {
     const cue = REFERENCE_CUE.exec(t.slice(Math.max(0, m.index - 48), m.index));
+    // a figure the page writes just before a reference word ("$24,995 MSRP") is a reference too; "was" is not one here, since it marks the figure after it
+    const after = cue ? null : AFTER_REFERENCE.exec(t.slice(m.index + m[0].length, m.index + m[0].length + 48));
     out.push({
       value: Number(m[2].replace(/,/g, '') + (m[3] ? '.' + m[3] : '')),
       dollar: m[1].includes('$'),
-      reference: Boolean(cue),
-      cue: cue ? cue[0].replace(CUE_END, '').replace(/\s+/g, ' ') : '',
+      reference: Boolean(cue || after),
+      cue: cue ? cue[0].replace(CUE_END, '').replace(/\s+/g, ' ') : after ? after[0].replace(CUE_END, '').replace(/\s+/g, ' ') : '',
     });
   }
   return out;
