@@ -162,7 +162,8 @@ export function checkPreOwned(v) {
   const unit = unitWordAfterYear(v);
   if (v.isDemo || v.isLoaner || saying('demo').length || unit) {
     // the word the website gave names the kind: the loaner flag, then the unit word after the year, then the inventory type's own words
-    const wordKind = (text) => (/\b(?:loaner|courtesy)\b/i.test(String(text || '')) ? 'loaner' : /\b(?:demo|demonstrator)\b/i.test(String(text || '')) ? 'demo' : '');
+    // "Courtesy" stays a demo here, as readCondition reads it; only the word loaner names a loaner
+    const wordKind = (text) => (/\bloaner\b/i.test(String(text || '')) ? 'loaner' : /\b(?:demo|demonstrator|courtesy)\b/i.test(String(text || '')) ? 'demo' : '');
     const demoCheck = saying('demo')[0];
     const what = v.isLoaner ? 'loaner' : wordKind(unit && unit.word) || wordKind(demoCheck && demoCheck.detail) || 'demo';
     if (unit) notes.push(`The website's ${unit.where} says "${unit.word}".`);

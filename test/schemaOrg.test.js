@@ -947,7 +947,8 @@ test('the gate: a demo or loaner word only the page title has is read, with the 
       assert.equal(v.siteTitle, title, `${name} / ${title}: the page title is the title the gate reads`);
       const r = assessVehicle(v, {});
       assert.equal(r.decision, DECISION.REVIEW, `${name} / ${title}`);
-      assert.match(r.reason, /^Listed as pre-owned but also flagged as a demo\. Demos and loaners are usually sold as new/, `${name} / ${title}`);
+      // the reason names the word the title gave: a loaner word says loaner, any other says demo
+      assert.match(r.reason, new RegExp(`^Listed as pre-owned but also flagged as a ${/\bloaner\b/i.test(title) ? 'loaner' : 'demo'}\\. Demos and loaners are usually sold as new`), `${name} / ${title}`);
     }
     // a name that says demo itself is kept
     assert.equal(flat({ name: 'Demo 2019 Honda Civic EX' }, shown(undefined, { ...carfax, title })).siteTitle, 'Demo 2019 Honda Civic EX', title);
