@@ -1926,3 +1926,24 @@ test('a scan that reads the home page as the list says the read is partial, sinc
   assert.equal(list.complete, true);
   assert.equal(list.homeOnly, undefined);
 });
+
+test('a Dealer Inspire direct search that never answers is ended by a timeout, so one website\'s search cannot hold up the other rescans', async () => {
+  const { makeDirectSearch } = await import('../extension/adapters/dealerInspire.js');
+  const seen = [];
+  // a service that never answers, until the signal it was given is aborted
+  const hangs = (url, init) => {
+    seen.push(init.signal);
+    return new Promise((resolve, reject) => {
+      init.signal.addEventListener('abort', () => reject(Object.assign(new Error('The operation was aborted.'), { name: 'AbortError' })));
+    });
+  };
+  const service = { search: 'https://example-dealer.test/api/v1/listings/1', apiKey: 'test-key' };
+  const started = Date.now();
+  await assert.rejects(makeDirectSearch(service, hangs, { timeoutMs: 50 })({ page: 1 }), /aborted/);
+  assert.ok(Date.now() - started < 1000, 'the search ends soon after the timeout');
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].aborted, true, 'the request\'s signal was aborted');
+  // a service that answers in time is not cut short
+  const answers = async (url, init) => ({ ok: true, json: async () => ({ data: { records: [1] } }), signal: init.signal });
+  assert.deepEqual(await makeDirectSearch(service, answers, { timeoutMs: 50 })({ page: 1 }), { records: [1] });
+});

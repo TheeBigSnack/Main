@@ -122,17 +122,29 @@ export function photoOrigins(records) {
 // A search(body) that calls the service directly, the way the website's own
 // helper does (POST, JSON, x-api-key). Needs the host permission for the
 // service's origin when used from the extension.
-export function makeDirectSearch(service, fetchImpl = globalThis.fetch) {
+// A direct search that gets no answer in this long is ended (the request and
+// its body are aborted), so a service that never answers cannot hold up the
+// other websites' rescans; the other adapters use the same 30 seconds.
+export const SEARCH_TIMEOUT_MS = 30000;
+
+export function makeDirectSearch(service, fetchImpl = globalThis.fetch, { timeoutMs = SEARCH_TIMEOUT_MS } = {}) {
   const url = String(service.search || '').replace(/\/+$/, '') + '/search';
   return async (body) => {
-    const res = await fetchImpl(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'x-api-key': service.apiKey },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) throw new Error('inventory search returned ' + res.status);
-    const json = await res.json();
-    return (json && json.data) || json || {};
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await fetchImpl(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'x-api-key': service.apiKey },
+        body: JSON.stringify(body),
+        signal: ctrl.signal,
+      });
+      if (!res.ok) throw new Error('inventory search returned ' + res.status);
+      const json = await res.json();
+      return (json && json.data) || json || {};
+    } finally {
+      clearTimeout(timer);
+    }
   };
 }
 
