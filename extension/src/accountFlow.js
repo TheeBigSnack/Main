@@ -189,6 +189,16 @@ export async function signOutAll(deps = {}) {
     }
   }
   if (storage) {
+    // a colleague's listing is theirs: it leaves this computer with the session, as the sync state does (a sign-in brings back the ones still listed, sync.js)
+    for (const origin of origins) {
+      try {
+        await updateKey(siteKeys(origin).posted, withoutColleagues, storage);
+      } catch {
+        /* the session is gone; a colleague's row shows until the next sync */
+      }
+    }
+  }
+  if (storage) {
     try {
       await updateKey(SITES_KEY, withoutSyncRecord, storage);
     } catch {
@@ -196,6 +206,15 @@ export async function signOutAll(deps = {}) {
     }
   }
   return { ok: true };
+}
+
+// The posted list without a colleague's listings (mine: false, merged by sync.js);
+// undefined (nothing written) when it holds none.
+function withoutColleagues(posted) {
+  if (!posted || typeof posted !== 'object') return undefined;
+  const entries = Object.entries(posted);
+  if (!entries.some(([, e]) => e && typeof e === 'object' && e.mine === false)) return undefined;
+  return Object.fromEntries(entries.filter(([, e]) => !(e && typeof e === 'object' && e.mine === false)));
 }
 
 // What the service worker records about a website's last sync on its

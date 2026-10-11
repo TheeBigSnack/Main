@@ -235,8 +235,9 @@ test('signOutAll forgets every website\'s sync state on this computer, not only 
     [ACCOUNT_KEY]: freshSession(),
     [K.sync]: { since: T(1), dealershipName: 'Example Motors', role: 'manager', postsToday: 3 },
     [O.sync]: { since: T(2), dealershipName: 'Example Motors', role: 'manager', postsToday: 3, plan: { state: 'lapsed' } },
-    [K.posted]: { [VIN_A]: { postedAt: T(0) } },
-    [O.posted]: { [VIN_B]: { postedAt: T(0) } },
+    // a colleague's listing merged in by sync (mine: false) sits on each website's posted list too
+    [K.posted]: { [VIN_A]: { postedAt: T(0) }, COLLEAGUE_A: { postedAt: T(0), mine: false, userId: 'colleague-1', name: 'Colleague car' } },
+    [O.posted]: { [VIN_B]: { postedAt: T(0) }, COLLEAGUE_B: { postedAt: T(0), mine: false, userId: 'colleague-1', name: 'Colleague car' } },
     [O.settings]: { dailyCap: 10 },
     [GLOBAL_KEYS.sites]: { [ORIGIN]: { name: 'Example Motors' } },
   });
@@ -248,6 +249,9 @@ test('signOutAll forgets every website\'s sync state on this computer, not only 
   const one = fakeStorage(stored());
   assert.deepEqual(await signOutAll(deps({ fetchImpl, storage: one, origins: [ORIGIN] })), { ok: true });
   assert.deepEqual(left(one), kept, 'both websites\' sync state and the session go; the posted lists, settings and registry stay');
+  // a colleague's listing leaves this computer with the session; the salesperson's own listings stay
+  assert.deepEqual(one.data[K.posted], { [VIN_A]: { postedAt: T(0) } }, 'the colleague row is gone from this website');
+  assert.deepEqual(one.data[O.posted], { [VIN_B]: { postedAt: T(0) } }, 'and from the other website');
 
   // the popup open on Facebook names no website: every website's state goes all the same
   const none = fakeStorage(stored());
