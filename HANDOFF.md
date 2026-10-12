@@ -1300,6 +1300,40 @@ The audit (read-only, four lenses) listed 30 findings. Ten were picked. Three of
 - The owner decisions in 30.4 and the open items in `plans/2026-10-07-needs-from-brandon.md`.
 - Merge order when he asks: #16, #17, #18, #19, #20, then this round's PR (#21).
 
+## 31. The third ten-improvements round, round 6 (2026-10-12, branch `claude/project-thread-ofbx1q-round6`, stacked on `claude/project-thread-ofbx1q-round5`, #21)
+
+The owner's instruction (2026-10-11): keep improving the app until he is satisfied, one PR per round, one commit per item, stacked on #21. Nothing merged. Each item was built test first: the new test was run and failed for the stated reason before the change.
+
+This round builds the side-panel and set-up items that section 30.5 listed as not yet built: sp-02, sp-03, sp-05, sp-07 and sp-08. Round 5's sp-01, sp-04 and sp-06 are items 8 to 10 in section 30.1.
+
+### 31.1 What each commit does
+
+1. `d686927` (sp-03) **Keyboard focus stays on the set-up wizard across Next, Back and Read.** Each redraw used to drop the focus to the top of the panel. `wizardFocusId` in `src/wizardSteps.js` picks the control to focus again: the one that had it, if the new step draws it; else the step's Next button; else the heading. `refocusWizard` in `sidepanel.js` uses it.
+2. `ffb614c` (sp-05) **While the rewrite service is off, Rewrite with Claude and Guess from the photos stay in the keyboard order.** They are `aria-disabled`, not `disabled`, the reason is visible text under the buttons, and a click does nothing (`viewReview` in `sidepanel.js`; `button[aria-disabled="true"]` in `sidepanel.css`).
+3. `0414e6c` (sp-07) **Each Copy button in "Couldn't fill" is named for its field** ("Copy the price"), as the "Not saved" list's buttons already were (`copyBtn` in `sidepanel.js`).
+4. `66fd624` (sp-02) **When set-up finds no car ready, the finish says so and sends the person to the Not ready tab.** `readyLine` in `src/wizardSteps.js` writes the sentence, and `wizard.js` uses it. The popup's Ready tab empty state says the same (`viewReady` in `popup.js`).
+5. `9956ce6` (sp-08) **When Chrome will not open the listing tab for an upkeep item, the panel asks the person to open the listing by hand.** They then click I updated it or I took it down. The new `open-failed` status is in `upkeep.js`.
+
+### 31.2 How it was checked
+
+- `npm test`: 1954 of 1954 at `9956ce6`, and again after the test-message change in 31.3. The README count (`test/docs.test.js`) is 1954.
+- Browser flows, run one at a time (`npm run test:e2e`, `PLAYWRIGHT_BROWSERS_PATH=/tmp/claude-0/pw`): the last two full runs passed all nine flows (291.3 s and 295.3 s). Panel and branding pass together; branding passes alone.
+- `npm run test:demo`, `npm run test:a11y` and `npm run test:site` passed on the round-6 head.
+- `npm run test:stack` was not run here: it needs a local Supabase stack.
+
+### 31.3 The branding flake: not fixed, and not explained
+
+Two of the four full-suite runs made in this round failed. The first failed on the panel flow (`#capReached`, the cap banner that never appeared) and on branding. The second failed on branding only, at `popup.check('#pickAll')` in step 6: the Ready tab never showed the "Select the next N" tick box. The two full runs made after them passed. Isolated runs of both flows and the panel-then-branding pair passed every time.
+
+What was ruled out: a port shared between flows (each flow starts its mock sites on random ports and uses its own browser profile). What is not established: the cause. The two failing full runs finished at 00:01 and 00:10 UTC, so the day boundary may be involved, but the second one ran wholly after midnight, so midnight alone does not explain it.
+
+Change made: the branding flow now says what the Ready tab showed when `#pickAll` is missing (`test/e2e/branding.e2e.mjs`), so a failure names the tab's state. This is a clearer message, not a fix. If the flake comes back, read that message first: the tick box is absent when the day's cap is reached, when a queue is under way, or when fewer than two cars can be queued.
+
+### 31.4 Still on Brandon
+
+- The round-5 list stands (section 30.7): the production Supabase drift decision (section 25 and HANDOFF section C), the redeploy of the `rewrite` function for the hosted guard's parity (30.2), and the owner decisions in 30.4.
+- Merge order when he asks: #16, #17, #18, #19, #20, #21, then this round's PR (#22).
+
 ## 11. Quick reference
 ```
 # tests
