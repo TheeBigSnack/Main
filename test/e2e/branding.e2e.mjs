@@ -315,7 +315,13 @@ try {
   await popup.click('#scan');
   await popup.waitForFunction(() => /2 ready to post/.test(document.querySelector('.meta')?.textContent || ''));
   await tab(popup, 'ready').click();
-  await popup.check('#pickAll');
+  try {
+    await popup.check('#pickAll');
+  } catch (err) {
+    // Without the Ready list's own text, a missing tick box is a bare timeout: say what the tab showed instead
+    const shown = await popup.textContent('#readyBody').catch(() => '(no Ready list)');
+    throw new Error(`#pickAll never appeared on the Ready tab. It showed: ${shown.replace(/\s+/g, ' ').trim().slice(0, 600)}`, { cause: err });
+  }
   assert.equal(await popup.textContent('#queueBtn'), 'Post 2 cars');
   await popup.click('#queueBtn');
   await popup.waitForFunction(() => /queue/i.test(document.querySelector('#status').textContent));
