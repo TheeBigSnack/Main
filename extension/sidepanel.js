@@ -2089,7 +2089,10 @@ function viewIdle() {
 }
 
 function viewChecking() {
-  return `<p class="lead">Re-checking <b>${esc(state.vin)}</b> on the website: still pre-owned, still on the lot, still priced.</p><p class="hint">${esc(state.message || '')}</p>`;
+  // Back leaves a single post's check the way Back does from the blocked view (clearFlow drops the read's answer);
+  // a queued car's check is left with the queue bar's Stop queue (queueBar)
+  const back = state.queueMode ? '' : `<div class="actions"><button type="button" class="plain" id="back">Back</button></div>`;
+  return `<p class="lead">Re-checking <b>${esc(state.vin)}</b> on the website: still pre-owned, still on the lot, still priced.</p><p class="hint">${esc(state.message || '')}</p>${back}`;
 }
 
 function viewBlocked() {

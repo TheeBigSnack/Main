@@ -74,6 +74,7 @@ export const SCENARIOS = {
 let current = 'day1';
 let directSearches = 0;
 let photoDelayMs = 0; // /photo-delay?ms=: every photo answers this late (a slow photo server)
+let searchDelayMs = 0; // /search-delay?ms=: every search answers this late (a slow website), so a post's re-check can be left open
 
 // The real site's `description` field mixes a lot-wide disclaimer, feature
 // bullets, and (on some cars) a genuine write-up; `features` is a clean list.
@@ -254,8 +255,12 @@ export function startMockSite(port = 0) {
         const list = all.filter((r) => (!f.type || f.type.includes(r.type)) && (!f.vin || f.vin.includes(r.vin)) && (!f.status || f.status.includes(r.status)));
         const perPage = b.perPage || 50;
         const start = ((b.page || 1) - 1) * perPage;
-        res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ data: { ccid: 153146, total_vehicle_count: list.length, listings: list.slice(start, start + perPage) }, meta: { apiKey: req.headers['x-api-key'] ? 'seen' : 'missing' } }));
+        const send = () => {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ data: { ccid: 153146, total_vehicle_count: list.length, listings: list.slice(start, start + perPage) }, meta: { apiKey: req.headers['x-api-key'] ? 'seen' : 'missing' } }));
+        };
+        if (searchDelayMs) setTimeout(send, searchDelayMs);
+        else send();
       });
       return;
     }
@@ -269,6 +274,11 @@ export function startMockSite(port = 0) {
       if (photoDelayMs) setTimeout(send, photoDelayMs);
       else send();
       return;
+    }
+    if (url.pathname === '/search-delay') {
+      searchDelayMs = Math.max(0, Number(url.searchParams.get('ms')) || 0);
+      res.writeHead(200, { 'content-type': 'text/plain' });
+      return res.end(String(searchDelayMs));
     }
     if (url.pathname === '/photo-delay') {
       photoDelayMs = Math.max(0, Number(url.searchParams.get('ms')) || 0);
