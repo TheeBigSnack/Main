@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { wizardSteps, accountStepModel, joinedFrom, joinedText, rewriteAtAccount, termsSummary, addressHint, storeTickReason, ACCOUNT_WORDS, LATER, GRANT_REFUSED_TEXT, wizardFocusId, readyLine } from '../extension/src/wizardSteps.js';
+import { wizardSteps, accountStepModel, joinedFrom, joinedText, rewriteAtAccount, termsSummary, addressHint, storeTickReason, ACCOUNT_WORDS, LATER, GRANT_REFUSED_TEXT, wizardFocusId, readyLine, scanLine } from '../extension/src/wizardSteps.js';
 import { syncPayload } from '../extension/src/sync.js';
 import { accountsConfigured } from '../extension/src/accountConfig.js';
 import { signInStart } from '../extension/src/accountFlow.js';
@@ -349,4 +349,21 @@ test('the set-up finish says when no car is ready yet, and sends the person to t
   // and the finish draws the line from the function
   const wizard = readFileSync(new URL('../extension/wizard.js', import.meta.url), 'utf8');
   assert.match(wizard, /<b>Set up\.<\/b> \$\{wiz\.scan \? readyLine\(wiz\.scan\.ready\) : ''\}/);
+});
+
+// The scan step's line under the Read button (wizard.js): the count and the stores in a good banner, and, when the
+// website's used inventory gave no car at all, a warning in place of it: set-up can go on, but nothing is ready
+// to post until a scan reads cars, so the step must not say "0 used cars read" as if that were done.
+test('the scan step says when the website gave no used car, and counts the cars and stores when it gave some', () => {
+  assert.deepEqual(scanLine({ cars: 6, siteName: 'Ron Lewis', stores: ['Ron Lewis Waynesburg', 'Ron Lewis Ram'] }), {
+    tone: 'good',
+    text: '6 used cars read from Ron Lewis. 2 stores found.',
+  });
+  const none = scanLine({ cars: 0, siteName: 'Ron Lewis', stores: [] });
+  assert.equal(none.tone, 'warn');
+  assert.match(none.text, /^No used cars were read from Ron Lewis\./);
+  assert.match(none.text, /no car can be posted until a scan reads some/);
+  assert.doesNotMatch(none.text, /0 used cars/, 'not a count of zero as a good result');
+  assert.equal(scanLine({}).tone, 'warn', 'a read with no count at all is no car');
+  assert.match(scanLine({ cars: 0 }).text, /No used cars were read from the website\./, 'a site with no name is named as the website');
 });
