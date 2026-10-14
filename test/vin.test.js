@@ -256,3 +256,12 @@ test('a motorcycle\'s model year is read without the car rule for position 7: a 
   assert.deepEqual(modelYearReadings(valid('JYAVP27E0EA000000'), { lightVehicle: false }), [1984, 2014]);
   assert.deepEqual(modelYearReadings('1C6RR7FT0KS643289'), [2019]);
 });
+
+test('the make is compared without its punctuation and spacing: "Mercedes Benz" agrees with "MERCEDES-BENZ"; another make still differs', () => {
+  const make = (website, decodedMake) => compareVin({ make: website }, { make: decodedMake }).rows.find((r) => r.field === 'Make').verdict;
+  for (const [website, decodedMake] of [['Mercedes Benz', 'MERCEDES-BENZ'], ['Mercedes-Benz', 'MERCEDES-BENZ'], ['Alfa Romeo', 'ALFA ROMEO'], ['Ram', 'RAM']]) {
+    assert.equal(make(website, decodedMake), 'agree', `${website} / ${decodedMake}`);
+  }
+  assert.equal(make('Ram', 'CHEVROLET'), 'differ');
+  assert.equal(make('Mercedes Benz', 'BMW'), 'differ');
+});
