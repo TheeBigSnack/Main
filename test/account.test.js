@@ -89,6 +89,16 @@ test('signInWithMagicLink passes the server\'s own words back on a rate limit', 
   assert.equal(errorText({ error: 'invalid_grant', error_description: 'Invalid Refresh Token' }, 400), 'Invalid Refresh Token');
 });
 
+test('an error text never shows a token or key the server echoed back; other words stay as they are', () => {
+  const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.c2lnbmF0dXJlMTIzNDU2';
+  assert.equal(errorText({ msg: `token ${jwt} is invalid` }, 401), 'token [removed] is invalid');
+  assert.equal(errorText({ message: 'Bearer abc.def.ghi was rejected' }, 401), '[removed] was rejected');
+  assert.equal(errorText({ msg: 'key sb_secret_abc123XYZ was refused' }, 401), 'key [removed] was refused');
+  assert.equal(errorText({ msg: 'access_token=abc123xyz failed' }, 401), '[removed] failed');
+  assert.equal(errorText({ msg: 'the apikey: k_99 is off' }, 401), 'the [removed] is off');
+  assert.equal(errorText({ error_description: 'Invalid Refresh Token' }, 400), 'Invalid Refresh Token');
+});
+
 test('verifyOtp exchanges the emailed code for a session', async () => {
   const { fetchImpl, calls } = fakeFetch([{ status: 200, body: tokenBody() }]);
   const r = await verifyOtp('alex@example.test', '123 456', { url: URL_, anonKey: ANON, fetchImpl, now: NOW });
