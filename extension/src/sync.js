@@ -51,7 +51,6 @@ export const SYNC_VERSION = 1;
 
 // A taken-down listing older than this is not sent back to a machine that
 // has never synced (it cannot have the entry anyway).
-export const TAKEN_DOWN_WINDOW_DAYS = 90;
 
 // The pilot's post attempts and closed flags go up when one of their stamps
 // is later than this long before `localSince`: the machine's own clock when

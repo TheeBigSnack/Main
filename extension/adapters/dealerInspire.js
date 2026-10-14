@@ -125,7 +125,7 @@ export function photoOrigins(records) {
 // A direct search that gets no answer in this long is ended (the request and
 // its body are aborted), so a service that never answers cannot hold up the
 // other websites' rescans; the other adapters use the same 30 seconds.
-export const SEARCH_TIMEOUT_MS = 30000;
+const SEARCH_TIMEOUT_MS = 30000;
 
 export function makeDirectSearch(service, fetchImpl = globalThis.fetch, { timeoutMs = SEARCH_TIMEOUT_MS } = {}) {
   const url = String(service.search || '').replace(/\/+$/, '') + '/search';
@@ -184,7 +184,7 @@ export function trimRecord(r, { fullRecords = false } = {}) {
 // the answer also says the search matched nothing (total_vehicle_count 0);
 // `emptyNeedsZero` is off for a later page of the paged read, where an empty
 // page is the service's unstable paging, not the lot.
-export function listingsOf(data, { emptyNeedsZero = true } = {}) {
+function listingsOf(data, { emptyNeedsZero = true } = {}) {
   const list = data && Array.isArray(data.listings) ? data.listings : null;
   if (!list) throw new Error('the inventory search answered without a list of cars');
   if (emptyNeedsZero && !list.length && data.total_vehicle_count !== 0) throw new Error('the inventory search answered with no cars and without saying it found none');

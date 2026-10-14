@@ -182,7 +182,8 @@ test('every storage key the shipped code names is produced by the key module or 
   for (const rel of ['popup.js', 'sidepanel.js', 'background.js', 'upkeep.js', 'wizard.js']) {
     assert.match(readFileSync(new URL(rel, EXT), 'utf8'), /from '\.\/src\/storageKeys\.js'/, `${rel} does not import src/storageKeys.js`);
   }
-  assert.match(readFileSync(new URL('popup.js', EXT), 'utf8'), /ownRemove\(Object\.values\(siteKeys\(state\.origin\)\)\)/);
+  // the clear hands every key the module names to clearWebsiteRecords (src/storage.js), which removes them all (test/workerRescan.test.js)
+  assert.match(readFileSync(new URL('popup.js', EXT), 'utf8'), /clearWebsiteRecords\(state\.origin, \{[^}]*recordKeys: Object\.values\(keys\)/);
   // nothing asks Chrome for more room: the quota is handled, not raised
   assert.doesNotMatch(readFileSync(new URL('manifest.json', EXT), 'utf8'), /unlimitedStorage/);
 });

@@ -9,7 +9,7 @@ import { sortOrder, newDaysOf } from './readyList.js';
 export const SETTINGS_VERSION = 2;
 export const DEFAULT_SALESPERSON_TITLE = 'sales consultant';
 // A closing line is checked by words (src/rewriteTemplate.js); this only stops a pasted page being kept.
-export const CLOSING_LINE_MAX_CHARS = 300;
+const CLOSING_LINE_MAX_CHARS = 300;
 
 // Every description names the dealership. The name comes from the website
 // (src/scan.js) or a person; a website that gives none leaves it blank until
@@ -33,7 +33,8 @@ export function feeGap(entries) {
 
 export function suggestedPriceNote(gap, basis = 'website') {
   if (!gap) return '';
-  const fee = '$' + Math.round(gap).toLocaleString('en-US');
+  // cents are kept when the gap has them: the note is typed into the listing as it reads
+  const fee = '$' + (gap % 1 === 0 ? gap.toLocaleString('en-US') : gap.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
   return basis === 'beforeFees' ? `Price is before the ${fee} doc fee; tax and tags extra.` : `Price includes the ${fee} doc fee; tax and tags extra.`;
 }
 
@@ -209,4 +210,25 @@ export async function saveProfile(settings, storage, origin = '') {
 export function defaultSettings(site, vehicles) {
   const mine = matchStore(site, storeNames(vehicles)); // one store at most (normalize.js); none when nothing stands out
   return withDefaults({ myStores: mine ? [mine] : [] }, site);
+}
+
+// The top-level settings a scan changed against the stored copy it read: keys
+// that were there and now hold another value (a first scan's stores and dealer
+// name). A key the copy did not have is not named: the worker fills it in on
+// every read anyway.
+export function settingsChanges(from, to) {
+  const out = {};
+  for (const key of Object.keys(to || {})) {
+    if (!from || !(key in from)) continue;
+    if (JSON.stringify(from[key] ?? null) !== JSON.stringify(to[key] ?? null)) out[key] = to[key];
+  }
+  return out;
+}
+
+// What a scan writes to the stored settings: its changes on top of what is
+// stored now, so a save made while the scan ran is kept. Undefined when there
+// is nothing to write. With nothing stored yet, the scan's settings are written.
+export function withScanChanges(stored, changes, settings) {
+  if (!stored) return settings;
+  return Object.keys(changes || {}).length ? { ...stored, ...changes } : undefined;
 }

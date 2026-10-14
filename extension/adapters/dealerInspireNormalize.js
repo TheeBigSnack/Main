@@ -123,7 +123,7 @@ export function normalizeVehicle(raw) {
     inTransit: raw.in_transit === 'yes' || (typeof availability === 'string' && /transit/i.test(availability)),
     location,
     locationShort: shortLocation(location), // a guess from brand words: one record has no lot to compare with; scanWithSearch settles it over the lot's store names
-    photoCount: toNumber(media.image_count) ?? images.length,
+    photoCount: Math.max(toNumber(media.image_count) ?? 0, images.length), // a zero count never hides the photos listed (as inventoryJson.js does)
     photos: images, // the bulk scan keeps 3 per car; a post-time fetch keeps them all
     dateInStock: raw.date_in_stock || null,
 

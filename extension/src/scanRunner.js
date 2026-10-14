@@ -7,7 +7,7 @@ import { ADAPTERS, detectAdapter, unsupportedSiteMessage } from '../adapters/ind
 import { assessVehicle } from './classify.js';
 import { makeSnapshot, diffScans, withSeenBasis } from './rescan.js';
 import { findBoilerplate, MIN_BOILERPLATE_COUNT } from './description.js';
-import { withDefaults } from './settings.js';
+import { withDefaults, settingsChanges } from './settings.js';
 import { storeNames, shortLocation, matchStore } from './normalize.js';
 import { probeSiteInPage } from './scan.js';
 import { SITES_KEY, siteKeys } from './storageKeys.js';
@@ -238,6 +238,7 @@ export async function performScan({ tabId, origin, settings = null, settingsFrom
   const site = { ...probe.site, adapter: adapter.PLATFORM.id };
   const service = probe.service;
   const search = searchViaTab(tabId, adapter, service);
+  const scanStart = settings; // the stored copy the scan read: changedSettings names what it changed from this
   let s = settings ? withDefaults(settings, site) : null;
   const out = await scanWithSearch({ adapter, search, site, settings: s || withDefaults({}, site), prevSnapshot: snapshot, posted, options: adapter.scanOptions(service), boilerplate });
   if (!out.ok) return { ok: false, message: out.message || "Couldn't read this page." };
@@ -275,7 +276,7 @@ export async function performScan({ tabId, origin, settings = null, settingsFrom
     result = { ...out, snapshot: snap, diff };
   }
   await rememberSite(origin, { name: site.name, adapter: adapter.PLATFORM.id, service, site: out.snapshot.site, photoOrigins: out.photoOrigins, lastScan: result.res.fetchedAt, lastError: null, auto: Boolean(s.autoRescan) });
-  return { ok: true, settings: s, site, service, adapterId: adapter.PLATFORM.id, snapshot: result.snapshot, diff: result.diff, boilerplate: result.boilerplate, vehicles: result.vehicles, res: result.res, photoOrigins: out.photoOrigins };
+  return { ok: true, settings: s, changedSettings: settingsChanges(scanStart, s), site, service, adapterId: adapter.PLATFORM.id, snapshot: result.snapshot, diff: result.diff, boilerplate: result.boilerplate, vehicles: result.vehicles, res: result.res, photoOrigins: out.photoOrigins };
 }
 
 // After a scan is saved: each posted entry without a price basis (brought by

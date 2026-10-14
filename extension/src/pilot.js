@@ -25,8 +25,8 @@ import { pilotKey } from './storageKeys.js';
 import { updateKey } from './storage.js';
 
 export { pilotKey };
-export const PILOT_VERSION = 1;
-export const POST_OUTCOMES = Object.freeze(['posted', 'draft', 'skipped', 'blocked', 'not-posted', 'abandoned']);
+const PILOT_VERSION = 1;
+const POST_OUTCOMES = Object.freeze(['posted', 'draft', 'skipped', 'blocked', 'not-posted', 'abandoned']);
 export const FLAG_KINDS = Object.freeze(['takeDown', 'price']);
 export const FLAG_HOWS = Object.freeze(['detected', 'manual', 'cleared']);
 export const POST_STEPS = Object.freeze(['reviewedAt', 'formOpenedAt', 'filledAt']);

@@ -24,7 +24,7 @@ export const DEFAULT_OTP_TYPE = 'email';
 
 const trimSlash = (u) => String(u || '').trim().replace(/\/+$/, '');
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-export const isEmail = (s) => EMAIL.test(String(s || '').trim());
+const isEmail = (s) => EMAIL.test(String(s || '').trim());
 
 function missingConfig({ url, anonKey }) {
   return trimSlash(url) && String(anonKey || '').trim() ? '' : 'the account server is not set up in this copy of Lot Current';

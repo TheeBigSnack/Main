@@ -50,14 +50,15 @@ function packWithEnv(dir, env, ...args) {
   return { code: r.status, out: `${r.stdout}${r.stderr}` };
 }
 
-// extension/'s files as pack.mjs walks them: sorted, editor leftovers skipped.
+// extension/'s files as pack.mjs walks them: sorted, editor leftovers and the
+// adapter contract (a developer's document, left out of the zip) skipped.
 function walk(dir, base = dir) {
   const out = [];
   for (const name of readdirSync(dir).sort()) {
     const full = join(dir, name);
     const rel = relative(base, full).split(sep).join('/');
     if (statSync(full).isDirectory()) out.push(...walk(full, base));
-    else if (!/(^|\/)(\.DS_Store|Thumbs\.db|desktop\.ini|.*\.swp|.*~)$/.test(rel)) out.push(rel);
+    else if (!/(^|\/)(\.DS_Store|Thumbs\.db|desktop\.ini|.*\.swp|.*~)$|^adapters\/README\.md$/.test(rel)) out.push(rel);
   }
   return out;
 }
@@ -74,6 +75,7 @@ test('without --pilot the pack is unchanged: the same name and the same bytes as
     const src = join(dir, 'extension');
     const want = zip(walk(src).map((name) => ({ name, data: readFileSync(join(src, name)) })));
     assert.ok(readFileSync(join(dir, NORMAL)).equals(want), 'the normal zip is extension/ as it is, byte for byte');
+    assert.ok(!readZip(readFileSync(join(dir, NORMAL)), true).some((e) => e.name === 'adapters/README.md'), 'the adapter contract stays out of the zip');
     const config = readZip(readFileSync(join(dir, NORMAL)), true).find((e) => e.name === 'src/accountConfig.js');
     assert.equal(config.data.toString('utf8'), COMMITTED, 'the normal zip carries the committed account config');
     // a pilot pack afterwards leaves the normal zip as it was

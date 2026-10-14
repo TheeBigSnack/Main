@@ -390,3 +390,14 @@ test('the remote-code answer says what store-check scans for, not that it catche
   const f = findRemoteCode(new Map([['x.js', Buffer.from("const s = document.createElement('script');\n")]]));
   assert.equal(f.length, 1, 'a script element built in code, which the answer names, is caught');
 });
+
+// The pack and the store preflight leave out the same files: one rule, in
+// scripts/packSkip.mjs. A copy that drifts makes the preflight call a correct
+// zip "missing" a file (CI's pack job, after the adapter contract was left out).
+test('the pack and the store preflight use one skip rule, which leaves out the adapter contract and OS leftovers', async () => {
+  const { SKIP: shared } = await import('../scripts/packSkip.mjs');
+  assert.equal(storeCheck.SKIP, shared, 'store-check uses the pack\'s rule');
+  assert.ok(shared.test('adapters/README.md'), 'the adapter contract is left out');
+  assert.ok(shared.test('src/.DS_Store'), 'an OS leftover is left out');
+  assert.ok(!shared.test('adapters/dealerInspire.js'), 'an adapter module is packed');
+});

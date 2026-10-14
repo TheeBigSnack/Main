@@ -4,7 +4,7 @@ import { draftPrice, markDraftPosted, draftPriceUpdate, withPriceUpdate, draftPi
 import { performScan, keepSeenBasis } from './src/scanRunner.js';
 import { todoCountFor, originsFor } from './src/rescanSchedule.js';
 import { askChrome } from './src/askChrome.js';
-import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, basisChangeNote, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE, NO_DEALER_NAME, dealerNameMissing } from './src/settings.js';
+import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, basisChangeNote, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE, NO_DEALER_NAME, dealerNameMissing, withScanChanges } from './src/settings.js';
 import { capStatus, capCount, logPost, askWhenListed, DEFAULT_DAILY_CAP } from './src/cap.js';
 import { noteTakenDown, stillListedNow } from './src/takenDown.js';
 import { TITLE_STATUSES, CONDITIONS } from './src/listingData.js';
@@ -16,7 +16,7 @@ import { recordFlags, resolveFlag, updatePilot, summarizePilot, pilotText, pilot
 import { LEGAL, acceptLegal, legalIsCurrent, legalHosted } from './src/legalLinks.js';
 import { POSTING_RULES } from './src/postingRules.js';
 import { siteKeys, GLOBAL_KEYS, SITES_KEY } from './src/storageKeys.js';
-import { updateKey, withLock, storageErrorText } from './src/storage.js';
+import { updateKey, withLock, storageErrorText, clearWebsiteRecords } from './src/storage.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { signInStart, signInFinish, currentSession, signOutAll, rewriteEndpointFor, describeSync, planText, NOT_CONFIGURED } from './src/accountFlow.js';
 import { clearNumbersKeepingUnsynced } from './src/sync.js';
@@ -254,7 +254,6 @@ async function scan() {
       setStatus(r.message, 'error');
       return;
     }
-    state.settings = r.settings;
     state.settingsFromProfile = false;
     state.boilerplate = r.boilerplate;
     if (!r.diff.unreliable) state.snapshot = r.snapshot; // keep the last good scan if this one looks broken
@@ -269,9 +268,13 @@ async function scan() {
       const stored = await chrome.storage.local.get([postedKey, diffKey]);
       state.posted = stored[postedKey] || {};
       state.diff = withWithheld(settleDiff(r.diff, state.posted), r.snapshot, stored[diffKey]);
-      return save('snapshot', 'diff', 'settings', 'boilerplate');
+      return save('snapshot', 'diff', 'boilerplate');
     });
     if (!saved) return; // the status says why (the quota); the read stays on screen
+    // the settings the scan changed (a first scan's stores and dealer name) go onto what is stored now, never over it: a Settings save made while the scan ran is kept (src/settings.js withScanChanges)
+    if (!(await update('settings', (stored) => withScanChanges(stored, r.changedSettings, r.settings)))) return;
+    state.settings = withDefaults(state.settings, state.snapshot?.site || {}); // as loadSaved reads them
+    await setSiteAuto(state.settings.autoRescan); // the scan's registry entry took the auto setting it started with; the one stored now is what the worker must read
     // the price basis this read shows for a listing that has none, kept on it unless the read was held back (src/scanRunner.js keepSeenBasis)
     state.posted = (await keepSeenBasis(state.origin, last, r.snapshot, r.diff, popupStorage).catch(() => undefined)) || state.posted;
     state.pilot = await recordFlags(state.origin, state.diff, state.diff.takenAt).catch(() => state.pilot); // pilot numbers: when a to-do item first appeared
@@ -416,7 +419,7 @@ function empty(text) {
 // draft: the draft's pill shows the price it was filled with, and says so
 // when the website's price moved (on a scan taken since the draft was
 // filled: src/drafts.js draftScanCar) or the car is not ready any more.
-function postButton(vin, { canPost = true } = {}) {
+function postButton(vin, { canPost = true, capReached = null } = {}) {
   const theirs = colleagueEntry(vin);
   if (theirs) return `<span class="pill" title="A colleague's listing: theirs to update or take down">Posted by ${byWhom(theirs)}</span>`;
   if (state.posted[vin]) return `<button type="button" class="small" data-action="unpost" data-vin="${esc(vin)}" title="Click to unmark. A post recorded today still counts toward today's cap.">Posted ✓</button>`;
@@ -425,9 +428,9 @@ function postButton(vin, { canPost = true } = {}) {
     const pill = draftPill(state.drafts[vin], draftScanCar(state.drafts[vin], state.snapshot, vin), { basis: state.settings?.basis, ready: canPost });
     return `<span class="actions"><span class="pill ${pill.tone}" title="${esc(pill.title)}">${esc(pill.text)}</span><button type="button" class="small go" data-action="post" data-vin="${esc(vin)}">Mark posted</button></span>`;
   }
-  const capReached = dailyCap().reached;
+  const reached = capReached ?? dailyCap().reached; // a list passes its one reading: the cap is the same for every row
   const post = canPost
-    ? `<button type="button" class="small go" data-action="openPost" data-vin="${esc(vin)}" ${capReached ? 'disabled' : ''} title="${capReached ? 'Daily post cap reached; it resets tomorrow' : 'Pre-fill the Marketplace form in the side panel. You click Publish.'}">Post</button>`
+    ? `<button type="button" class="small go" data-action="openPost" data-vin="${esc(vin)}" ${reached ? 'disabled' : ''} title="${reached ? 'Daily post cap reached; it resets tomorrow' : 'Pre-fill the Marketplace form in the side panel. You click Publish.'}">Post</button>`
     : '';
   return `<span class="actions">${post}<button type="button" class="small" data-action="post" data-vin="${esc(vin)}" title="Already listed it yourself? Mark it posted so rescans watch it.">Mark posted</button></span>`;
 }
@@ -634,7 +637,7 @@ function readyBodyHtml(l, cap) {
     : '';
   if (!shown.length) return toolbar + empty('No cars match');
   const now = Date.now();
-  return toolbar + rows(shown.map((e) => row(e, { sub: facts(e), line: whenLine(e, now), tag: newPill(e, now), right: money(price(e)), action: postButton(e.vin), pick: queueable(e) && !cap.reached })));
+  return toolbar + rows(shown.map((e) => row(e, { sub: facts(e), line: whenLine(e, now), tag: newPill(e, now), right: money(price(e)), action: postButton(e.vin, { capReached: cap.reached }), pick: queueable(e) && !cap.reached })));
 }
 
 // Ticks that no longer apply: a car that left the Ready list or was posted
@@ -1575,24 +1578,19 @@ async function onPanelClick(ev) {
         return;
       }
       Object.assign(state, { snapshot: null, diff: null, posted: {}, postLog: [], takenDown: null, settings: null, settingsFromProfile: false, queue: null, drafts: {}, wizardDone: false, wizardActive: false, site: null, pilot: null, rescanPermission: null, view: 'todo' });
-      await ownRemove(Object.values(siteKeys(state.origin)));
+      // forget the website for background rescans too (its registry entry goes first, so a rescan still reading writes nothing back), and its records under the diff's lock (src/storage.js clearWebsiteRecords)
+      try {
+        const keys = siteKeys(state.origin);
+        await clearWebsiteRecords(state.origin, { sitesKey: SITES_KEY, recordKeys: Object.values(keys), diffKey: keys.diff, storage: popupStorage, remove: ownRemove });
+        setStatus('Cleared. Scan again, or run set-up, to start over.');
+      } catch (e) {
+        setStatus(storageErrorText(e), 'error');
+      }
       // The synced profile is the person's, not this website's data: start
       // again from it, as a popup opened on a website with no settings does,
       // so the next Scan or Settings save puts it back instead of defaults.
       state.settings = settingsFromProfile(await loadProfile(), { origin: state.origin });
       state.settingsFromProfile = Boolean(state.settings);
-      // forget the website for background rescans too, and take its count off the badge
-      try {
-        await updateKey(SITES_KEY, (sites) => {
-          if (!sites || !sites[state.origin]) return undefined;
-          const next = { ...sites };
-          delete next[state.origin];
-          return next;
-        }, popupStorage);
-        setStatus('Cleared. Scan again, or run set-up, to start over.');
-      } catch (e) {
-        setStatus(storageErrorText(e), 'error');
-      }
       chrome.runtime.sendMessage({ type: 'updateBadge' }).catch(() => {});
       clearArmed = false;
       break;

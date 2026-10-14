@@ -21,7 +21,7 @@
 
 import { DECISION } from './classify.js';
 
-export const MASS_DISAPPEARANCE_SHARE = 0.5;
+const MASS_DISAPPEARANCE_SHARE = 0.5;
 // The share rule applies from this many cars in the last scan up. Below it a
 // lot that really sells half its cars in one rescan would otherwise wait for
 // the salesperson to accept its new list (an unreliable scan is not saved:
@@ -499,14 +499,14 @@ export function settleDiff(diff, posted) {
 // WITHHELD_AGREE_SCANS have, To do says so and offers to use the new list
 // (acceptWithheld). Only that click replaces the saved list: no scan does it
 // on its own.
-export const WITHHELD_AGREE_SCANS = 2;
+const WITHHELD_AGREE_SCANS = 2;
 
 // Two held-back reads agree when both read some cars, both got the website's
 // whole list (complete), and they differ by no more than a tenth of the
 // larger, or two cars: a car sold or arrived between two scans hours apart
 // still agrees, a read of another part of the lot does not. A read with no
 // cars never agrees, so an empty list is never offered.
-export function sameRead(a, b) {
+function sameRead(a, b) {
   const x = Object.keys((a && a.vehicles) || {});
   const y = new Set(Object.keys((b && b.vehicles) || {}));
   if (!x.length || !y.size || a.complete === false || b.complete === false) return false;
@@ -546,7 +546,7 @@ export function withheldOffer(diff) {
 }
 
 // The words of the hiccup warning that stay the same whatever the counts.
-export const HICCUP_WORDS = "disappeared at once. That's usually a website hiccup";
+const HICCUP_WORDS = "disappeared at once. That's usually a website hiccup";
 
 /**
  * The salesperson's Use the new list: the held-back read becomes the saved

@@ -57,7 +57,7 @@ export const MAX_SITEMAPS = 5;
 // The most of robots.txt read for its Sitemap lines: what search engines read
 // of it (500 KiB); the rest of a longer file is ignored, as they ignore it.
 export const ROBOTS_TEXT_LIMIT = 512000;
-export const MAX_SITEMAP_ADDRESSES = 20000;
+const MAX_SITEMAP_ADDRESSES = 20000;
 export const REQUEST_TIMEOUT_MS = 30000;
 
 // ---------- in the dealer tab (self-contained, read-only) ----------

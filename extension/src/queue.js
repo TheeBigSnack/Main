@@ -5,7 +5,7 @@
 // The queue lives in chrome.storage so it survives closing the panel, and it
 // can never be longer than the day's remaining post cap.
 
-export const OUTCOMES = Object.freeze(['posted', 'draft', 'skipped', 'blocked']);
+const OUTCOMES = Object.freeze(['posted', 'draft', 'skipped', 'blocked']);
 
 export function createQueue(vins, { remaining = Infinity, dealerTabId = null, windowId = null, now = new Date().toISOString() } = {}) {
   const unique = [...new Set((vins || []).map((v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '')).filter(Boolean))];

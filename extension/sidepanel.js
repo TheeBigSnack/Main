@@ -1182,7 +1182,8 @@ function queueBar() {
     ? `<p class="hint" id="queueUnlinked">No listing link was saved for ${esc(unlinked.join(', '))}: the address in Listing link wasn't a Marketplace listing's own address. ${unlinked.length === 1 ? 'Its' : 'Their'} To do items open Your listings, where you pick the listing.</p>`
     : '';
   const next = currentVin(q);
-  const active = state.queueMode && state.vin && state.step !== 'idle' && state.step !== 'queueDone';
+  // any post under way, a single car's review included: Post next car would clear it (startFlow)
+  const active = Boolean(state.vin) && state.step !== 'idle' && state.step !== 'queueDone';
   let buttons = '';
   if (q.status === 'done') {
     buttons = `<button type="button" class="plain" id="queueClear">Clear queue</button>`;
@@ -2838,6 +2839,14 @@ async function openWizard(req) {
 // Post, with no dealer tab: the car is read straight from the website.
 async function postFromList(vin) {
   if (!(await askForSite())) return undefined;
+  // a queue under way (or paused) keeps its own bar: a post started here would clear its car (startFlow)
+  const key = siteKeys(state.origin).queue;
+  const queued = (await chrome.storage.local.get(key))[key] || null;
+  if (queued && queued.status !== 'done') {
+    state.queue = queued;
+    setStatus(QUEUE_UNDER_WAY, 'error');
+    return render();
+  }
   const entry = state.snapshotVehicles[vin];
   if (!entry || state.posted[vin]) return render(); // posted or gone meanwhile: the list is redrawn
   const cap = dailyCap();
@@ -2848,6 +2857,8 @@ async function postFromList(vin) {
   return startFlow({ origin: state.origin, vin, dealerTabId: null, windowId: panelWindowId, at: Date.now() });
 }
 
+const QUEUE_UNDER_WAY = 'A queue is already under way: continue it from the bar above, or stop it first.';
+
 // "Post the next N": a queue of the first N cars in the order shown, walked
 // the way the popup's queue is (src/queue.js), with no dealer tab.
 async function queueFromList() {
@@ -2856,7 +2867,7 @@ async function queueFromList() {
   const stored = (await chrome.storage.local.get(key))[key] || null;
   if (stored && stored.status !== 'done') {
     state.queue = stored; // one started in the popup meanwhile: its bar takes over
-    setStatus('A queue is already under way: continue it from the bar above, or stop it first.', 'error');
+    setStatus(QUEUE_UNDER_WAY, 'error');
     return render();
   }
   const cap = dailyCap();

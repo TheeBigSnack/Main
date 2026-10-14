@@ -180,7 +180,7 @@ export const PRICE_NOTE_WORDS = Object.freeze([
 ]);
 
 // Which features matter most to a Marketplace shopper. Earlier = better.
-export const FEATURE_PRIORITY = Object.freeze([
+const FEATURE_PRIORITY = Object.freeze([
   /\b(navigation|nav system|gps)\b/i,
   /apple carplay|android auto/i,
   /heated (front |rear )?seats/i,
@@ -231,7 +231,7 @@ export function numbersIn(text) {
 }
 
 // Numbers the website (and the dealer's own settings) actually contain.
-export function sourceNumbers({ vehicle = {}, dealer = {}, priceNote = '', price = null } = {}) {
+function sourceNumbers({ vehicle = {}, dealer = {}, priceNote = '', price = null } = {}) {
   const v = vehicle;
   const bits = [
     v.year, v.make, v.model, v.trim, v.name, v.mileage, v.stock, v.engine, v.transmission, v.drivetrain,
@@ -316,7 +316,7 @@ export function mileageClaims(text) {
 
 // Wording that claims a price change. Prices only ever mirror the website,
 // and a listing's price drop reaches buyers through the listing itself.
-export const PRICE_CHANGE = /\b(?:price (?:drop(?:ped)?|reduced|reduction|cut)|reduced price|just reduced|marked down|(?:reduced|dropped|lowered|slashed|cut) from(?= \$?\d)|was \$|now (?:just |only )?\$)/i;
+const PRICE_CHANGE = /\b(?:price (?:drop(?:ped)?|reduced|reduction|cut)|reduced price|just reduced|marked down|(?:reduced|dropped|lowered|slashed|cut) from(?= \$?\d)|was \$|now (?:just |only )?\$)/i;
 const CHANGE_LEAD = /^(?:was|now|reduced to|dropped to)\b/i;
 function priceChangeSaid(text) {
   const m = PRICE_CHANGE.exec(text);
@@ -521,7 +521,7 @@ export function signOffLine(person, title, dealerName) {
 
 // The salesperson's role as a description must name it: their title from
 // Settings, or the default one, with its spacing evened out.
-export const roleOf = (salesperson) => String((salesperson && salesperson.title) || DEFAULT_SALESPERSON_TITLE).replace(/\s+/g, ' ').trim();
+const roleOf = (salesperson) => String((salesperson && salesperson.title) || DEFAULT_SALESPERSON_TITLE).replace(/\s+/g, ' ').trim();
 
 /**
  * @param {object} args
@@ -938,7 +938,7 @@ function claimSource({ vehicle = {}, priceNote = '', boilerplate = [] }) {
 // shows, or the condition word in its address or at the start of its title.
 // The rewrite service gets none of these, so there a draft says certified
 // only when the write-up or the features do.
-export function listedCertified(v = {}) {
+function listedCertified(v = {}) {
   const titleWords = typeof v.siteTitle === 'string' ? (v.siteTitle.match(/^\s*(.*?)\s*\b(?:19|20)\d{2}\b/) || [])[1] : '';
   return /\b(?:certified|cpo)\b/i.test([v.inventoryType, v.readableType, v.urlConditionWord, titleWords].filter((s) => typeof s === 'string').join(' '));
 }

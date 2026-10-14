@@ -222,3 +222,10 @@ test('a Dealer Inspire reference price (MSRP, Was) is never the selling price: w
   raw.extra_fields.lightning.pricing = { low: false, high: { label: 'MSRP', value: '$31,995' } };
   assert.equal(normalizeVehicle(raw).price, null);
 });
+
+test('a Dealer Inspire record that says it has no photos but lists some has as many photos as it lists, and a larger count the site gives stands', () => {
+  const raw = { vin: 'VIN0000000000001', year: 2020, make: 'Ram', model: '1500', media: { image_count: 0, images: ['a.jpg', 'b.jpg'] } };
+  assert.equal(normalizeVehicle(raw).photoCount, 2, 'a zero count does not hide the photos listed');
+  assert.equal(normalizeVehicle({ ...raw, media: { image_count: 0, images: [] } }).photoCount, 0, 'no photos listed: none');
+  assert.equal(normalizeVehicle({ ...raw, media: { image_count: 5, images: ['a.jpg'] } }).photoCount, 5, 'the count the site gives, when it is larger');
+});

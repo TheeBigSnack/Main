@@ -1,5 +1,6 @@
-// Packs the extension into dist/lot-current-extension-<version>.zip: exactly the files under
-// extension/, nothing else, with the version from manifest.json in the name.
+// Packs the extension into dist/lot-current-extension-<version>.zip: the files under
+// extension/ that the browser reads, nothing else, with the version from manifest.json in the name.
+// The adapter contract (extension/adapters/README.md) is for developers; no shipped code reads it, so it stays out.
 // Plain Node (22+, the repo's engine), no dependencies: a small zip writer (deflate via zlib).
 //
 // Run: npm run pack                -> dist/lot-current-extension-0.4.0.zip
@@ -19,6 +20,7 @@ import { join, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { deflateRawSync } from 'node:zlib';
 import { PILOT_CONFIG_PATH, pilotAccountConfig, accountsOffProblems } from './pilot-config.mjs';
+import { SKIP } from './packSkip.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const src = join(root, 'extension');
@@ -31,8 +33,6 @@ if (pkg.version !== manifest.version) {
 const out = join(root, 'dist', `lot-current-extension-${manifest.version}.zip`);
 const pilotOut = join(root, 'dist', `lot-current-extension-${manifest.version}-pilot.zip`);
 
-// Files a packed extension must not carry (editor and OS leftovers).
-const SKIP = /(^|\/)(\.DS_Store|Thumbs\.db|desktop\.ini|.*\.swp|.*~)$/;
 
 function walk(dir, base = dir) {
   const files = [];

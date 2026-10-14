@@ -27,7 +27,7 @@ import { siteKeys, SITES_KEY } from './src/storageKeys.js';
 import { updateKey, withLock, storageErrorText } from './src/storage.js';
 import { settleDiff, withWithheld } from './src/rescan.js';
 import { withDefaults } from './src/settings.js';
-import { RESCAN_ALARM, RESCAN_PERIOD_MINUTES, SYNC_RETRY_MINUTES, syncRetryAlarm, originOfSyncRetryAlarm, todoCountFor, badgeText, notificationFor, notifiedAfter, toldCountAfterChange, isDue, latestOf, originsFor, httpOnlyWebsite } from './src/rescanSchedule.js';
+import { RESCAN_ALARM, RESCAN_PERIOD_MINUTES, SYNC_RETRY_MINUTES, syncRetryAlarm, originOfSyncRetryAlarm, todoCountFor, badgeText, notificationFor, notifiedAfter, toldCountAfterChange, isDue, latestOf, originsFor, httpOnlyWebsite, withSiteFields } from './src/rescanSchedule.js';
 import { recordFlags } from './src/pilot.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { syncOnce, scanFromStored, NOT_CONFIGURED } from './src/accountFlow.js';
@@ -89,7 +89,7 @@ const KNOWN_PHOTO_TYPE = /^image\/(?:jpe?g|pjpeg|png|gif|webp|avif)$/;
 // other only when the body is not a page of markup. Anything else (a
 // text/html answer, a missing or octet-stream type over bytes of no photo
 // format, an empty, JSON or text body under a JPEG or PNG type) is no photo.
-export function photoTypeFor(declared, bytes) {
+function photoTypeFor(declared, bytes) {
   const b = bytes || new Uint8Array(0);
   if (!b.length) return null;
   const sniffed = sniffPhotoType(b);
@@ -325,13 +325,14 @@ async function hasPermission(info, adapter) {
 
 export const NO_PERMISSION = 'Lot Current has no permission to read this website in the background. Click Allow automatic rescans in Settings.';
 export const NO_HTTPS_ONLY = 'Chrome allows automatic rescans only for https websites, so this website is checked by hand.';
-export const NO_SETTINGS = 'This website has no settings on this computer (they were cleared, or set-up never finished). Scan it from the popup first.';
+const NO_SETTINGS = 'This website has no settings on this computer (they were cleared, or set-up never finished). Scan it from the popup first.';
+const CLEARED_WHILE_READ = 'This website was cleared while it was being read, so nothing was saved.';
 
 // A failed attempt is recorded so the popup can show that the schedule is not
 // working, with what asked for it (the alarm, or the side panel's Rescan).
 async function noteFailure(origin, info, error, reason = 'alarm') {
   try {
-    await updateSites((sites) => ({ ...sites, [origin]: { ...(sites[origin] || info), lastAttempt: new Date().toISOString(), lastError: error, lastReason: reason } }));
+    await updateSites((sites) => withSiteFields(sites, origin, { lastAttempt: new Date().toISOString(), lastError: error, lastReason: reason }));
   } catch (e) { /* the registry could not be written either; the result still says what failed */ }
   return { ok: false, error };
 }
@@ -370,19 +371,22 @@ export async function runRescan(origin, { reason = 'alarm' } = {}) {
   // hiccup is not saved as the snapshot: it is held back with the diff,
   // counted on from the one saved before (withWithheld), for the popup to
   // offer; only the salesperson's click there replaces the snapshot.
-  let diff;
+  let saved;
   try {
-    ({ diff } = await withLock(k.diff, async () => {
-      const now = await chrome.storage.local.get([k.posted, k.diff]);
+    saved = await withLock(k.diff, async () => {
+      const now = await chrome.storage.local.get([k.posted, k.diff, SITES_KEY]);
+      if (!(now[SITES_KEY] || {})[origin]) return null; // cleared while this read ran: nothing is written back (clearWebsiteRecords)
       const settled = withWithheld(settleDiff(out.diff, now[k.posted] || {}), out.snapshot, now[k.diff]);
       const save = { [k.diff]: settled, [k.boilerplate]: out.boilerplate };
       if (!settled.unreliable) save[k.snapshot] = out.snapshot;
       await chrome.storage.local.set(save);
       return { diff: settled };
-    }));
+    });
   } catch (e) {
     return noteFailure(origin, info, storageErrorText(e), reason); // the quota, most likely: the popup's To do shows it as the last error
   }
+  if (!saved) return { ok: false, error: CLEARED_WHILE_READ };
+  const { diff } = saved;
   await recordFlags(origin, diff, out.res.fetchedAt).catch(() => null); // pilot numbers: when a to-do item first appeared
   await keepSeenBasis(origin, data[k.snapshot] || null, out.snapshot, diff).catch(() => null); // the price basis this read shows for a listing that has none; none from a held-back read
   const count = todoCountFor(diff);
@@ -399,7 +403,7 @@ export async function runRescan(origin, { reason = 'alarm' } = {}) {
     } catch (e) { failed = true; /* notifications may be blocked; the badge still shows, and the next scan makes the notice again */ }
   }
   try {
-    await updateSites((sites) => ({ ...sites, [origin]: { ...(sites[origin] || info), photoOrigins: out.photoOrigins, lastScan: out.res.fetchedAt, lastAttempt: now, lastError: null, lastReason: reason, lastNotifiedCount: notifiedAfter(known.lastNotifiedCount, count, failed) } }));
+    await updateSites((sites) => withSiteFields(sites, origin, { photoOrigins: out.photoOrigins, lastScan: out.res.fetchedAt, lastAttempt: now, lastError: null, lastReason: reason, lastNotifiedCount: notifiedAfter(known.lastNotifiedCount, count, failed) }));
   } catch (e) {
     return noteFailure(origin, info, storageErrorText(e), reason);
   }

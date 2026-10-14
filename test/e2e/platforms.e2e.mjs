@@ -27,6 +27,7 @@ import assert from 'node:assert/strict';
 import { startMockPlatformSite, PLATFORM_LOT, DEALER_NAMES } from './mock-platform-sites.mjs';
 import { startMockMarketplace, INITIAL_LISTINGS } from './mock-marketplace.mjs';
 import { blockFacebook } from './noFacebook.mjs';
+import { closeBounded } from './closeBounded.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const shots = join(root, 'test/e2e/screenshots');
@@ -242,7 +243,10 @@ try {
   console.error('Console errors:', errors);
   throw e;
 } finally {
-  await context.close();
+  if (!(await closeBounded(context))) {
+    console.error('The browser did not close within 15 s, so the run ends here.');
+    process.exit(1);
+  }
   for (const d of [profileDir, extDir]) { try { rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); } catch (e) { /* every run makes its own folders */ } }
   for (const s of Object.values(sites)) s.close();
   market.close();

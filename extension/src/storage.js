@@ -67,3 +67,23 @@ export function storageErrorText(e) {
   const msg = String((e && e.message) || e || '');
   return isStorageFull(e) ? STORAGE_FULL : "Couldn't save: " + (msg || 'unknown error');
 }
+
+/**
+ * Clear everything for one website, in an order a rescan that is still reading
+ * cannot undo (review U3). The website's registry entry goes first, so a result
+ * that lands later finds it gone (withSiteFields, src/rescanSchedule.js) and
+ * writes nothing; then its records go under the diff's lock, the lock every
+ * rescan save takes. `remove` takes a list of keys (the popup's own-write
+ * wrapper, or a plain storage call).
+ * @param {string} origin
+ * @param {{ sitesKey: string, recordKeys: string[], diffKey: string, storage?: object, remove: (keys: string[]) => Promise<any> }} o
+ */
+export async function clearWebsiteRecords(origin, { sitesKey, recordKeys, diffKey, storage, remove }) {
+  await updateKey(sitesKey, (sites) => {
+    if (!sites || !sites[origin]) return undefined;
+    const next = { ...sites };
+    delete next[origin];
+    return next;
+  }, storage);
+  await withLock(diffKey, () => remove(recordKeys));
+}
