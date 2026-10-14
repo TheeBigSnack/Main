@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { wizardSteps, accountStepModel, joinedFrom, joinedText, rewriteAtAccount, termsSummary, addressHint, storeTickReason, ACCOUNT_WORDS, LATER } from '../extension/src/wizardSteps.js';
+import { wizardSteps, accountStepModel, joinedFrom, joinedText, rewriteAtAccount, termsSummary, addressHint, storeTickReason, ACCOUNT_WORDS, LATER, GRANT_REFUSED_TEXT } from '../extension/src/wizardSteps.js';
 import { syncPayload } from '../extension/src/sync.js';
 import { accountsConfigured } from '../extension/src/accountConfig.js';
 import { signInStart } from '../extension/src/accountFlow.js';
@@ -249,6 +249,10 @@ function wizardFn(name, scope) {
   const text = src.slice(start, src.indexOf('\n}\n', start) + 2);
   return new Function(...Object.keys(scope), `${text}\nreturn ${name};`)(...Object.values(scope));
 }
+
+test('the rescan permission step says rescans stay off when Chrome refuses, and how to ask again', () => {
+  assert.equal(GRANT_REFUSED_TEXT, "Chrome didn't allow automatic rescans, so they stay off. Click Allow automatic rescans to ask again, or Skip for now; the Scan button in the popup still works.");
+});
 
 test('the address step says when no dealership name is set, and Next goes on only once one is typed', async () => {
   assert.equal(dealerNameMissing({ name: '' }), true);

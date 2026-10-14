@@ -744,7 +744,9 @@ test('schemaOrg scan: the list and its rel=next pages to the end, then each car\
   assert.deepEqual([busy.ok, busy.error], [false, 'blocked'], 'a 503 is the website asking to be left alone');
   const drawn = await scanSite(new Map([[LIST, html('<html><head><title>Used</title></head><body><div id="app"></div></body></html>')]]));
   assert.deepEqual([drawn.ok, drawn.error], [false, 'no-cars']);
-  assert.match(drawn.message, /draws its list with scripts/);
+  assert.match(drawn.message, /Some websites load their car list with scripts, and Lot Current can't see those cars\./);
+  assert.match(drawn.message, /Open that page in this window and scan again/, 'the message ends with the next step');
+  assert.match(drawn.message, /If it still finds no cars, tell your manager that Lot Current can't read that page's car list\.$/, 'and what to do when the next step fails');
   const unknown = await schemaOrg.scan(fakeSiteSearch(site), { origin: O, listUrl: null });
   assert.deepEqual([unknown.ok, unknown.error, unknown.requests], [false, 'no-list', 0]);
 });
@@ -2012,4 +2014,28 @@ test('probeSiteInPage: a street ending in a word that is also a city is read who
   const two = fakeDealerPage({ records: [], withLd: false, bodyText: 'Our stores\n200 Main Street, Springfield, OH 43215\n9 Oak Avenue, Columbus, OH 43004' });
   const blank = (await runInPage(two, probeSiteInPage)).address;
   assert.ok(!blank.street && !blank.zip && !blank.city, 'no address is read from two');
+});
+
+// A search that never answers (a page helper or the POST that hangs) gives up at its time limit,
+// so a scan cannot wait on it forever. The page's own helper is stood in with a promise that never settles.
+test('a Dealer Inspire search that never answers gives up at its time limit, and an answer in time is kept', async () => {
+  globalThis.window = { IDPSearchServiceHelper: { getListings: () => new Promise(() => {}) } };
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const pending = searchInPage({ search: 'https://x', apiKey: 'k' }, {});
+    mock.timers.tick(20 * 1000);
+    const r = await Promise.race([pending, new Promise((resolve) => setImmediate(() => resolve('still waiting')))]);
+    assert.notEqual(r, 'still waiting', 'the search is not left waiting');
+    assert.equal(r.ok, false);
+    assert.match(r.error, /took too long/);
+  } finally {
+    mock.timers.reset();
+    delete globalThis.window;
+  }
+  globalThis.window = { IDPSearchServiceHelper: { getListings: async () => ({ data: { listings: [] } }) } };
+  try {
+    assert.deepEqual(await searchInPage({ search: 'https://x', apiKey: 'k' }, {}), { ok: true, data: { listings: [] } });
+  } finally {
+    delete globalThis.window;
+  }
 });

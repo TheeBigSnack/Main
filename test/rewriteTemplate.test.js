@@ -368,6 +368,33 @@ test('a stale price, price drop or mileage in a draft fails the checks, though t
   assert.ok(runGuardrails(`${base}\n$26,673.`, { ...c, price: null }).problems.some((p) => p.code === 'price-mismatch'));
 });
 
+test('a price change claimed in words, with no amount, is flagged in any word order', () => {
+  const v = { ...vehicle('usedNormal', { features: FEATURES }), descriptionRaw: STALE };
+  const c = { vehicle: v, dealer: EXAMPLE, salesperson: SAM, priceNote: 'Price includes the $490 doc fee; tax and tags extra.', price: 26673 };
+  const base = buildTemplateDescription(c);
+  assert.deepEqual(runGuardrails(base, c).problems, [], 'the template passes');
+  for (const line of ['Price just dropped!', 'Dropped price, act now.', 'Price lowered this week.', 'Lower price this week.', 'Price has dropped.']) {
+    assert.ok(runGuardrails(`${base}\n${line}`, c).problems.some((p) => p.code === 'price-change'), line);
+  }
+  // a comparison about mileage is not a price change
+  assert.ok(!runGuardrails(`${base}\nLower mileage than most in the lot.`, c).problems.some((p) => p.code === 'price-change'), 'the control');
+});
+
+test('the checks read digits and hidden characters as they show: fullwidth or Arabic-Indic digits are the same amounts, and a zero-width space does not split a phrase', () => {
+  const v = { ...vehicle('usedNormal', { features: FEATURES }), descriptionRaw: STALE };
+  const c = { vehicle: v, dealer: EXAMPLE, salesperson: SAM, priceNote: 'Price includes the $490 doc fee; tax and tags extra.', price: 26673 };
+  const base = buildTemplateDescription(c);
+  const codeOf = (line) => runGuardrails(`${base}\n${line}`, c).problems.map((p) => p.code);
+  // the same amount in other digits is still a price the website does not show
+  assert.ok(codeOf('Only $\uff13\uff11\uff0c\uff19\uff19\uff15 on this one.').includes('price-mismatch'), 'fullwidth digits');
+  assert.ok(codeOf('Only $\u0663\u0661,\u0669\u0669\u0665 on this one.').includes('price-mismatch'), 'Arabic-Indic digits');
+  // a zero-width space inside a phrase is still that phrase
+  assert.ok(codeOf('Meta\u200b Verified dealer.').includes('affiliation'), 'zero-width space in Meta Verified');
+  assert.ok(codeOf('Clean\u200b title.').includes('banned-phrase'), 'zero-width space in clean title');
+  // ordinary text is unchanged
+  assert.deepEqual(codeOf('Priced at $26,673 with 20,986 miles.').filter((x) => /price|mileage/.test(x)), [], 'the control');
+});
+
 test('distances, ranges and warranty terms are not read as the mileage', () => {
   assert.deepEqual(mileageClaims('A 3-year/36,000-mile powertrain warranty, 300 miles of range, 30 miles away, within 50 miles, every 5,000 miles, 60 mph.'), []);
   assert.deepEqual(mileageClaims('Only 38,000 miles! Has 38K miles, 41.2k mi and 45 thousand miles.').map((m) => m.value), [38000, 38000, 41200, 45000]);
@@ -931,6 +958,9 @@ test('a draft that invents warranty, financing, certification, history, care, ne
     "It was Grandma's car.": ['unsupported-claim'],
     'Came in on trade from a local customer.': ['unsupported-claim'],
     'A trade-in from a local family.': ['unsupported-claim'],
+    'Carfax clean, ready to go.': ['unsupported-claim'],
+    'AutoCheck is clean.': ['unsupported-claim'],
+    'A spotless or pristine interior.': ['unsupported-claim'],
   };
   for (const [sentence, codes] of Object.entries(invented)) assert.deepEqual(codesAfter(sentence), codes, sentence);
   const c = plainCtx();
@@ -1451,10 +1481,11 @@ test('guardrails catch a description that claims a Facebook or Meta partnership 
   const v = vehicle('usedNoCarfax');
   const base = buildTemplateDescription(ctx(v));
   const codes = (text, c = ctx(v)) => runGuardrails(text, c).problems.map((p) => p.code);
-  for (const line of ['Facebook partner dealership.', 'Meta Verified dealer.', 'Partnered with Meta.', 'Endorsed by Facebook.', 'An approved Facebook seller.', 'Official Facebook dealer.', 'Facebook Verified dealer.', 'Verified by Meta.', 'Certified by Facebook.', 'Facebook recommended seller.', 'Recognized by Meta.', 'Sanctioned by Facebook.']) {
+  for (const line of ['Facebook partner dealership.', 'Meta Verified dealer.', 'Partnered with Meta.', 'Endorsed by Facebook.', 'An approved Facebook seller.', 'Official Facebook dealer.', 'Facebook Verified dealer.', 'Verified by Meta.', 'Certified by Facebook.', 'Facebook recommended seller.', 'Recognized by Meta.', 'Sanctioned by Facebook.', 'We are in partnership with Facebook for this sale.', 'Facebook Marketplace partner, Sales Consultant.', 'A partner of Meta.', 'Partnership with Meta.']) {
     assert.ok(codes(base + '\n' + line).includes('affiliation'), line);
   }
   assert.deepEqual(codes(base + '\nListed on Facebook Marketplace, and sold on Facebook.'), [], 'a plain name and the certified word are not a claim');
+  assert.deepEqual(codes(base + '\nAsk any question you like before you visit.'), [], 'the control: no Facebook or Meta word, no claim');
   assert.deepEqual(codes(base), []);
 });
 

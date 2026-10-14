@@ -41,6 +41,14 @@ test('a dropdown still showing the value it had before the click is not reported
   assert.match(r.reason, /^chose "Gray" but the form shows "Silver"/);
 });
 
+test('a dropdown that takes a looser option than the one wanted is filled, with a note naming both; the exact option has none', async () => {
+  const loose = await applyFieldWith({ shownBefore: 'Silver', shownAfter: 'Gray Metallic', chosen: 'Gray Metallic' });
+  assert.equal(loose.status, 'filled');
+  assert.equal(loose.shown, 'Gray Metallic');
+  assert.match(loose.note, /chose "Gray Metallic" for "Gray"/);
+  assert.deepEqual(await applyFieldWith({ shownBefore: 'Silver', shownAfter: 'Gray', chosen: 'Gray' }), { status: 'filled', shown: 'Gray' });
+});
+
 test('a dropdown that shows the chosen value is filled, and one that reads empty keeps the read-it-back note', async () => {
   assert.deepEqual(await applyFieldWith({ shownBefore: 'Silver', shownAfter: 'Gray' }), { status: 'filled', shown: 'Gray' });
   const empty = await applyFieldWith({ shownBefore: '', shownAfter: '' });

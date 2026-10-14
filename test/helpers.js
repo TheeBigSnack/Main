@@ -67,7 +67,7 @@ export function fakeDealerPage({ records = [], origin = 'https://example-dealer.
     querySelectorAll: (sel) => (sel === 'script[type="application/ld+json"]' && withLd ? [{ textContent: JSON.stringify(ld) }] : []),
   };
   const location = { origin, hostname: new URL(origin).hostname, href: origin + '/used-vehicles/' };
-  return vm.createContext({ window, document, location, URL });
+  return vm.createContext({ window, document, location, URL, setTimeout, clearTimeout });
 }
 
 // Runs a function's source inside the page sandbox, the way Chrome copies it

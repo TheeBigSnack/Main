@@ -145,6 +145,13 @@ const texts = [
   // an item without its own "new" is quoted from the nearest "new" before it, and a very long list is read once
   sixty('2019 Ram 1500 Big Horn with new tires and new brakes, plus a battery; new tires, struts, new brakes and rotors; fresh brakes, the new battery and wipers.') + '\nVIN TESTVIN0000000001.',
   sixty(`2019 Ram 1500 Big Horn with ${'new tires, struts, Brake Assist, new brake pads & '.repeat(60)}wipers.`) + '\nVIN TESTVIN0000000001.',
+  // the round-5 rules: a partnership claim, a Carfax or interior claim, a price change with no amount, and text with hidden or other-script characters
+  sixty('2019 Ram 1500 Big Horn, a Facebook partnership truck, Meta\u200B Verified.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn, partner of Facebook Marketplace; approved by Meta.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn, Carfax clean and a spotless interior.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn, AutoCheck is clean; its pristine or immaculate cabin is ready.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn. Price just dropped, lower price this week, price came down.') + '\nVIN TESTVIN0000000001.',
+  sixty('2019 Ram 1500 Big Horn with $\uFF13\uFF11,\uFF19\uFF19\uFF15 and 41,230 miles.') + '\nVIN TESTVIN0000000001.',
 ];
 const contexts = [
   { vehicle, dealer, priceNote: '', price: 28995 },

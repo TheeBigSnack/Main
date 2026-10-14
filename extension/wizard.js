@@ -25,7 +25,7 @@ import { updateKey, withLock, storageErrorText, isStorageFull, STORAGE_FULL } fr
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { signInStart, signInFinish, currentSession, rewriteEndpointFor } from './src/accountFlow.js';
 import { loadSession, redeemInvite } from './src/account.js';
-import { wizardSteps, accountStepModel, joinedFrom, rewriteAtAccount, termsSummary, TERMS_PENDING, addressHint, storeTickReason } from './src/wizardSteps.js';
+import { wizardSteps, accountStepModel, joinedFrom, rewriteAtAccount, termsSummary, TERMS_PENDING, addressHint, storeTickReason, GRANT_REFUSED_TEXT } from './src/wizardSteps.js';
 import { settingNumberWarning, settingNumberNotice, priceNoteWarning, priceNoteNotice } from './src/rewriteTemplate.js';
 
 const steps = () => wizardSteps(accountsConfigured());
@@ -44,7 +44,7 @@ export const wiz = {
   settings: null, // built up as the person goes
   fromProfile: false, // the settings came from the synced profile and the first read has not settled the store yet
   service: null, site: null,
-  granted: false, rulesRead: false, termsAccepted: false, busy: false, error: '',
+  granted: false, refused: false, rulesRead: false, termsAccepted: false, busy: false, error: '',
   account: freshAccount(),
 };
 
@@ -386,7 +386,7 @@ export function wizardHtml() {
         ? (httpOnlyWebsite(wiz.site?.origin)
           ? '<p class="hint">Chrome allows the automatic check only for https sites, so this site is checked by hand. The Scan button in the popup still works.</p>'
           : '<p class="hint">Lot Current can\'t read this website in the background, so automatic rescans stay off for it. The Scan button in the popup still works by hand.</p>')
-        : wiz.granted ? '<div class="banner good">Permission granted. Automatic rescans are on.</div>' : `<div class="actions"><button type="button" class="primary" id="wizGrant">Allow automatic rescans</button></div><p class="hint">Or skip: the Scan button in the popup still works by hand.</p>`;
+        : wiz.granted ? '<div class="banner good">Permission granted. Automatic rescans are on.</div>' : `${wiz.refused ? `<div class="banner warn" role="status">${esc(GRANT_REFUSED_TEXT)}</div>` : ''}<div class="actions"><button type="button" class="primary" id="wizGrant">Allow automatic rescans</button></div><p class="hint">Or skip: the Scan button in the popup still works by hand.</p>`;
       return `${progress}<h3>Automatic rescans</h3>
         <p>Every 3 hours while Chrome is open, Lot Current can re-read the website and put your to-do count on its toolbar icon: sold cars to take down, prices to update.${accountsConfigured() ? " While you are signed in to a Lot Current account, it also sends that rescan's results (your posted list, post records, to-do items and the scan's counts) to your dealership's account." : ''}${origins.length ? ` For that it needs permission to read ${origins.map((o) => `<b>${esc(o.replace(/\/\*$/, ''))}</b>`).join(' and ')} in the background.${wiz.granted ? '' : ' Chrome will ask.'}` : ''} It never touches Facebook.</p>
         ${ask}
@@ -607,8 +607,10 @@ async function wizardClick(id, ctx) {
       readInputs(); // keep the notification tick as the person left it across the re-render
       const origins = originsFor(wiz.site, wiz.service);
       wiz.error = ''; // an earlier error on this step no longer applies; a failure below sets its own
+      wiz.refused = false;
       try {
         wiz.granted = await askChrome(origins); // straight from the click
+        wiz.refused = !wiz.granted; // Chrome said no: the step says rescans stay off
       } catch (e) {
         wiz.error = "Couldn't ask Chrome for permission: " + ((e && e.message) || e);
       }

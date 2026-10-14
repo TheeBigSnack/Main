@@ -316,7 +316,7 @@ export function mileageClaims(text) {
 
 // Wording that claims a price change. Prices only ever mirror the website,
 // and a listing's price drop reaches buyers through the listing itself.
-const PRICE_CHANGE = /\b(?:price (?:drop(?:ped)?|reduced|reduction|cut)|reduced price|just reduced|marked down|(?:reduced|dropped|lowered|slashed|cut) from(?= \$?\d)|was \$|now (?:just |only )?\$)/i;
+const PRICE_CHANGE = /\b(?:price (?:(?:just|has|recently|now|again|also) )*(?:drop(?:ped)?|reduced|reduction|cut|lowered|came down|went down)|(?:dropped|lowered|reduced|slashed|cut) (?:the |our )?price|lower price|just reduced|marked down|(?:reduced|dropped|lowered|slashed|cut) from(?= \$?\d)|was \$|now (?:just |only )?\$)/i;
 const CHANGE_LEAD = /^(?:was|now|reduced to|dropped to)\b/i;
 function priceChangeSaid(text) {
   const m = PRICE_CHANGE.exec(text);
@@ -461,7 +461,7 @@ export function cleanClosingLine(line) {
 // { ok, problems: [{ code, text }] } for a closing line as typed. An empty
 // line is fine: the description then ends as before.
 export function checkClosingLine(line) {
-  const t = cleanClosingLine(line);
+  const t = foldForGuard(cleanClosingLine(line));
   const problems = [];
   if (!t) return { ok: true, problems };
   const words = wordCount(t);
@@ -823,7 +823,7 @@ export const priceNoteNotice = (note, dealer) => priceNoteReasons(note, dealer).
 // sole owner", "its first owner", "owned by one family"; not "One-Touch
 // Windows, Owner's Manual"
 // a claim of a Facebook or Meta partnership, approval, endorsement or verification, in either word order ("Meta Verified", "Facebook partner", "approved by Meta", "Facebook Verified", "Verified by Meta")
-const AFFILIATION_CLAIM = /\bmeta[\s-]+verified\b|\b(?:facebook|meta)[\s-]+(?:partners?|partnership|approved|endorsed|authori[sz]ed|official|verified|certified|recommended|sanctioned|recognized)\b|\b(?:partnered|partners?|endorsed|approved|authori[sz]ed|official|verified|certified|recommended|sanctioned|recognized)\s+(?:with\s+|by\s+)?(?:facebook|meta)\b/i;
+const AFFILIATION_CLAIM = /\bmeta[\s-]+verified\b|\b(?:facebook|meta)[\s-]+(?:marketplace[\s-]+)?(?:partners?|partnership|approved|endorsed|authori[sz]ed|official|verified|certified|recommended|sanctioned|recognized)\b|\b(?:partnered|partners?|partnership|endorsed|approved|authori[sz]ed|official|verified|certified|recommended|sanctioned|recognized)\s+(?:with\s+|by\s+|of\s+)?(?:facebook|meta)\b/i;
 const ONE_OWNER = /\b(?:(?:one|1|single)[\s-]+(?:(?:(?!(?:new|next|more|other|of|the|a|an|its|your|lucky)\b)[a-z']+,?[\s-]+){0,2}(?!(?:new|next|more|other|of|the|a|an|its|your|lucky)\b)[a-z']+[\s-]+)?owner(?!['\u2019]s[\s-]+(?:manual|guide|handbook|portal|app)\b)|(?:sole|only|first)[\s-]+owner|owned by (?:one|a single))\b/i;
 
 // "Driven by" the engine is what powers the car, not who drove it ("driven
@@ -899,11 +899,11 @@ export const CLAIM_KINDS = Object.freeze([
   { what: 'financing', re: /\b(?:financ\w*|loans?|lenders?|apr|down[\s-]payments?|monthly payments?|per month|lease\w*|buy[\s-]here)\b/i },
   // credit and approval, apart from financing: "subject to bank approval" or "with approved credit" says approval is not given, so it never backs "everyone gets approved" or "all credit types"
   { what: 'credit or approval', re: /\b(?:credit|approv\w*)\b/i, hedge: /\b(?:subject to\b[^.!?;\n]{0,40}\b(?:approval|credit)|(?:with|on|upon) approved credit|upon (?:credit |lender |bank )?approval|if (?:you(?:'re| are) )?approved|approval (?:is )?required)\b/i },
-  { what: 'accident, damage or title history', re: /\b(?:accidents?|collisions?|wreck(?:s|ed)?|damaged?|flood\w*|salvage|rebuilt|titles?|clean (?:carfax|autocheck|history|record|report))\b/i },
+  { what: 'accident, damage or title history', re: /\b(?:accidents?|collisions?|wreck(?:s|ed)?|damaged?|flood\w*|salvage|rebuilt|titles?|clean (?:carfax|autocheck|history|record|report)|(?:carfax|autocheck)[\s-]+(?:is[\s-]+)?clean)\b/i },
   { what: 'smoking or pets', re: /\b(?:non[\s-]?smok\w*|smok(?:er|ers|ing|ed)|smoke[\s-]?free|pet[\s-]?free|no pets)\b/i },
   { what: 'service history, inspection or upkeep', re: /\b(?:inspect\w*|serviced|service (?:history|records?)|records|maintenance|maintained|oil changes?|tune[\s-]?up|reconditioned|(?:fully|freshly|just|professionally|recently) detailed|garage[\s-]kept|garaged|well[\s-](?:kept|cared)|taken care of)\b/i },
   { what: 'new or replaced parts', re: new RegExp(`\\b(?:(?:brand[\\s-])?new|newer|fresh|replaced|recent)\\s+(?:(?:set of|[\\w-]+)\\s+){0,2}?(${PARTS})\\b`, 'i'), part: true },
-  { what: 'its condition', re: /\b(?:(?:excellent|great|good|pristine|immaculate|showroom|top|amazing|beautiful|clean) (?:condition|shape)|runs (?:great|strong|well|smooth\w*|excellent)|drives (?:great|well|smooth\w*|excellent)|mechanically sound|needs nothing|turn[\s-]?key|rust[\s-]free|no (?:rust|dents|problems))\b/i },
+  { what: 'its condition', re: /\b(?:(?:excellent|great|good|pristine|immaculate|showroom|top|amazing|beautiful|clean) (?:condition|shape)|(?:spotless|pristine|immaculate|flawless)(?:\s+or\s+\w+)?\s+(?:interior|exterior|cabin|paint|body|upholstery)\b|runs (?:great|strong|well|smooth\w*|excellent)|drives (?:great|well|smooth\w*|excellent)|mechanically sound|needs nothing|turn[\s-]?key|rust[\s-]free|no (?:rust|dents|problems))\b/i },
   // who had it and how it was used ("one owner" has its own check, against the Carfax flag; "Pre-owned" is not a claim)
   // (sourceRe: the same kind in the website's own words, where only the words after "locally owned" decide that it is the dealership's)
   { what: 'its owners or how it was driven', re: ownerWords(LOCALLY_OWNED_SAID), sourceRe: ownerWords(LOCALLY_OWNED) },
@@ -949,7 +949,7 @@ function listedCertified(v = {}) {
 function without(text, names) {
   let out = String(text || '');
   for (const n of names) {
-    const name = oneLine(n);
+    const name = oneLine(foldForGuard(n));
     if (name) out = out.replace(new RegExp(escapeRe(name).replace(/ /g, '\\s+'), 'gi'), ' ');
   }
   return out;
@@ -1481,14 +1481,36 @@ export const settingNumberNotice = (setting, value, dealer) => (settingWarning(s
 // does too until it is added here.
 export const STYLE_PROBLEMS = Object.freeze(['too-short', 'too-long', 'all-caps', 'emoji', 'closing-too-long', 'closing-caps', 'closing-emoji']);
 
+// The text as the checks read it: NFKC folds the compatibility forms (fullwidth
+// letters and digits, ligatures), invisible characters are read as nothing, and
+// every decimal digit of any script is read as its ASCII value, so "$３１,９９５"
+// and "$٣١,٩٩٥" are the amounts "$31,995", and a zero-width space cannot split
+// "Meta Verified".
+function foldForGuard(s) {
+  return String(s ?? '').normalize('NFKC').replace(NOTE_HIDDEN, '').replace(/\p{Nd}/gu, asciiDigit);
+}
+// A decimal digit's value. Each script's digits are a run of ten starting at zero,
+// so the value is the distance from the start of its run.
+function asciiDigit(ch) {
+  const cp = ch.codePointAt(0);
+  if (cp < 128) return ch;
+  let start = cp;
+  while (start > 0 && /\p{Nd}/u.test(String.fromCodePoint(start - 1))) start -= 1;
+  return String((cp - start) % 10);
+}
+
 /**
  * Checks a description against the source data. Returns { ok, problems, words }.
  * Every problem has a code and a short plain-English text.
  */
 export function runGuardrails(text, { vehicle = {}, dealer = {}, salesperson = {}, priceNote = '', price = null, closingLine = '', boilerplate = [] } = {}) {
-  const t = String(text || '');
+  const t = foldForGuard(text);
+  // the note is read folded like the text, so its words, digits and amounts match the text's; the direction marks
+  // are read from the note as written (noteSteer's last argument, rawNote)
+  const rawNote = priceNote;
+  priceNote = foldForGuard(priceNote);
   // the closing line is the salesperson's, checked on its own (checkClosingLine) wherever the text carries it
-  const closing = cleanClosingLine(closingLine);
+  const closing = foldForGuard(cleanClosingLine(closingLine));
   const hasClosing = Boolean(closing) && closingPattern(closing).test(t);
   const prose = stripVin(hasClosing ? stripClosing(t, closing) : t);
   const problems = [];
@@ -1557,7 +1579,7 @@ export function runGuardrails(text, { vehicle = {}, dealer = {}, salesperson = {
   for (const [phrase, re] of BANNED_RE) {
     if (re.test(besideNote)) problems.push({ code: 'banned-phrase', text: `Says "${phrase}"` });
     else if (noteSaid && NOTE_BANNED_RE.get(phrase).test(noteSaid)) problems.push({ code: 'banned-phrase', text: noteBanned(phrase) });
-    else if (noteSaid && noteSteer(phrase, noteSaid, dealer, priceNote)) problems.push({ code: 'banned-phrase', text: noteSteer(phrase, noteSaid, dealer, priceNote) });
+    else if (noteSaid && noteSteer(phrase, noteSaid, dealer, rawNote)) problems.push({ code: 'banned-phrase', text: noteSteer(phrase, noteSaid, dealer, rawNote) });
     else if (!re.test(tBanned)) continue;
     else if (!(noteSaid && re.test(noteSaid))) problems.push({ code: 'banned-phrase', text: `Says "${phrase}"` });
     else if (re.test(besideOwnNote)) problems.push({ code: 'banned-phrase', text: `Says "${phrase}" with words joined to your price note's sentence; keep the note as a sentence of its own: end the sentence before it, and start the one after it with a capital letter` });

@@ -1234,6 +1234,72 @@ The owner's instruction was to build the round-4 list (`plans/2026-10-11-improve
 - The Brandon decisions and the live checks listed in section 25 and `plans/2026-10-07-needs-from-brandon.md` are unchanged.
 - The round-4 items that need a decision (the pilot "cleared by the website" count, the Marketplace price element for "saved") are still not built.
 
+## 30. The third ten-improvements round, round 5 (2026-10-11, branch `claude/project-thread-ofbx1q-round5`, stacked on `claude/project-thread-ofbx1q-round4`, #20)
+
+The owner's instruction (2026-10-11): keep improving the app until he is satisfied, one PR per round, one commit per item, stacked on #20. Nothing merged. Each item was built test first (the new test was run and failed for the stated reason before the change).
+
+The audit (read-only, four lenses) listed 30 findings. Ten were picked. Three of the first picks were dropped and replaced, for the reasons in 30.3.
+
+### 30.1 What each commit does
+
+1. `696f3c5` **"New Certified" reads as a new car in either word order**, so the pre-owned gate skips it (`readCondition` in `src/classify.js`).
+2. `c2aa867` **Price-change wording with no amount is flagged**: "Price just dropped!", "Dropped price, act now.", "Price lowered this week.", "Lower price this week." (`PRICE_CHANGE` in `src/rewriteTemplate.js`).
+3. `85e4142` **"partnership with Facebook", "Facebook Marketplace partner" and "a partner of Meta" are affiliation claims** (`AFFILIATION_CLAIM`).
+4. `5c884cf` **"Carfax clean", "AutoCheck is clean", "a spotless or pristine interior" are claims** (`CLAIM_KINDS`).
+5. `852b2a1` **The checks read digits of any script as their ASCII value and skip hidden characters**: `foldForGuard` and `asciiDigit` in `src/rewriteTemplate.js`. Repaired in `c5274d7` (see 30.2).
+6. `e10c624` **A dropdown that takes a looser option is filled with a note** naming both values ("chose Gray Metallic for Gray; check it on the form"). Before, it was filled without a word (`applyField` in `facebook/fillForm.js`).
+7. `ca8c14a` **A Dealer Inspire inventory search is given up after 20 seconds** and the scan says so, instead of waiting forever (`searchInPage` in `adapters/dealerInspire.js`).
+8. `f2951f5` **The side panel's "no dealership name" stop names the route**: click the Lot Current icon in Chrome's toolbar, then Settings, and type the name in Dealership name. The panel has no Settings button (`NO_DEALER_TEXT` in `sidepanel.js`).
+9. `be83a39` **The "found no car links" scan message ends with the next step**: open that page in this window, scan again, and tell the manager if it still finds no cars (`adapters/schemaOrg.js`).
+10. `1fdfb00` **When Chrome refuses the set-up's Allow automatic rescans, the step says rescans stay off and how to ask again**, under the button. A yes takes the line away (`GRANT_REFUSED_TEXT` in `src/wizardSteps.js`, `wizGrant` in `wizard.js`).
+11. `c5274d7` **Repair: the hosted copy of the checks is brought in step.** See 30.2.
+
+### 30.2 The repair (`c5274d7`)
+
+`test/portCheck.test.js` failed after items 2 to 5. It found that `supabase/functions/_shared/guardrails.ts` (the hosted rewrite service's copy of `runGuardrails`) was out of step with the extension:
+
+- The hosted copy never had the affiliation check (`AFFILIATION_CLAIM`). That gap predates this round: a hosted draft could say "Meta Verified" and the hosted check would pass it. The extension still checks every draft before the salesperson sees it.
+- The hosted copy lacked the price-change, claim and digit rules from items 2, 4 and 5.
+- Folding the description (item 5) also folded the price note, which broke the note's own checks: a note with fullwidth digits or a hidden character was reported as missing from the description. The note is now folded at the start of the check, in both copies. Its direction marks are still read as written (`rawNote`), because `noteSteerWords` needs them.
+- `supabase/tests/port-check.mjs` has seven new samples, one for each rule, so a future drift fails `npm test`.
+
+**Deploy note (owner decision):** the hosted copy changed in this round. It runs only after the `rewrite` Supabase function is deployed again. Deploying is a production change, so it waits for Brandon. Until then the service checks drafts with the older rules; the extension's own checks still run on every draft.
+
+### 30.3 Dropped from the audit's first picks, and why
+
+- **R2 and R6 (page caps on scan requests)**: a request-volume policy for the website, and the survey tool shares the same constants (`capConstants`). Owner decision.
+- **R5 (a pilot-number write that fails silently)**: showing the error would put a new message in front of salespeople. Product decision.
+- Replaced with **sp-06, sp-01 and sp-04** (items 8, 9 and 10 above).
+
+### 30.4 Owner decisions this round leaves open
+
+- Whether the daily post cap stops a post when the sync cannot be reached (audit L3: the cap can be exceeded by posting from two computers, a rule 7 breach).
+- R2 and R6: the fixed page caps on scan requests (see 30.3).
+- R5: whether a failed pilot-number write should be shown to the salesperson (see 30.3).
+- R4: the boilerplate share is a fixed 30%. Should it be per website, with an absolute floor (CLAUDE.md "How to work")?
+- Deploy of the `rewrite` function (see 30.2).
+
+### 30.5 Side-panel items not built this round (S-size, copy or focus)
+
+- sp-02: set-up's done banner with zero ready cars does not say where to look (Not ready tab).
+- sp-03: keyboard focus is lost on every set-up Next, Back and Read.
+- sp-05: the disabled Rewrite and Guess buttons explain themselves only in a tooltip.
+- sp-07: the Copy buttons in "Couldn't fill" do not say which field they copy.
+- sp-08: when upkeep cannot open the listing tab, the waiting banner still asks the person to click Edit listing.
+
+### 30.6 How it was checked
+
+- `npm test`: 1948 tests, all pass, at `c5274d7`. The README count (`test/docs.test.js`) moved from 1946 to 1948 with item 10's two tests.
+- Browser flows (`npm run test:e2e`, with `PLAYWRIGHT_BROWSERS_PATH=/tmp/claude-0/pw`): all nine pass at `c5274d7` (popup, post, queue, wizard, upkeep, standard, platforms, panel, branding; 295.8 s).
+- `npm run test:demo` passes; `npm run test:a11y` has no findings; `npm run test:site` has no website findings.
+- `npm run test:stack` was not run here: it needs a local Supabase stack.
+
+### 30.7 Still on Brandon
+
+- The production Supabase drift and its decision (section 25, and HANDOFF section C).
+- The owner decisions in 30.4 and the open items in `plans/2026-10-07-needs-from-brandon.md`.
+- Merge order when he asks: #16, #17, #18, #19, #20, then this round's PR (#21).
+
 ## 11. Quick reference
 ```
 # tests

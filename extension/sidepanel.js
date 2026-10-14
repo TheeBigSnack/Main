@@ -343,7 +343,7 @@ const ctx = () => ({ vehicle: state.vehicle, dealer: state.settings.dealer, sale
 // Every description names the dealership (rule 5): with no dealership name
 // set, no description can, so the form is not opened until one is.
 const dealerNamed = () => Boolean(String((state.settings && state.settings.dealer && state.settings.dealer.name) || '').trim());
-const NO_DEALER_TEXT = "Add your dealership's name in Settings first (Dealership name): every description names the dealership.";
+const NO_DEALER_TEXT = "Add your dealership's name first. Click the Lot Current icon in Chrome's toolbar, then Settings, and type it in Dealership name: every description names the dealership.";
 
 // What fixes the description's stops when every one of them is a number in
 // Settings (rewriteTemplate.js settingNumberProblems): the description must

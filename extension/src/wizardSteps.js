@@ -59,6 +59,9 @@ export function termsSummary(configured = false) {
 // false): no acceptance is asked for or recorded, but the usage numbers the
 // summary names are recorded from the first post all the same, so the note
 // says which of the two waits.
+// The line under the rescan permission step's Allow button after Chrome says no:
+// the rescans stay off, and the button and the popup's Scan still work.
+export const GRANT_REFUSED_TEXT = "Chrome didn't allow automatic rescans, so they stay off. Click Allow automatic rescans to ask again, or Skip for now; the Scan button in the popup still works.";
 export const TERMS_PENDING = 'The Terms of Service and the Privacy Policy are being finalised. Once they are published you can read and accept them in Settings (Terms and privacy); your acceptance is recorded then. The usage numbers above are recorded from your first post.';
 
 const trimSlash = (u) => String(u || '').trim().replace(/\/+$/, '');

@@ -479,6 +479,18 @@ test('"Certified New" is a new car, not a pre-owned one; "Certified Pre-Owned" s
   assert.equal(readCondition('Certified New 2027 Jeep Grand Cherokee Limited'), 'new');
   assert.equal(readCondition('Certified Pre-Owned 2022 Jeep Wagoneer'), 'pre-owned', 'the control: pre-owned stays pre-owned');
   assert.equal(readCondition('Certified 2022 Jeep Wagoneer'), 'pre-owned');
+  // the other word order, and with a dash or a slash between the words, is a new car too
+  assert.equal(readCondition('New Certified'), 'new', 'the other word order');
+  assert.equal(readCondition('New - Certified 2027 Jeep Grand Cherokee'), 'new');
+  assert.equal(readCondition('New/Certified'), 'new');
+  assert.equal(readCondition('new-certified'), 'new', 'as a word in a web address');
+  assert.equal(readCondition('Certified - New'), 'new');
+});
+
+test('a car whose inventory type says "New Certified" never reaches Ready', () => {
+  const plain = { ...vehicle('usedNormal'), name: '2019 Ram 1500 Big Horn', siteTitle: '', readableType: '', urlConditionWord: '' };
+  const newCertified = assessVehicle({ ...plain, inventoryType: 'New Certified' }, MY_STORE);
+  assert.notEqual(newCertified.decision, DECISION.READY);
 });
 
 test('a "Loaner" inventory type is called a loaner in the reason, not a demo', () => {
