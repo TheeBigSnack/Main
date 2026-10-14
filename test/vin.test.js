@@ -265,3 +265,15 @@ test('the make is compared without its punctuation and spacing: "Mercedes Benz" 
   assert.equal(make('Ram', 'CHEVROLET'), 'differ');
   assert.equal(make('Mercedes Benz', 'BMW'), 'differ');
 });
+
+// The local check reads the website's make the same way: a hyphen or a space in it, or in the maker list
+// ('mercedes-benz', 'land rover'), is the same make (localVinCheck's Manufacturer row).
+test('the local manufacturer check reads "Land-Rover" on a Jaguar Land Rover VIN and "Alfa-Romeo" on a Stellantis VIN as the same make; another make still fails', () => {
+  const maker = (vin, make) => localVinCheck({ vin, make, year: 2020 }).checks.find((c) => c.code === 'make').ok;
+  assert.equal(maker('SALGS2RE7LA123456', 'Land-Rover'), true);
+  assert.equal(maker('SALGS2RE7LA123456', 'Land Rover'), true);
+  assert.equal(maker('ZARFAMAN2M7123456', 'Alfa-Romeo'), true);
+  assert.equal(maker('ZARFAMAN2M7123456', 'Alfa Romeo'), true);
+  assert.equal(maker('SALGS2RE7LA123456', 'Ford'), false, 'another make still fails');
+  assert.equal(maker('ZARFAMAN2M7123456', 'Ferrari'), false, 'another make still fails');
+});
