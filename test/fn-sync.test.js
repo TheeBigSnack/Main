@@ -212,7 +212,7 @@ test('sync: a first sync writes the registry, the attempts, the flags and the sc
   assert.equal(a.role, 'salesperson');
   assert.deepEqual(keysOf(a.plan), ['currentPeriodEnd', 'pilotEndsAt', 'seats', 'state']);
   assert.equal(a.postsToday, 2);
-  assert.deepEqual(a.counts, { listingsInserted: 2, listingsUpdated: 0, takenDown: 0, rejected: 0, conflicts: 0, attempts: 1, todoItems: 1, scans: 1 });
+  assert.deepEqual(a.counts, { listingsInserted: 2, listingsUpdated: 0, takenDown: 0, rejected: 0, scanRejected: 0, conflicts: 0, attempts: 1, todoItems: 1, scans: 1 });
   assert.equal(a.listings.length, 2);
   for (const l of a.listings) assert.deepEqual(keysOf(l), LISTING_COLUMNS);
   assert.deepEqual(a.listings.map((l) => l.vin), [VIN(2), VIN(1)], 'newest post first');
@@ -252,7 +252,7 @@ test('sync: an upload never changes another member\'s row or a taken-down row, a
     },
   });
   assert.equal(r.status, 200);
-  assert.deepEqual(r.body.counts, { listingsInserted: 0, listingsUpdated: 0, takenDown: 0, rejected: 0, conflicts: 1, attempts: 0, todoItems: 0, scans: 0 });
+  assert.deepEqual(r.body.counts, { listingsInserted: 0, listingsUpdated: 0, takenDown: 0, rejected: 0, scanRejected: 0, conflicts: 1, attempts: 0, todoItems: 0, scans: 0 });
   assert.deepEqual(fake.rows('listings'), before, 'every row as it was');
   assert.deepEqual(fake.writes('listings'), []);
 
@@ -389,13 +389,13 @@ test('sync: a scan stamped more than 5 minutes ahead of the server is not stored
   // a laptop whose clock runs a month ahead syncs its scan
   const ahead = await sync(handler, TOKEN.u1, { scan: { takenAt: at(30 * 24 * 60), cars: 12, ready: 9, takeDownCount: 0, priceUpdateCount: 0 } });
   assert.equal(ahead.status, 200);
-  assert.deepEqual([ahead.body.counts.rejected, ahead.body.counts.scans], [1, 0]);
+  assert.deepEqual([ahead.body.counts.scanRejected, ahead.body.counts.rejected, ahead.body.counts.scans], [1, 0, 0], 'a scan is counted as a scan, not as a post');
   assert.equal(fake.rows('scan_summaries').length, 0, 'nothing from the future is stored');
   // ten minutes ahead is still too far; four minutes is within the same margin listings get
   const ten = await sync(handler, TOKEN.u1, { scan: { takenAt: at(10), cars: 12, ready: 9 } });
-  assert.deepEqual([ten.body.counts.rejected, ten.body.counts.scans], [1, 0]);
+  assert.deepEqual([ten.body.counts.scanRejected, ten.body.counts.rejected, ten.body.counts.scans], [1, 0, 0]);
   const four = await sync(handler, TOKEN.u1, { scan: { takenAt: at(4), cars: 12, ready: 9 } });
-  assert.deepEqual([four.body.counts.rejected, four.body.counts.scans], [0, 1]);
+  assert.deepEqual([four.body.counts.scanRejected, four.body.counts.scans], [0, 1]);
   assert.equal(fake.rows('scan_summaries').length, 1);
 });
 

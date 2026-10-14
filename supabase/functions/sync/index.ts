@@ -23,7 +23,7 @@
 //   - a listing whose posted_at is more than FUTURE_SKEW_MS ahead of the
 //     server's clock is rejected (counts.rejected): a stamp from the future
 //     would win every merge for ever. So is a scan whose takenAt is that far
-//     ahead (also counted in counts.rejected): it would stay the newest scan
+//     ahead (counted in counts.scanRejected, not as a post): it would stay the newest scan
 //     in the manager view and the owner's usage report until its date came. A price change (updated_at) stamped
 //     that far ahead is written as made at the server's time, and a stored
 //     one that far ahead counts as no change time at all (the posting time
@@ -420,7 +420,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const u = ms(r.updated_at);
     return (u !== null && u <= latest ? u : ms(r.posted_at)) ?? 0;
   };
-  const counts = { listingsInserted: 0, listingsUpdated: 0, takenDown: 0, rejected: sentListings.length - incoming.length, conflicts: 0, attempts: 0, todoItems: 0, scans: 0 };
+  const counts = { listingsInserted: 0, listingsUpdated: 0, takenDown: 0, rejected: sentListings.length - incoming.length, scanRejected: 0, conflicts: 0, attempts: 0, todoItems: 0, scans: 0 };
 
   try {
     // 1. the registry: new posts go in, unless another member has the VIN
@@ -660,7 +660,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     //    later accepts a held-back read and it comes again unmarked with the
     //    same time, the stored row stays marked withheld until a newer scan
     const scan = scanRow(body.scan, membership.dealership.website_origin, dealershipId);
-    if (scan && (ms(scan.taken_at) ?? 0) > latest) counts.rejected += 1;
+    if (scan && (ms(scan.taken_at) ?? 0) > latest) counts.scanRejected += 1;
     else if (scan) {
       must(await client.from('scan_summaries').upsert(scan, { onConflict: 'dealership_id,website_origin,taken_at', ignoreDuplicates: true }), 'could not record the scan');
       counts.scans = 1;
