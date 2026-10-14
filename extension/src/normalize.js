@@ -194,6 +194,14 @@ const within = (hay, part) => Boolean(hay && part && part.length >= MIN_PART && 
  * @param {string[]} locations  the lot's store names (storeNames(vehicles))
  */
 export function matchStore(site, locations) {
+  const m = storeMatchRule(site, locations);
+  return m ? m.store : null;
+}
+
+// The store matchStore picks, and the rule that picked it: 'name' (the store's name is the website's name), 'site'
+// (the website's name, page title or host is in the store's name, or the store's name in the website's name), or
+// 'town' (the store's own part is the website's town, or sits in its name or host). Null when no one rule picks one store.
+export function storeMatchRule(site, locations) {
   const stores = [...new Set((locations || []).filter((l) => typeof l === 'string' && l.trim()))];
   if (!site || !stores.length) return null;
   const name = compact(site.name);
@@ -205,9 +213,10 @@ export function matchStore(site, locations) {
     (st) => [name, title, host].some((t) => within(t, compact(st))) || within(compact(st), name),
     (st) => { const own = compact(shortLocation(st, stores)); return (Boolean(city) && own === city) || within(name, own) || within(host, own); },
   ];
-  for (const rule of rules) {
+  const RULES = ['name', 'site', 'town'];
+  for (const [i, rule] of rules.entries()) {
     const hits = stores.filter(rule);
-    if (hits.length === 1) return hits[0];
+    if (hits.length === 1) return { store: hits[0], rule: RULES[i] };
   }
   return null;
 }

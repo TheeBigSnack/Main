@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildTemplateDescription, runGuardrails, pickFeatures, numbersIn, wordCount, ensureVinLine, stripVin, WORD_LIMITS } from '../extension/src/rewriteTemplate.js';
+import { buildTemplateDescription, runGuardrails, pickFeatures, numbersIn, wordCount, ensureVinLine, stripVin, signOffLine, WORD_LIMITS } from '../extension/src/rewriteTemplate.js';
 import { vehicle } from './helpers.js';
 import { assessVehicle, DECISION } from '../extension/src/classify.js';
 
@@ -146,6 +146,10 @@ test('a price note quoting a fee amount must match the gap between the two price
   const wrongTied = ctx(v, { priceNote: 'Price includes the $500 doc fee; tax, tags and a $55 title fee extra.' });
   const t3 = runGuardrails(buildTemplateDescription(wrongTied), wrongTied);
   assert.ok(t3.problems.some((p) => p.code === 'price-note-amount' && /\$500/.test(p.text)), JSON.stringify(t3.problems));
+  // a fee typed with a space after the dollar sign ("$ 500") is the same amount, so it is checked too
+  const spaced = ctx(v, { priceNote: 'Price includes the $ 500 doc fee; tax and tags extra.' });
+  const s = runGuardrails(buildTemplateDescription(spaced), spaced);
+  assert.ok(s.problems.some((p) => p.code === 'price-note-amount' && /\$500/.test(p.text)), JSON.stringify(s.problems));
   // no second price on this car: nothing to compare the note with, so it passes
   const single = vehicle('usedNormal', { extra_fields: { lightning: { pricing: { high: false } } } });
   const c = ctx(single, { priceNote: 'Price includes the $500 doc fee; tax and tags extra.' });
@@ -1447,7 +1451,7 @@ test('guardrails catch a description that claims a Facebook or Meta partnership 
   const v = vehicle('usedNoCarfax');
   const base = buildTemplateDescription(ctx(v));
   const codes = (text, c = ctx(v)) => runGuardrails(text, c).problems.map((p) => p.code);
-  for (const line of ['Facebook partner dealership.', 'Meta Verified dealer.', 'Partnered with Meta.', 'Endorsed by Facebook.', 'An approved Facebook seller.', 'Official Facebook dealer.']) {
+  for (const line of ['Facebook partner dealership.', 'Meta Verified dealer.', 'Partnered with Meta.', 'Endorsed by Facebook.', 'An approved Facebook seller.', 'Official Facebook dealer.', 'Facebook Verified dealer.', 'Verified by Meta.', 'Certified by Facebook.', 'Facebook recommended seller.', 'Recognized by Meta.', 'Sanctioned by Facebook.']) {
     assert.ok(codes(base + '\n' + line).includes('affiliation'), line);
   }
   assert.deepEqual(codes(base + '\nListed on Facebook Marketplace, and sold on Facebook.'), [], 'a plain name and the certified word are not a claim');
@@ -1465,4 +1469,24 @@ test('a dealership whose own name holds a banned phrase is not blocked by that n
   // a name that is only a word of a phrase does not switch the check off for the phrase's other words
   const short = { ...c, dealer: { ...DEALER, name: 'Best Motors' } };
   assert.ok(codes(buildTemplateDescription(short) + '\nThe best deal in town.', short).includes('banned-phrase'), 'Best Motors does not hide best deal');
+});
+
+test('a dealership name that already ends in a period is not followed by a second one in the sign-off, lot or visit lines', () => {
+  assert.equal(signOffLine('Sam', 'Sales Manager', 'Example Motors Inc.'), "I'm Sam, Sales Manager at Example Motors Inc.");
+  assert.equal(signOffLine('', 'Sales Manager', 'Example Motors Inc.'), 'Sales Manager at Example Motors Inc.');
+  assert.equal(signOffLine('Sam', 'Sales Manager', 'Example Motors'), "I'm Sam, Sales Manager at Example Motors.");
+  const v = vehicle('usedNormal');
+  const inc = { dealer: { ...DEALER, name: 'Example Motors Inc.' } };
+  const text = buildTemplateDescription(ctx(v, inc));
+  assert.equal(text.includes('..'), false, 'no doubled period anywhere in the description');
+  assert.ok(text.includes('Example Motors Inc.'), 'the name is still said as typed');
+});
+
+test('a number that only the lot-wide footer of every car carries is not in this car\'s source, so an edit that adds it is caught', () => {
+  // every car's write-up ends with the same footer; the rate is the lot's, not this car's
+  const v = vehicle('usedNormal', { description: 'Clean one owner SUV, well kept.\nAPR 3.9% for 72 months.' });
+  const c = ctx(v, { boilerplate: ['APR 3.9% for 72 months.'] });
+  const edited = buildTemplateDescription(c) + ' A special 3.9% rate for 72 months.';
+  const g = runGuardrails(edited, c);
+  assert.ok(g.problems.some((p) => p.code === 'unknown-number' && /3\.9/.test(p.text)), JSON.stringify(g.problems));
 });

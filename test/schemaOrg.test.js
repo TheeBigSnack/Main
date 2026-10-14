@@ -947,7 +947,8 @@ test('the gate: a demo or loaner word only the page title has is read, with the 
       assert.equal(v.siteTitle, title, `${name} / ${title}: the page title is the title the gate reads`);
       const r = assessVehicle(v, {});
       assert.equal(r.decision, DECISION.REVIEW, `${name} / ${title}`);
-      assert.match(r.reason, /^Listed as pre-owned but also flagged as a demo\. Demos and loaners are usually sold as new/, `${name} / ${title}`);
+      // the reason names the word the title gave: a loaner word says loaner, any other says demo
+      assert.match(r.reason, new RegExp(`^Listed as pre-owned but also flagged as a ${/\bloaner\b/i.test(title) ? 'loaner' : 'demo'}\\. Demos and loaners are usually sold as new`), `${name} / ${title}`);
     }
     // a name that says demo itself is kept
     assert.equal(flat({ name: 'Demo 2019 Honda Civic EX' }, shown(undefined, { ...carfax, title })).siteTitle, 'Demo 2019 Honda Civic EX', title);
@@ -1072,4 +1073,12 @@ test('price: a footnote in brackets or a mark with a number after a guide\'s or 
   // a footnote after the selling price's own words changes nothing either
   assert.equal(at('Internet Price (1) $24,995').value, 24995);
   assert.equal(at('Our Price *1 $24,995').value, 24995);
+});
+
+test('price: a figure a reference word follows is a reference too, so the markup price that equals it is not the car\'s', () => {
+  const at = (price, text) => priceFromOffers(car({ offers: { '@type': 'Offer', price, priceCurrency: 'USD' } }), shown(text)).value;
+  // the markup says $24,995 and the page's sale price is $22,995: $24,995 comes after the words that make it a reference
+  for (const text of ['Sale price $22,995 $24,995 MSRP', 'Now $23,995. $24,995 retail value', 'Now $23,995 $24,995 sticker']) assert.equal(at(24995, text), null, text);
+  // "was" after a figure marks the NEXT figure, so the current price before it is still the car's
+  assert.equal(at(23995, 'Now $23,995 was $24,995'), 23995);
 });

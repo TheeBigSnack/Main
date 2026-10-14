@@ -1384,7 +1384,8 @@ test('schemaOrg getDetails: the car\'s own page from the address the last scan k
   assert.equal(schemaOrg.normalize(d2.record).descriptionRaw.length > 0, true, 'read from its page, description included');
   assert.deepEqual(viaList.calls, [LIST, LIST + '?page=2', O + cars[5].path]);
   siteMap.set(O + cars[5].path, httpError(404));
-  assert.deepEqual((await schemaOrg.getDetails(fakeSiteSearch(siteMap), cars[5].vin, { ...schemaOrg.scanOptions(SERVICE), url: O + cars[5].path })).record, null, 'its page is gone: so is the car');
+  // its page is gone, but the list still shows the car, so the list decides: it is not called gone (the car gone from both is below)
+  assert.equal(schemaOrg.normalize((await schemaOrg.getDetails(fakeSiteSearch(siteMap), cars[5].vin, { ...schemaOrg.scanOptions(SERVICE), url: O + cars[5].path })).record).vin, cars[5].vin, 'the list still shows it');
   siteMap.set(O + cars[5].path, httpError(429));
   const blocked = await schemaOrg.getDetails(fakeSiteSearch(siteMap), cars[5].vin, { ...schemaOrg.scanOptions(SERVICE), url: O + cars[5].path });
   assert.equal(blocked.ok, false);
@@ -1980,4 +1981,35 @@ test('a car with no description reads as no description (null), not an empty tex
   const url = STANDARD_ORIGIN + sample.path;
   assert.equal(schemaOrg.normalize({ node: { ...standardCarNode(sample), description: '' }, url }).descriptionRaw, null);
   assert.notEqual(schemaOrg.normalize({ node: standardCarNode(sample), url }).descriptionRaw, null, 'a described car keeps its text');
+});
+
+test('schemaOrg scan: a list whose own count is higher than the car pages it links, with no sitemap, is not a complete read', async () => {
+  const cars = standardCars(24);
+  const site = standardSite({ cars, perPage: 24, numberOfItems: 108 });
+  const res = await schemaOrg.scan(fakeSiteSearch(site), schemaOrg.scanOptions(SERVICE));
+  assert.deepEqual([res.ok, res.total, res.complete], [true, 24, false], 'the 84 cars the list counts but does not link are said to be missing');
+});
+
+test('schemaOrg post-time check: a kept car address that answers 404 is not "gone" until the list is read too', async () => {
+  const cars = standardCars(6);
+  const site = standardSite({ cars, perPage: 6 });
+  // the dealership moved the car after the last scan: its old address answers 404, the list has it at its new one
+  const old = O + '/used-vehicles/moved-car/';
+  site.set(old, { ok: false, status: 404, contentType: 'text/html', text: '<html><head><title>Page not found</title></head><body>Page not found</body></html>' });
+  const found = await schemaOrg.getDetails(fakeSiteSearch(site), cars[0].vin, { origin: O, url: old, listUrl: LIST });
+  assert.equal(found.ok, true);
+  assert.equal(schemaOrg.normalize(found.record).vin, cars[0].vin, 'the list shows the car, so it is not reported gone');
+  // a car on neither the old address nor the list is still reported as not on the website
+  const gone = await schemaOrg.getDetails(fakeSiteSearch(site), 'ZZZZZZZZZZZZZZZZZ', { origin: O, url: old, listUrl: LIST });
+  assert.deepEqual([gone.ok, gone.record], [true, null]);
+});
+
+test('probeSiteInPage: a street ending in a word that is also a city is read whole, and a page with two addresses gives none', async () => {
+  // no comma after the street: its suffix ends the street, so "Street" is not the city
+  const suffix = fakeDealerPage({ records: [], withLd: false, bodyText: 'USED CARS\nVisit us at 100 Main Street Waynesburg, PA 15370 today' });
+  assert.deepEqual((await runInPage(suffix, probeSiteInPage)).address, { street: '100 Main Street', city: 'Waynesburg', state: 'PA', zip: '15370', phone: '', source: 'page text' });
+  // two stores' addresses in the page text: whichever comes first is not the dealership's, so the address is left blank
+  const two = fakeDealerPage({ records: [], withLd: false, bodyText: 'Our stores\n200 Main Street, Springfield, OH 43215\n9 Oak Avenue, Columbus, OH 43004' });
+  const blank = (await runInPage(two, probeSiteInPage)).address;
+  assert.ok(!blank.street && !blank.zip && !blank.city, 'no address is read from two');
 });

@@ -73,6 +73,11 @@ test('a color guessed from the photos fills only a blank, and is marked as a gue
 
 test('a branded title in the website text switches the clean-title default off', () => {
   assert.equal(brandedTitleSignal({ descriptionRaw: 'Rebuilt title, runs and drives great.<br>Disclaimer.' }), 'Rebuilt');
+  // the hyphen, the space and the short spelling are the same brand; "rebuildable" stays its own word
+  assert.equal(brandedTitleSignal({ descriptionRaw: 'Re-built title, runs and drives great.' }), 'Re-built');
+  assert.equal(brandedTitleSignal({ descriptionRaw: 'Re built title, runs and drives great.' }), 'Re built');
+  assert.equal(brandedTitleSignal({ descriptionRaw: 'Rebuild title, runs and drives great.' }), 'Rebuild');
+  assert.equal(brandedTitleSignal({ descriptionRaw: 'Rebuildable, clean history.' }), 'Rebuildable');
   assert.equal(brandedTitleSignal({ features: ['Salvage Title'] }), 'Salvage');
   assert.equal(brandedTitleSignal({ descriptionRaw: 'Fog lights, flood lights on the rack, one owner.' }), '');
   assert.equal(brandedTitleSignal({}), '');
@@ -442,4 +447,16 @@ test('a lien in the website\'s words, "Lienholder" or "liens", is a branded titl
   // a denial (lien free) is not a lien, and a word that only starts with lien is not one either
   assert.equal(brandedTitleSignal({ descriptionRaw: 'Lien free, clean history.' }), '', 'a car said to be lien free is not branded');
   assert.equal(brandedTitleSignal({ descriptionRaw: 'Lienient financing on approved credit.' }), '', 'a word that only starts with lien is not a lien');
+});
+
+test('a branded word in the lot-wide footer every car carries is not this car\'s title brand', () => {
+  // the footer every car's write-up ends with names a lemon law; this car's own words say nothing branded
+  const footer = 'Lemon Law rights apply in some states.';
+  const v = vehicle('usedNormal', { description: `Clean one owner SUV, well kept.\n${footer}` });
+  assert.notEqual(brandedTitleSignal({ descriptionRaw: v.descriptionRaw }), '', 'read alone, the footer is a brand');
+  assert.equal(brandedTitleSignal(v, [footer]), '', 'with the scan\'s footer set aside, it is not');
+  assert.equal(buildListingData(v, { boilerplate: [footer] }).fields.cleanTitle, 'yes', 'so the clean default is still ticked');
+  // this car's own line about its title still counts
+  const branded = vehicle('usedNormal', { description: `Rebuilt title, runs great.\n${footer}` });
+  assert.equal(brandedTitleSignal(branded, [footer]), 'Rebuilt');
 });

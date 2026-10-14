@@ -324,6 +324,15 @@ test('"New" in a model name is not read as a new car', () => {
   assert.equal(a.decision, DECISION.READY);
 });
 
+test('a car the website marks sold is not called a sale pending: the blocker says it is marked sold', () => {
+  // the schema.org reader sets statusLabel "Sold" on a SoldOut or OutOfStock offer (schemaOrgNormalize.js)
+  const sold = assessVehicle({ ...vehicle('usedNormal'), statusLabel: 'Sold' }, MY_STORE);
+  assert.deepEqual(sold.blockers.map((b) => b.code), ['sale-pending']);
+  assert.equal(sold.blockers[0].text, 'Marked sold on the website');
+  const pending = assess('usedNormal', { status: 'pend-sale' });
+  assert.equal(pending.blockers[0].text, 'Sale pending');
+});
+
 test('sale pending and in-transit used cars are not ready', () => {
   assert.deepEqual(assess('usedNormal', { status: 'pend-sale' }).blockers.map((b) => b.code), ['sale-pending']);
   assert.deepEqual(
@@ -470,4 +479,14 @@ test('"Certified New" is a new car, not a pre-owned one; "Certified Pre-Owned" s
   assert.equal(readCondition('Certified New 2027 Jeep Grand Cherokee Limited'), 'new');
   assert.equal(readCondition('Certified Pre-Owned 2022 Jeep Wagoneer'), 'pre-owned', 'the control: pre-owned stays pre-owned');
   assert.equal(readCondition('Certified 2022 Jeep Wagoneer'), 'pre-owned');
+});
+
+test('a "Loaner" inventory type is called a loaner in the reason, not a demo', () => {
+  // no loaner flag and no unit word: only the inventory type says it, and the reason names that word
+  const plain = { ...vehicle('usedNormal'), name: '2019 Ram 1500 Big Horn', siteTitle: '', readableType: '', urlConditionWord: '' };
+  const loaner = assessVehicle({ ...plain, inventoryType: 'Loaner' }, MY_STORE);
+  assert.notEqual(loaner.decision, DECISION.READY);
+  assert.equal(loaner.reason, "Loaner unit, sold as new, so it can't go on Marketplace.");
+  const demo = assessVehicle({ ...plain, inventoryType: 'Demo' }, MY_STORE);
+  assert.equal(demo.reason, "Demo unit, sold as new, so it can't go on Marketplace.");
 });

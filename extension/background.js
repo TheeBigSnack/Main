@@ -397,13 +397,15 @@ export async function runRescan(origin, { reason = 'alarm' } = {}) {
   // The notice goes out before the account sync below, which can take a while
   // and can be cut short when Chrome stops the worker; it is never waiting on it.
   let failed = false;
+  // a notice due from a rescan that sends none (the side panel's) is not recorded as told: the next automatic rescan still sends it
+  const unannounced = Boolean(note) && settings.notify !== false && reason !== 'alarm';
   if (note && settings.notify !== false && reason === 'alarm') {
     try {
       await chrome.notifications.create(`lot-sync-${origin}`, { type: 'basic', iconUrl: 'icons/icon128.png', title: note.title, message: `${note.message} (${info.name || origin})`, priority: 0 });
     } catch (e) { failed = true; /* notifications may be blocked; the badge still shows, and the next scan makes the notice again */ }
   }
   try {
-    await updateSites((sites) => withSiteFields(sites, origin, { photoOrigins: out.photoOrigins, lastScan: out.res.fetchedAt, lastAttempt: now, lastError: null, lastReason: reason, lastNotifiedCount: notifiedAfter(known.lastNotifiedCount, count, failed) }));
+    await updateSites((sites) => withSiteFields(sites, origin, { photoOrigins: out.photoOrigins, lastScan: out.res.fetchedAt, lastAttempt: now, lastError: null, lastReason: reason, lastNotifiedCount: notifiedAfter(known.lastNotifiedCount, count, failed || unannounced) }));
   } catch (e) {
     return noteFailure(origin, info, storageErrorText(e), reason);
   }
@@ -439,8 +441,15 @@ function onAlarm(alarm) {
   if (!alarm) return undefined;
   if (alarm.name === RESCAN_ALARM) return rescanDueSites('alarm');
   const origin = originOfSyncRetryAlarm(alarm.name);
-  if (origin) return syncSite(origin);
+  if (origin) return syncRetryFor(origin);
   return undefined;
+}
+
+// A retry set before its website was cleared finds no website: nothing is synced, so the posted list and sync state
+// the clear removed are not rebuilt from the dealership's listings
+async function syncRetryFor(origin) {
+  const sites = await loadSites();
+  return sites[origin] ? syncSite(origin) : undefined;
 }
 
 chrome.alarms.onAlarm.addListener(onAlarm);

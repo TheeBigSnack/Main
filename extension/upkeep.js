@@ -208,9 +208,11 @@ function pageOf(url) {
 // matched.
 export function onListing(seen, { id = '', yourListingsUrl = '', namesakes = 0 } = {}) {
   if (!seen) return false;
-  if (id) return Boolean(seen.matchesId);
-  if (yourListingsUrl && pageOf(seen.url) === pageOf(yourListingsUrl)) return false;
+  // a known id must be in the address, and the page must still be this car: its VIN, or its name and price when no namesake shares the name
+  if (id && !seen.matchesId) return false;
+  if (!id && yourListingsUrl && pageOf(seen.url) === pageOf(yourListingsUrl)) return false;
   if (namesakes !== 0 && !seen.matchesVin) return false;
+  if (id && seen.matchesVin) return true;
   return Boolean(seen.matchesName && seen.matchesPrice);
 }
 
@@ -255,6 +257,14 @@ async function poll(ctx) {
     if (up.kind === 'price') {
       const want = String(Math.round(up.price));
       const boxHasIt = seen.hasPriceBox && seen.priceBoxValue.replace(/\D/g, '') === want;
+      if (boxHasIt && (up.status === 'waiting' || up.stuck)) {
+        // the person typed the price into the box by hand, so it is filled: Update closes the item, and a stuck banner clears
+        up.status = 'filled';
+        up.filledShown = seen.priceBoxValue;
+        up.note = '';
+        up.stuck = false;
+        ctx.render();
+      }
       if (seen.hasPriceBox && !boxHasIt && up.fills < MAX_FILLS && (up.status === 'waiting' || up.status === 'filled')) {
         up.fills += 1;
         const [inj] = await chrome.scripting.executeScript({ target: { tabId: up.tabId }, func: fillPriceInPage, args: [map, up.price] });
@@ -279,7 +289,8 @@ async function poll(ctx) {
       }
       if (up.status === 'filled' && !seen.hasPriceBox && seen.prices.includes(want)) return finish(ctx, 'detected'); // saved: the listing page shows the new price
     } else if (up.kind === 'takeDown') {
-      const changed = (seen.sold && !up.baseline.sold) || (seen.unavailable && !up.baseline.unavailable);
+      // a removed page does not show this car's name; a live page that says "isn't available" in its text still does
+      const changed = (seen.sold && !up.baseline.sold) || (seen.unavailable && !seen.matchesName && !up.baseline.unavailable);
       if (changed) return finish(ctx, 'detected');
     }
   } finally {

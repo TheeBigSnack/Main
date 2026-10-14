@@ -229,3 +229,13 @@ test('a Dealer Inspire record that says it has no photos but lists some has as m
   assert.equal(normalizeVehicle({ ...raw, media: { image_count: 0, images: [] } }).photoCount, 0, 'no photos listed: none');
   assert.equal(normalizeVehicle({ ...raw, media: { image_count: 5, images: ['a.jpg'] } }).photoCount, 5, 'the count the site gives, when it is larger');
 });
+
+test('storeMatchRule says which rule ticked the store: the name, the website\'s name, page title or host, or the town', async () => {
+  const { storeMatchRule } = await import('../extension/src/normalize.js');
+  const GROUP_STORES = ['Ron Lewis CDJR Waynesburg', 'Ron Lewis CDJR Cranberry'];
+  assert.deepEqual(storeMatchRule({ name: 'Ron Lewis CDJR Waynesburg' }, GROUP_STORES), { store: 'Ron Lewis CDJR Waynesburg', rule: 'name' });
+  assert.deepEqual(storeMatchRule({ name: 'Used Cars', title: 'Used Cars | Ron Lewis CDJR Cranberry' }, GROUP_STORES), { store: 'Ron Lewis CDJR Cranberry', rule: 'site' });
+  assert.deepEqual(storeMatchRule({ name: 'Ron Lewis Automotive', title: 'Used | Ron Lewis Automotive', host: 'x.test', address: { city: 'Cranberry' } }, GROUP_STORES), { store: 'Ron Lewis CDJR Cranberry', rule: 'town' });
+  assert.equal(storeMatchRule({ name: 'Ron Lewis Automotive' }, GROUP_STORES), null);
+  assert.equal(matchStore({ name: 'Used Cars', title: 'Used Cars | Ron Lewis CDJR Cranberry' }, GROUP_STORES), 'Ron Lewis CDJR Cranberry', 'matchStore is unchanged');
+});

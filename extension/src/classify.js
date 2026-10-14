@@ -161,7 +161,11 @@ export function checkPreOwned(v) {
 
   const unit = unitWordAfterYear(v);
   if (v.isDemo || v.isLoaner || saying('demo').length || unit) {
-    const what = v.isLoaner || (!v.isDemo && unit && !/demo/i.test(unit.word)) ? 'loaner' : 'demo';
+    // the word the website gave names the kind: the loaner flag, then the unit word after the year, then the inventory type's own words
+    // "Courtesy" stays a demo here, as readCondition reads it; only the word loaner names a loaner
+    const wordKind = (text) => (/\bloaner\b/i.test(String(text || '')) ? 'loaner' : /\b(?:demo|demonstrator|courtesy)\b/i.test(String(text || '')) ? 'demo' : '');
+    const demoCheck = saying('demo')[0];
+    const what = v.isLoaner ? 'loaner' : wordKind(unit && unit.word) || wordKind(demoCheck && demoCheck.detail) || 'demo';
     if (unit) notes.push(`The website's ${unit.where} says "${unit.word}".`);
     // The second condition field backs up the title above; for a demo or
     // loaner it also counts when the title has words of its own, so a car
@@ -227,7 +231,11 @@ function readyBlockers(v, settings = {}) {
   const blockers = [];
   if (!v.photoCount) blockers.push({ code: 'no-photos', text: 'No photos on the website yet' });
   if (!v.price) blockers.push({ code: 'no-price', text: `No price on the website (${v.priceLabel || 'call for price'})` });
-  if (/pend/i.test(v.status || '') || /pending|sold/i.test(v.statusLabel || '')) blockers.push({ code: 'sale-pending', text: 'Sale pending' });
+  // a car the website marks sold ("Sold", not "Sale pending") says so: a deal in progress is not what the label means (src/rescan.js pendingText words it the same way)
+  if (/pend/i.test(v.status || '') || /pending|sold/i.test(v.statusLabel || '')) {
+    const soldNotPending = /\bsold\b/i.test(v.statusLabel || '') && !/pend/i.test(v.statusLabel || '') && !/pend/i.test(v.status || '');
+    blockers.push({ code: 'sale-pending', text: soldNotPending ? 'Marked sold on the website' : 'Sale pending' });
+  }
   if (v.inTransit || (v.availability && !/in.?stock/i.test(v.availability))) blockers.push({ code: 'not-on-lot', text: `Not on the lot yet (${v.availability || 'in transit'})` });
   const myStores = Array.isArray(settings.myStores) ? settings.myStores.filter(Boolean) : [];
   if (myStores.length && v.location && !myStores.includes(v.location)) blockers.push({ code: 'other-store', text: `At ${v.locationShort || v.location}` });

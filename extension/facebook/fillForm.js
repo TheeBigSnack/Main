@@ -456,7 +456,8 @@ export async function fillFormInPage(map, data) {
         await sleep(150);
         const after = displayed(el, spec);
         if (after && norm(after).includes(norm(r.chosen))) return { status: 'filled', shown: after };
-        if (!after || after === before) return { status: 'filled', shown: r.chosen, note: "couldn't read it back; check it on the form" };
+        // an empty read cannot be checked here, so the restore re-check looks at it; a form still showing its old value has not taken the choice
+        if (!after) return { status: 'filled', shown: r.chosen, note: "couldn't read it back; check it on the form" };
         last = { chosen: r.chosen, after };
         await sleep(400);
       }
@@ -849,11 +850,12 @@ export function readListingInPage(map, signs, expect) {
   const body = chunks.join(' ');
   const prices = [...new Set((body.match(/\$\s?[\d,]{3,}/g) || []).map((p) => p.replace(/[^\d]/g, '')))];
   const re = (p) => { try { return new RegExp(p, 'i'); } catch (e) { return null; } };
-  // a status label is a short chunk of its own ("Sold"), never a sentence
-  const soldRe = signs && signs.sold ? re(signs.sold) : null;
+  // a status label is a short chunk of its own ("Sold"), never a sentence: "Not sold separately." is prose, so the sold sign must be the whole chunk
+  const soldRe = signs && signs.sold ? re(`^\\s*(?:${signs.sold})\\s*[.!]?\\s*$`) : null;
   const sold = Boolean(soldRe) && chunks.some((c) => c.length <= 40 && soldRe.test(c));
+  // the removed sign is a short chunk too, never a phrase inside the description's text
   const unavailableRe = signs && signs.unavailable ? re(signs.unavailable) : null;
-  const unavailable = Boolean(unavailableRe) && unavailableRe.test(body);
+  const unavailable = Boolean(unavailableRe) && chunks.some((c) => c.length <= 60 && unavailableRe.test(c));
   // is this the listing the panel is working on?
   const want = expect || {};
   const id = String(want.id || '').replace(/\D/g, '');

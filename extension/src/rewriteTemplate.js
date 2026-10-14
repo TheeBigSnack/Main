@@ -231,11 +231,11 @@ export function numbersIn(text) {
 }
 
 // Numbers the website (and the dealer's own settings) actually contain.
-function sourceNumbers({ vehicle = {}, dealer = {}, priceNote = '', price = null } = {}) {
+function sourceNumbers({ vehicle = {}, dealer = {}, priceNote = '', price = null, boilerplate = [] } = {}) {
   const v = vehicle;
   const bits = [
     v.year, v.make, v.model, v.trim, v.name, v.mileage, v.stock, v.engine, v.transmission, v.drivetrain,
-    v.exteriorColor, v.interiorColor, v.bodyType, v.fuelType, v.price, v.priceBeforeFees, v.descriptionRaw,
+    v.exteriorColor, v.interiorColor, v.bodyType, v.fuelType, v.price, v.priceBeforeFees, writeUpText(v.descriptionRaw, boilerplate),
     ...(Array.isArray(v.features) ? v.features : []),
     priceNote, price, dealer.name, dealer.city, dealer.zip, v.location,
   ];
@@ -505,6 +505,8 @@ const capitalize = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 // The title with its first letter a capital, past any bracket, quote or emoji
 // before it ("(BDC) rep", "“Internet” sales"); a letter whose capital is
 // more than one letter ("ß") is kept, so the title is still said as typed.
+// the text with one full stop at its end: a name that already ends in "Inc." or "Ltd." is not given a second
+const endedSentence = (s) => (/[.!?]$/.test(s) ? s : `${s}.`);
 const sentenceCase = (s) => s.replace(/[\p{L}\p{N}]/u, (c) => (c.toUpperCase().length === c.length ? c.toUpperCase() : c));
 // The sign-off, the line the template puts right after the price note: with
 // no name, the title starts it, so a title the note's sentence check would
@@ -514,9 +516,9 @@ const sentenceCase = (s) => s.replace(/[\p{L}\p{N}]/u, (c) => (c.toUpperCase().l
 // rewrite prompts ask for the same line (backend/rewritePrompt.js).
 export function signOffLine(person, title, dealerName) {
   const at = dealerName ? ` at ${dealerName}` : '';
-  if (person) return `I'm ${person}, ${title}${at}.`;
-  const line = `${sentenceCase(title)}${at}.`;
-  return startsOwnSentence(line, true) ? line : `I'm the ${title}${at}.`;
+  if (person) return endedSentence(`I'm ${person}, ${title}${at}`);
+  const line = endedSentence(`${sentenceCase(title)}${at}`);
+  return startsOwnSentence(line, true) ? line : endedSentence(`I'm the ${title}${at}`);
 }
 
 // The salesperson's role as a description must name it: their title from
@@ -558,7 +560,7 @@ export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson 
     { id: 'features', keep: 'always', site: true, text: features.length ? `Highlights: ${features.join(', ')}.` : '' },
     { id: 'colors', keep: 'optional', site: true, text: colors.length ? `${capitalize(colors.join(', '))}.` : '' },
     { id: 'mech', keep: 'optional', site: true, text: mech.length ? `${mech.join(', ')}.` : '' },
-    { id: 'where', keep: 'always', text: lot ? `Pre-owned and on the lot at ${lot}.` : '' },
+    { id: 'where', keep: 'always', text: lot ? endedSentence(`Pre-owned and on the lot at ${lot}`) : '' },
     { id: 'carfax', keep: 'filler', text: v.carfaxUrl ? 'Carfax report available, just ask.' : '' },
     { id: 'stock', keep: 'filler', text: v.stock ? `Stock number ${v.stock}.` : '' },
     { id: 'vin', keep: 'always', text: v.vin ? `VIN ${String(v.vin).toUpperCase().replace(/[^A-Z0-9]/g, '')}.` : '' },
@@ -569,7 +571,7 @@ export function buildTemplateDescription({ vehicle: v, dealer = {}, salesperson 
     // which then comes back only when the text runs short (the closing line is not counted)
     { id: 'cta', keep: closing ? 'filler' : 'optional', text: 'Message me to set up a test drive or ask a question.' },
     { id: 'more', keep: 'filler', text: 'Happy to send more photos or answer any questions.' },
-    { id: 'visit', keep: 'filler', text: store || dealerName ? `Come take a look in person at ${store || dealerName}.` : '' },
+    { id: 'visit', keep: 'filler', text: store || dealerName ? endedSentence(`Come take a look in person at ${store || dealerName}`) : '' },
     { id: 'reply', keep: 'filler', text: "Message me here on Marketplace and I'll get right back to you." },
     // the last filler names nothing, so a sparse car at a dealership with a short name still reaches the minimum
     { id: 'see', keep: 'filler', text: 'Let me know a good time to come see it.' },
@@ -820,8 +822,8 @@ export const priceNoteNotice = (note, dealer) => priceNoteReasons(note, dealer).
 // between, a comma after any but the last), "only one previous owner", "its
 // sole owner", "its first owner", "owned by one family"; not "One-Touch
 // Windows, Owner's Manual"
-// a claim of a Facebook or Meta partnership, approval, endorsement or verification, in either word order ("Meta Verified", "Facebook partner", "approved by Meta")
-const AFFILIATION_CLAIM = /\bmeta[\s-]+verified\b|\b(?:facebook|meta)[\s-]+(?:partners?|partnership|approved|endorsed|authori[sz]ed|official)\b|\b(?:partnered|partners?|endorsed|approved|authori[sz]ed|official)\s+(?:with\s+|by\s+)?(?:facebook|meta)\b/i;
+// a claim of a Facebook or Meta partnership, approval, endorsement or verification, in either word order ("Meta Verified", "Facebook partner", "approved by Meta", "Facebook Verified", "Verified by Meta")
+const AFFILIATION_CLAIM = /\bmeta[\s-]+verified\b|\b(?:facebook|meta)[\s-]+(?:partners?|partnership|approved|endorsed|authori[sz]ed|official|verified|certified|recommended|sanctioned|recognized)\b|\b(?:partnered|partners?|endorsed|approved|authori[sz]ed|official|verified|certified|recommended|sanctioned|recognized)\s+(?:with\s+|by\s+)?(?:facebook|meta)\b/i;
 const ONE_OWNER = /\b(?:(?:one|1|single)[\s-]+(?:(?:(?!(?:new|next|more|other|of|the|a|an|its|your|lucky)\b)[a-z']+,?[\s-]+){0,2}(?!(?:new|next|more|other|of|the|a|an|its|your|lucky)\b)[a-z']+[\s-]+)?owner(?!['\u2019]s[\s-]+(?:manual|guide|handbook|portal|app)\b)|(?:sole|only|first)[\s-]+owner|owned by (?:one|a single))\b/i;
 
 // "Driven by" the engine is what powers the car, not who drove it ("driven
@@ -1494,7 +1496,8 @@ export function runGuardrails(text, { vehicle = {}, dealer = {}, salesperson = {
   if (words < WORD_LIMITS.min) problems.push({ code: 'too-short', text: `${words} words; needs at least ${WORD_LIMITS.min}` });
   if (words > WORD_LIMITS.max) problems.push({ code: 'too-long', text: `${words} words; the limit is ${WORD_LIMITS.max}` });
 
-  const src = sourceNumbers({ vehicle, dealer, priceNote, price });
+  // the write-up without the lot-wide footer, as the claims read it: a rate every car carries is not this car's number
+  const src = sourceNumbers({ vehicle, dealer, priceNote, price, boilerplate });
   const unknownNumbers = (text) => [...numbersIn(text)].filter((n) => !src.has(n)).map((n) => ({ code: 'unknown-number', text: `"${n}" isn't in the website's data for this car` }));
   const amountProblems = (text) => [...priceAndMileageProblems(text, { vehicle, priceNote, price }), ...bareAmountProblems(text, { vehicle, dealer, priceNote, price }, src)];
   const role = roleOf(salesperson);
@@ -1529,7 +1532,7 @@ export function runGuardrails(text, { vehicle = {}, dealer = {}, salesperson = {
     let tied = amounts.filter((a) => tiedAfter.test(note.slice(a.at + a.text.length)) || tiedBefore.test(note.slice(0, a.at)));
     if (!tied.length && amounts.length === 1) tied = amounts;
     for (const a of tied) {
-      if (a.value !== gap && t.includes(a.text.replace(/\s/g, ''))) problems.push({ code: 'price-note-amount', text: `The price note says $${a.value.toLocaleString('en-US')}, but the website's two prices for this car differ by $${gap.toLocaleString('en-US')}; check the note in Settings` });
+      if (a.value !== gap && t.replace(/\s/g, '').includes(a.text.replace(/\s/g, ''))) problems.push({ code: 'price-note-amount', text: `The price note says $${a.value.toLocaleString('en-US')}, but the website's two prices for this car differ by $${gap.toLocaleString('en-US')}; check the note in Settings` });
     }
   }
   // The note says what the posted price includes or leaves out (a doc fee,

@@ -32,15 +32,30 @@ function missingConfig({ url, anonKey }) {
 
 const jsonHeaders = (anonKey, extra = {}) => ({ 'Content-Type': 'application/json', apikey: String(anonKey || ''), ...extra });
 
+// Each request to the account server is given up after this long, so a stalled one ends the way a dropped network does; the sync's request has the same limit (accountFlow.js postJson)
+export const REQUEST_TIMEOUT_MS = 20 * 1000;
+
+// A signal that aborts after REQUEST_TIMEOUT_MS, and the call that clears its timer once the request is done
+function timedRequest() {
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS) : null;
+  return { signal: controller ? controller.signal : undefined, done: () => clearTimeout(timer) };
+}
+
 async function call(fetchImpl, url, init) {
-  const res = await fetchImpl(url, init);
-  let body = null;
+  const timed = timedRequest();
   try {
-    body = await res.json();
-  } catch {
-    body = null;
+    const res = await fetchImpl(url, { ...init, signal: timed.signal });
+    let body = null;
+    try {
+      body = await res.json();
+    } catch {
+      body = null;
+    }
+    return { status: res.status, ok: res.ok, body };
+  } finally {
+    timed.done();
   }
-  return { status: res.status, ok: res.ok, body };
 }
 
 // The auth server and the database API word their errors differently; this
@@ -338,10 +353,13 @@ export async function createInvite(dealershipId, role = 'salesperson', { url = '
 // them out of the manager view and their extension on every other machine.
 export async function signOut(session, { url = '', anonKey = '', fetchImpl = globalThis.fetch, storage } = {}) {
   if (session && session.accessToken && !missingConfig({ url, anonKey })) {
+    const timed = timedRequest();
     try {
-      await fetchImpl(`${trimSlash(url)}/auth/v1/logout?scope=local`, { method: 'POST', headers: jsonHeaders(anonKey, authHeaders(session)) });
+      await fetchImpl(`${trimSlash(url)}/auth/v1/logout?scope=local`, { method: 'POST', headers: jsonHeaders(anonKey, authHeaders(session)), signal: timed.signal });
     } catch {
-      /* offline: the stored session goes anyway */
+      /* offline or stalled: the stored session goes anyway */
+    } finally {
+      timed.done();
     }
   }
   await clearSession(storage);

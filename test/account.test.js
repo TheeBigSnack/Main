@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import {
   signInWithMagicLink, unanswerableChallenge, verifyOtp, sessionFromHash, exchangeTokenFromUrl, refreshSession, ensureFreshSession, isExpired,
   storeSession, loadSession, clearSession, authHeaders, redeemInvite, createInvite, signOut, decodeJwt, sessionFromTokenResponse, errorText,
-  ACCOUNT_KEY, REFRESH_SKEW_MS,
+  ACCOUNT_KEY, REFRESH_SKEW_MS, REQUEST_TIMEOUT_MS,
 } from '../extension/src/account.js';
 
 const URL_ = 'https://abcdefgh.supabase.co/';
@@ -256,4 +256,21 @@ test('createInvite and signOut', async () => {
   const offline = async () => { throw new Error('offline'); };
   await signOut(session(), { url: URL_, anonKey: ANON, fetchImpl: offline, storage: local });
   assert.equal(await loadSession(local), null);
+});
+
+test('a refresh that stalls is given up after the request timeout, and a sign-out sends its request with one too', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  // a server that never answers: a request ends only when the client aborts it
+  const stalled = (url, init) => new Promise((_, reject) => {
+    init.signal.addEventListener('abort', () => reject(Object.assign(new Error('the request was aborted'), { name: 'AbortError' })));
+  });
+  const session = { accessToken: 'a', refreshToken: 'r' };
+  const refreshing = refreshSession(session, { url: 'https://auth.example.test', anonKey: 'k', fetchImpl: stalled, now: 0 });
+  t.mock.timers.tick(REQUEST_TIMEOUT_MS);
+  await assert.rejects(refreshing, /aborted/, 'a stalled refresh ends, as a dropped network does');
+  let signal = null;
+  const storage = { data: { account: session }, get: async (k) => ({ [k]: storage.data[k] }), set: async (o) => Object.assign(storage.data, o), remove: async (k) => { for (const x of [].concat(k)) delete storage.data[x]; } };
+  const fetchImpl = async (url, init) => { signal = init.signal; return { ok: true, status: 204, json: async () => null }; };
+  await signOut(session, { url: 'https://auth.example.test', anonKey: 'k', fetchImpl, storage });
+  assert.ok(signal instanceof AbortSignal, 'the sign-out request can be aborted');
 });
