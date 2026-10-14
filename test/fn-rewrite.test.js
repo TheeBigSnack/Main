@@ -420,11 +420,22 @@ test('rewrite: the monthly cap sums this month\'s rows of the caller\'s dealersh
   const capped = await rewrite(handler, TOKEN.u1);
   assert.deepEqual([capped.status, capped.body], [429, { ok: false, error: 'monthly cost cap of $1.0005 reached for your dealership; descriptions come from the built-in template until next month' }]);
   assert.equal(net.calls.length, 0, 'no model call at the cap');
-  assert.deepEqual(fake.queries('rewrite_usage', 'select').map((q) => q.range), [[0, 999], [1000, 1999]]);
+  assert.deepEqual(fake.queries('rewrite_usage', 'select').map((q) => q.range), [[0, 999], [1000, 1999], [1001, 2000]], 'a page past the last row answers none, and that is the stop');
   const color = await invoke(handler, { path: 'rewrite/color', token: TOKEN.u1, body: { photos: ['https://img.example.test/1.jpg'] } });
   assert.equal(color.status, 429, '/color is capped too');
   const health = await invoke(handler, { method: 'GET', path: 'rewrite/health', token: TOKEN.u1 });
   assert.deepEqual([health.status, health.body.usd], [200, 1.001], 'the health route still answers, with the month\'s spend');
+});
+
+test('rewrite: the month\'s spend is summed to the last row when the API answers fewer rows than a page', async () => {
+  const row = (dealership_id, cost_usd) => ({ dealership_id, user_id: U1, model: MODEL, cost_usd, kind: 'rewrite' });
+  world({ usage: Array.from({ length: 1001 }, () => row(D1, 0.001)) });
+  fake.maxRows = 400;
+  const handler = await load({ MONTHLY_COST_CAP_USD: '1.0005' });
+  net.calls = [];
+  const capped = await rewrite(handler, TOKEN.u1);
+  assert.equal(capped.status, 429, 'the sum of all 1,001 rows reaches the cap, though no answer carries more than 400');
+  assert.deepEqual(fake.queries('rewrite_usage', 'select').map((q) => q.range), [[0, 999], [400, 1399], [800, 1799], [1001, 2000]]);
 });
 
 test('rewrite: /health answers the documented shape for the caller\'s dealership without an API key; /rewrite then says the key is missing', async () => {

@@ -95,16 +95,19 @@ const monthOf = (d = new Date()): string => d.toISOString().slice(0, 7);
 const monthStart = (d = new Date()): string => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)).toISOString();
 
 // Sums this month's rows in pages (the API answers at most 1,000 rows at a
-// time), so the cap holds however many calls a dealership makes.
+// time), so the cap holds however many calls a dealership makes. Each page
+// starts after the rows the last answer carried and the sum stops on an empty
+// page, so a server that answers fewer rows than a page loses none.
 async function monthSpend(service: SupabaseClient, dealershipId: string): Promise<number> {
   let usd = 0;
   const page = 1000;
-  for (let from = 0; ; from += page) {
+  for (let from = 0; ; ) {
     const { data, error } = await service.from('rewrite_usage').select('cost_usd').eq('dealership_id', dealershipId).gte('at', monthStart()).order('id', { ascending: true }).range(from, from + page - 1);
     if (error) throw new Error('could not read rewrite_usage: ' + error.message);
     const rows: unknown[] = Array.isArray(data) ? data : [];
+    if (!rows.length) break;
     for (const r of rows) usd += Number((isRecord(r) ? r.cost_usd : 0) || 0);
-    if (rows.length < page) break;
+    from += rows.length;
   }
   return usd;
 }

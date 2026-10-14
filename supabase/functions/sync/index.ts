@@ -301,13 +301,16 @@ function rowsOf(res: DbResult, what: string): Row[] {
   return out;
 }
 
-// Every row of a query, page by page.
+// Every row of a query, page by page. The next page starts after the rows the
+// last answer carried, not after PAGE, and the read stops on an empty page: a
+// server that answers fewer rows than PAGE would otherwise skip the rows between.
 async function selectAll(what: string, query: (from: number, to: number) => PromiseLike<DbResult>): Promise<Row[]> {
   const out: Row[] = [];
-  for (let from = 0; ; from += PAGE) {
+  for (let from = 0; ; ) {
     const rows = rowsOf(await query(from, from + PAGE - 1), what);
+    if (!rows.length) break;
     out.push(...rows);
-    if (rows.length < PAGE) break;
+    from += rows.length;
   }
   return out;
 }
