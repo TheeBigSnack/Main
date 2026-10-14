@@ -252,6 +252,13 @@ function page(lang) {
       setCombo('year', p.year);
       document.getElementById('makeWrap').hidden = false;
       for (const id of ['make', 'model', 'vin', 'mileage', 'description']) document.getElementById(id).value = p[id] || '';
+      if (typeof p.cleanTitle === 'boolean') {
+        const box = document.getElementById('cleanTitle');
+        const wasTicked = box.checked;
+        box.checked = p.cleanTitle;
+        // a draft can also land on the box a second after Lot Current ticks it: once, and only when the restore found it unticked
+        if (!wasTicked) box.addEventListener('change', () => { if (box.checked) setTimeout(() => { box.checked = p.cleanTitle; }, 1000); }, { once: true });
+      }
       document.body.dataset.prefilled = '1';
     };
     if (p.late) setTimeout(apply, Number(p.late));
@@ -412,7 +419,9 @@ export function startMockMarketplace(port = 0) {
     if (url.pathname === '/prefill') {
       const base = PREFILLS[url.searchParams.get('name')] || null;
       const late = Number(url.searchParams.get('late') || 0);
-      prefill = base ? { ...base, late } : null;
+      // cleanTitle=1 or 0: the restored draft ticks or unticks the clean-title box (a draft can put the box back the other way)
+      const clean = url.searchParams.get('cleanTitle');
+      prefill = base ? { ...base, late, ...(clean === null ? {} : { cleanTitle: clean === '1' }) } : null;
       res.writeHead(200, { 'content-type': 'text/plain' });
       return res.end(prefill ? `prefill on${late ? ' (late ' + late + 'ms)' : ''}` : 'prefill off');
     }

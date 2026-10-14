@@ -488,7 +488,7 @@ export function normalizeVehicle(node, { url = null, facts = null } = {}) {
     dateInStock: null,
 
     // Text for the description writer
-    descriptionRaw: (list(node.description).find((d) => typeof d === 'string' && d.trim()) || '').trim(),
+    descriptionRaw: (list(node.description).find((d) => typeof d === 'string' && d.trim()) || '').trim() || null,
     features: featuresOf(node),
 
     // Details for the eventual listing

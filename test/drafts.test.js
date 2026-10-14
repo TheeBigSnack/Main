@@ -5,7 +5,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { draftRecord, draftPrice, markDraftPosted, draftPriceUpdate, withPriceUpdate, draftPill, draftScanCar } from '../extension/src/drafts.js';
+import { draftRecord, draftPrice, markDraftPosted, draftPriceUpdate, withPriceUpdate, draftPill, draftScanCar, isOpenDraft, retireDraft } from '../extension/src/drafts.js';
 import { diffScans, markPosted, markPriceUpdated, basisPrice, listingLine, scanCar } from '../extension/src/rescan.js';
 import { syncPayload } from '../extension/src/sync.js';
 import { snapshot, fixtures } from './helpers.js';
@@ -171,4 +171,17 @@ test('the draft\'s pill shows its price, and says when the website\'s price move
   assert.match(draftPill(draft, day1, { markWhere: ' in the popup' }).title, /mark it posted in the popup\.$/);
   // no word of what the website price is when the car is missing from the scan
   assert.equal(draftPill(draft, undefined).text, 'Draft on Facebook at $27,163');
+});
+
+test('a draft whose car was marked posted is retired: it is no open draft, and its record keeps its details; saving it again opens it', () => {
+  const draft = { name: 'Ram', savedAt: '2026-10-11T08:00:00.000Z', price: 27163, basis: 'website' };
+  assert.equal(isOpenDraft(draft), true, 'a saved draft is open');
+  assert.equal(isOpenDraft(undefined), false, 'nothing stored is not a draft');
+  const retired = retireDraft(draft, '2026-10-11T09:00:00.000Z');
+  assert.equal(isOpenDraft(retired), false, 'marked posted: no draft pill any more');
+  const { markedPosted, ...kept } = retired;
+  assert.equal(markedPosted, '2026-10-11T09:00:00.000Z', 'the time it was marked posted is kept');
+  assert.deepEqual(kept, draft, 'the record keeps its name, time and price');
+  const saved = draftRecord({ name: 'Ram', price: 27163, basis: 'website', savedAt: '2026-10-11T10:00:00.000Z' });
+  assert.equal(isOpenDraft(saved), true, 'a draft saved again is open again');
 });

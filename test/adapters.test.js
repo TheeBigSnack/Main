@@ -1546,7 +1546,9 @@ test('scanWithSearch keeps the saved lot-wide lines when a scan did not read eve
   const site = { origin: 'https://x', host: 'x', name: 'Example Motors', title: 't', adapter: 'dealerInspire' };
   const saved = ['Every car gets a 120-point inspection.'];
   // every description read (Dealer Inspire's search always gives them): this scan's lines replace the saved ones
-  const all = await scanWithSearch({ adapter: dealerInspire, search: fakeSearch(records), site, settings: withDefaults({}), boilerplate: saved });
+  // (each car has its own text: a car with no description is not counted as one that was read)
+  const described = records.map((r, i) => ({ ...r, description: `Car ${i} is clean.` }));
+  const all = await scanWithSearch({ adapter: dealerInspire, search: fakeSearch(described), site, settings: withDefaults({}), boilerplate: saved });
   assert.ok(!all.boilerplate.includes(saved[0]));
   // most descriptions not read this time (the scan lists them in descriptionsUnread): the saved lines stay
   const skipped = records.slice(1).map((r) => r.vin.toUpperCase());
@@ -1965,4 +1967,17 @@ test('schemaOrg probe: a used-list link with a view, page size or tracking param
   // a filter that narrows the list is not the used list: the home page it is found on stays the list
   assert.deepEqual(await on('/', { html: home('/used-vehicles/?zip=43215') }), { ...SERVICE, listUrl: O + '/' }, 'a filter by zip');
   assert.deepEqual(await on('/', { html: home('/used-vehicles/?view=grid&amp;make=honda') }), { ...SERVICE, listUrl: O + '/' }, 'a display parameter does not make a make filter a whole list');
+});
+
+test('a car with no description reads as no description (null), not an empty text, on Dealer Inspire and schema.org', () => {
+  const car = records[0];
+  assert.equal(dealerInspire.normalize({ ...car, description: '' }).descriptionRaw, null);
+  assert.equal(dealerInspire.normalize({ ...car, description: '   ' }).descriptionRaw, null);
+  const { description, ...noField } = car;
+  assert.equal(dealerInspire.normalize(noField).descriptionRaw, null);
+  assert.equal(dealerInspire.normalize({ ...car, description: 'Nice car.' }).descriptionRaw, 'Nice car.');
+  const [sample] = standardCars(1);
+  const url = STANDARD_ORIGIN + sample.path;
+  assert.equal(schemaOrg.normalize({ node: { ...standardCarNode(sample), description: '' }, url }).descriptionRaw, null);
+  assert.notEqual(schemaOrg.normalize({ node: standardCarNode(sample), url }).descriptionRaw, null, 'a described car keeps its text');
 });

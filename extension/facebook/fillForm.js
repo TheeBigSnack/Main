@@ -487,6 +487,13 @@ export async function fillFormInPage(map, data) {
     return Date.now() - started;
   }
 
+  // Does a checkbox hold the tick its entry wants? { ok, shown } with shown 'ticked' or 'unticked'.
+  // A box shows no text, so displayed() cannot say what it holds (verifyEntry).
+  function tickHeld(el, entry) {
+    const on = isChecked(el);
+    return { ok: on === (entry.value === 'yes'), shown: on ? 'ticked' : 'unticked' };
+  }
+
   // Does the form still show what we filled? { ok, shown }
   const hasWord = (t, word) => new RegExp('\\b' + escapeRe(word) + '\\b', 'i').test(t);
   function verifyEntry(spec, entry, el) {
@@ -508,6 +515,16 @@ export async function fillFormInPage(map, data) {
 
   result.settledAfterMs = await waitForStableForm();
 
+  // Is what the form shows a value Lot Current put there? A choice shows any
+  // of its labels (formMap.js options: car_truck is "Car/Truck" on the form)
+  // and a number may carry separators (28,995 for 28995). Nothing stored is
+  // never ours, so anything the form shows for it is reported.
+  function shownAsOurs(shown, value, spec) {
+    if (!value) return false;
+    const labels = spec.options && spec.options[value] ? spec.options[value] : [value];
+    return labels.some((label) => norm(shown) === norm(label) || norm(shown).includes(norm(label)) || accepted(shown, label));
+  }
+
   // Anything already in the form that is not ours: another car, most likely
   // a draft Facebook restored. Reported so nothing of it is published by
   // mistake. The location and the dealership defaults are not "another car".
@@ -516,7 +533,7 @@ export async function fillFormInPage(map, data) {
     const el = findFieldNow(spec);
     const shown = el ? displayed(el, spec) : '';
     const ours = fields[spec.key] === null || fields[spec.key] === undefined ? '' : String(fields[spec.key]);
-    if (shown && norm(shown) !== norm(ours) && !(ours && norm(shown).includes(norm(ours)))) {
+    if (shown && !shownAsOurs(shown, ours, spec)) {
       result.preexisting.push({ key: spec.key, label: spec.label, shown: shown.slice(0, 60) });
     }
   }
@@ -559,16 +576,17 @@ export async function fillFormInPage(map, data) {
   for (const entry of [...result.filled, ...retryBlocked]) {
     const wasBlocked = retryBlocked.includes(entry);
     const spec = map.fields.find((f) => f.key === entry.key);
-    if (!spec || spec.kind === 'checkbox' || (!wasBlocked && entry.note && /read it back/.test(entry.note))) continue;
+    if (!spec || (!wasBlocked && entry.note && /read it back/.test(entry.note))) continue;
     const el = findFieldNow(spec);
     if (!el) continue;
-    const v = verifyEntry(spec, entry, el);
+    // a checkbox (the clean-title box) is read by its tick; a draft restored over it can untick it
+    const v = spec.kind === 'checkbox' ? tickHeld(el, entry) : verifyEntry(spec, entry, el);
     if (v.ok && !wasBlocked) continue;
     const was = wasBlocked ? (v.shown || '(empty)') : (v.shown || '(empty)');
     let again = { status: 'blocked' };
     try { again = await applyField(spec, entry, el); } catch (e) { again = { status: 'blocked', reason: String((e && e.message) || e) }; }
     await sleep(300);
-    const v2 = verifyEntry(spec, entry, findFieldNow(spec) || el);
+    const v2 = spec.kind === 'checkbox' ? tickHeld(findFieldNow(spec) || el, entry) : verifyEntry(spec, entry, findFieldNow(spec) || el);
     const held = again.status === 'filled' && v2.ok;
     result.changedAfterFill.push({ key: spec.key, label: spec.label, was, held });
     if (held) {

@@ -1260,3 +1260,20 @@ test('To do: Dismiss on a posted car that needs a look keeps it off until the re
   assert.match(retyped.panel(), new RegExp(`data-kind="takeDown" data-vin="${car.vin}" title="Opens your listing so you can delete it"`));
   assert.equal(retyped.local[k.pilot]?.flags?.length || 0, 0, 'no sold-car flag in the numbers');
 });
+
+test('a car published from a draft and then unmarked goes back to Ready with Post, not the draft pill, and its draft record stays', async () => {
+  const car = vehicle('usedNormal');
+  const drafts = { [car.vin]: { name: car.name, savedAt: new Date().toISOString(), price: car.price, basis: 'website' } };
+  const p = await loadPopup({ local: { [k.settings]: { ...MY_STORE }, [k.drafts]: drafts } });
+  await p.scan();
+  await p.tab('ready');
+  assert.match(p.panel(), /Draft on Facebook/, 'the draft shows its pill before it is marked posted');
+  await p.click('post', { vin: car.vin });
+  assert.ok(p.local[k.posted][car.vin], 'marked posted');
+  await p.click('unpost', { vin: car.vin });
+  assert.deepEqual(p.local[k.posted], {}, 'unmarked');
+  await p.tab('ready');
+  assert.doesNotMatch(p.panel(), /Draft on Facebook/, 'no draft pill for a car that was unmarked');
+  assert.match(p.panel(), new RegExp(`data-action="openPost" data-vin="${car.vin}"`), 'Post is offered');
+  assert.equal(p.local[k.drafts][car.vin].name, car.name, 'the draft record stays, for the day\'s count');
+});

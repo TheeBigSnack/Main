@@ -17,6 +17,18 @@ export function draftRecord({ name, price, basis, savedAt }) {
   return { name, savedAt, price: draftPrice({ price }), basis: basis === 'beforeFees' ? 'beforeFees' : 'website' };
 }
 
+// A draft is open until Mark posted runs on its car. Once it has, the record
+// is retired: it stays (the day's count and the draft's price still read it),
+// but the car shows no draft pill and no Mark posted while it is back on Ready.
+// Saving the car as a draft again writes a new record, which is open.
+export function isOpenDraft(draft) {
+  return Boolean(draft) && typeof draft === 'object' && !draft.markedPosted;
+}
+
+export function retireDraft(draft, at) {
+  return draft && typeof draft === 'object' ? { ...draft, markedPosted: at } : draft;
+}
+
 // The price the draft was filled with; null for a draft saved before drafts
 // kept their price (or anything else that is not a price).
 export function draftPrice(draft) {

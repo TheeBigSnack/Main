@@ -146,14 +146,18 @@ export function localVinCheck(vehicle = {}) {
   const checks = [];
   checks.push({ code: 'format', label: 'VIN format and check digit', ok: format.ok, detail: format.ok ? (format.notes[0] || '17 characters, check digit correct') : format.problems.join('; ') });
 
-  const maker = format.ok ? manufacturerFromVin(vin) : null;
+  // A check-digit typo leaves the rest readable: position 9 carries no weight in the year or the maker code, so those rows still compare what the VIN says.
+  // Only a VIN of the wrong length, or with I, O or Q, cannot be read.
+  const readable = vin.length === 17 && !/[IOQ]/.test(vin);
+  const maker = readable ? manufacturerFromVin(vin) : null;
   // the position-7 year rule holds only for a car or light truck: not for a motorcycle by
   // the website's body style or make, nor for a VIN from a motorcycle maker
   const lightVehicle = readVehicleKind(vehicle).kind === VEHICLE_KIND.CAR_TRUCK && !cycleVin(vin, maker);
-  const readings = format.ok ? modelYearReadings(vin, { lightVehicle }) : [];
+  const readings = readable ? modelYearReadings(vin, { lightVehicle }) : [];
   const said = readings.join(' or ');
   let vinYear = readings.length === 1 ? readings[0] : null;
-  if (!readings.length) checks.push({ code: 'year', label: 'Model year', ok: null, detail: 'could not be read from the VIN' });
+  if (!readable) checks.push({ code: 'year', label: 'Model year', ok: null, detail: 'not checked: the VIN fails the format check' });
+  else if (!readings.length) checks.push({ code: 'year', label: 'Model year', ok: null, detail: 'could not be read from the VIN' });
   else if (typeof vehicle.year !== 'number') checks.push({ code: 'year', label: 'Model year', ok: null, detail: `VIN says ${said}; the website has no year` });
   else if (readings.includes(vehicle.year)) {
     vinYear = vehicle.year;
@@ -161,7 +165,8 @@ export function localVinCheck(vehicle = {}) {
   } else checks.push({ code: 'year', label: 'Model year', ok: false, detail: `VIN says ${said}, the website says ${vehicle.year}` });
 
   const make = String(vehicle.make || '').trim().toLowerCase();
-  if (!maker) checks.push({ code: 'make', label: 'Manufacturer', ok: null, detail: 'this manufacturer code is not in the local list' });
+  if (!readable) checks.push({ code: 'make', label: 'Manufacturer', ok: null, detail: 'not checked: the VIN fails the format check' });
+  else if (!maker) checks.push({ code: 'make', label: 'Manufacturer', ok: null, detail: 'this manufacturer code is not in the local list' });
   else if (!make) checks.push({ code: 'make', label: 'Manufacturer', ok: null, detail: `VIN is from ${maker.group}; the website has no make` });
   else if (maker.makes.some((m) => make === m || make.startsWith(m + ' '))) checks.push({ code: 'make', label: 'Manufacturer', ok: true, detail: `${maker.group}, website's "${vehicle.make}" agrees` });
   else checks.push({ code: 'make', label: 'Manufacturer', ok: false, detail: `VIN is from ${maker.group}, but the website says ${vehicle.make}` });

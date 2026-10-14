@@ -14,6 +14,7 @@ import { basisPrice } from './rescan.js';
 import { sortOrder, sortEntries, filterText, isNew, newDaysOf, dateLine } from './readyList.js';
 import { originsFor } from './rescanSchedule.js';
 import { patternCovers, hostList } from './photoHosts.js';
+import { isOpenDraft } from './drafts.js';
 
 const has = (obj, key) => Boolean(obj) && typeof obj === 'object' && Object.prototype.hasOwnProperty.call(obj, key);
 
@@ -43,7 +44,7 @@ export function readyRows(snapshot, { posted = {}, drafts = {}, settings = {}, f
       price: basisPrice(e, basis),
       isNew: isNew(e, { days, now, posted }),
       line: dateLine(e, { now }),
-      draft: has(drafts, e.vin),
+      draft: isOpenDraft(drafts[e.vin]),
     })),
   };
 }

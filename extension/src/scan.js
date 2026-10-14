@@ -49,11 +49,22 @@ export function probeSiteInPage() {
     return out;
   }
 
+  // The dealership's name from the page title, for a site with no og:site_name: the one part of
+  // the title (split on | or a dash) that is not made of page words (Used, Vehicles for Sale,
+  // Home), or '' when there is not exactly one, so the wizard asks rather than taking
+  // "Used Vehicles" for the name
+  function nameFromTitle(title) {
+    const pageWords = /\b(used|pre-?owned|certified|new|vehicles?|cars?|trucks?|inventory|sales?|for|in|the|and|our|search|home|shop|specials?|financing|welcome|browse|view|all)\b/gi;
+    const parts = String(title || '').split(/\s*[|·•–—]\s*|\s+-\s+/).map((p) => p.trim()).filter(Boolean);
+    const names = parts.filter((p) => p.replace(pageWords, '').replace(/[^a-z0-9]/gi, '').length > 0);
+    return names.length === 1 ? names[0] : '';
+  }
+
   const ogName = document.querySelector('meta[property="og:site_name"]');
   return {
     origin: location.origin,
     host: location.hostname.replace(/^www\./, ''),
-    name: (ogName && ogName.content) || document.title.split('|').pop().trim(),
+    name: (ogName && ogName.content) || nameFromTitle(document.title),
     title: document.title,
     address: readSiteAddress(),
   };

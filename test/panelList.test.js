@@ -159,3 +159,12 @@ test('which website patterns Chrome has not granted: by Chrome\'s own matching, 
   assert.deepEqual(missingOrigins(['http://127.0.0.1:8080/*'], ['http://127.0.0.1/*']), ['http://127.0.0.1:8080/*'], 'not https: reported missing, and Chrome answers the request without a prompt when it is covered');
   assert.deepEqual(missingOrigins(null, ['https://*/*']), []);
 });
+
+test('a car whose draft was marked posted and then unmarked is listed with its Post, not as a draft; an open draft is still listed as one', () => {
+  const s = snap(entry('AAA', { dateInStock: '2026-09-29' }), entry('BBB', { dateInStock: '2026-09-29' }));
+  const drafts = { AAA: { savedAt: '2026-09-30T10:00:00Z', markedPosted: '2026-10-01T10:00:00Z' }, BBB: { savedAt: '2026-09-30T10:00:00Z' } };
+  const row = Object.fromEntries(readyRows(s, { drafts, settings: { newDays: 7 }, now: NOW }).rows.map((r) => [r.vin, r]));
+  assert.equal(row.AAA.draft, false, 'the retired draft is not a draft any more');
+  assert.equal(row.BBB.draft, true, 'an open draft is still listed as one');
+  assert.deepEqual(nextToPost([row.AAA, row.BBB], 5), ['AAA'], '"Post the next N" takes the retired one, not the open draft');
+});

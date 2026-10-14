@@ -260,6 +260,8 @@ try {
   for (let i = 0; i < 300 && (await fillsRecorded()) < 2; i++) await panel.waitForTimeout(100);
   assert.equal(await fillsRecorded(), 2, 'Fill again filled the form again');
   await panel.waitForSelector('#photos.done');
+  // the fields Lot Current filled itself (Vehicle type shows "Car/Truck" for car_truck, Price shows 28,995) are not another car
+  assert.equal(await panel.$('#preexisting'), null, 'Fill again does not call its own fields another vehicle');
   assert.equal(await fb.textContent('#photoCount'), '2 photos', 'Fill again sends no photo a second time');
   assert.match(await panel.textContent('#photos'), /2 of 2 attached/);
   assert.equal(await panel.$('#photosAgain'), null);

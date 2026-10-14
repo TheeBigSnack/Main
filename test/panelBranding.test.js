@@ -440,7 +440,7 @@ function pickView(state) {
     state, usablePhotos, isFacebookServer, settlePick, pickSummary, cropPlan, insetOf, photoNote, brandingSummary,
     esc: (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]),
     photoLimitNow: () => 20, pickLimit: () => 0, pickedPhotos: () => settlePick(state.photoPick, state.vehicle.photos, 0), ordinal: (n) => `${n}th`,
-  }, ['brandingOn', 'brandingNow', 'setBack', 'goesCropped', 'brandingProgressText']);
+  }, ['brandingOn', 'brandingNow', 'setBack', 'goesCropped', 'brandingProgressText', 'shownPick']);
   return fns.photoPickHtml();
 }
 
@@ -616,4 +616,14 @@ test('the review, a re-read that changed the photos, a panel brought back and a 
   assert.match(src, /^const FORM_WAITS_HTML = '<p class="hint" id="formWaits">Open the Marketplace form is ready when the photo check ends, or click Skip the check\.<\/p>';$/m);
   // the pilot numbers record nothing about the photo check (legal/pilot-agreement.md section 2)
   for (const name of ['checkBranding', 'readForBranding', 'stopBranding', 'forTheForm', 'afterBrandingChoice', 'brandingAfterSettings']) assert.doesNotMatch(fnText(name), /pilotNote|notePostStep|noteFill|endPost|beginPost/, `${name} records nothing in the pilot numbers`);
+});
+
+test('a car with more than 20 photos, reviewed before any fill, shows the 20 attachPhotos takes, not 25 of 25', () => {
+  const twentyFive = Array.from({ length: 25 }, (_, n) => `https://img.example.test/a/${n + 1}.jpg`);
+  const state = { vin: 'AAA', vehicle: { vin: 'AAA', photos: twentyFive }, settings: { cropBranding: true }, branding: null, photoOriginals: null, brandingRun: null, photoPick: null, fill: null };
+  const html = pickView(state);
+  assert.match(html, /id="photoPickSummary">20 of 25 photos picked; the form takes 20\.</);
+  assert.doesNotMatch(html, /attached 21st|attached 22nd|attached 25th/, 'no photo past the 20th is shown as attached');
+  assert.match(html, /id="photo-19" data-photo="19" checked/, 'the 20th photo is ticked');
+  assert.doesNotMatch(html, /id="photo-20" data-photo="20" checked/, 'the 21st photo is not');
 });

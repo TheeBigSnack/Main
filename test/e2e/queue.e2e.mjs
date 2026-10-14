@@ -167,7 +167,7 @@ try {
   // ---- 3. The person clicks Publish on car 1; the panel records it and loads car 2 ----
   // Car 2's draft lands late: 9 s after the page opens, over fields already filled
   // (the fill waits for a still form first, then takes several seconds).
-  await dealer.request.get(`${marketOrigin}/prefill?name=honda&late=9000`);
+  await dealer.request.get(`${marketOrigin}/prefill?name=honda&late=9000&cleanTitle=0`);
   await fb1.click('#publish');
   await panel.waitForFunction(() => /Car 2 of 2/.test(document.querySelector('#queueBar')?.textContent || ''), null, { timeout: 40000 });
   // car 2's fuel is assumed (a mild hybrid listed as Hybrid), so the queue waits at review with it shown
@@ -201,6 +201,9 @@ try {
   assert.match(changed, /Facebook changed[\s\S]*after Lot Current filled it/);
   assert.match(changed, /"1HGCV1F30LA000000"|"2020"|"Honda"|"Accord EX-L"/);
   assert.match(changed, /set them again and they held/);
+  // the restored draft unticked the clean-title box Lot Current had ticked: the panel says so, and the box is ticked again
+  assert.match(changed, /Clean title/, 'the clean-title box is named as changed after the fill');
+  assert.equal(await fb2.evaluate(() => document.getElementById('cleanTitle').checked), true, 'the box is ticked again');
   assert.match(changed, /delete that draft on Facebook/);
   assert.doesNotMatch(await panel.textContent('#panel'), /Couldn't fill/);
   await panel.screenshot({ path: join(shots, 'queue-2b-restored-draft-warning.png'), fullPage: true });
