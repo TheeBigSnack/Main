@@ -398,7 +398,11 @@ export function upkeepHtml() {
   if (up.status === 'checking') body = `<p id="priceChecking">Checking this car's price on the website first…</p>`;
   else if (up.status === 'stopped') body = `<div class="banner warn" id="upkeepStopped">${esc(up.note)}</div>`;
   else if (up.status === 'opening') body = '<p>Opening your listing…</p>';
-  else if (up.status === 'open-failed') body = `<p class="hint" id="upkeepOpenFailed">${up.kind === 'price' ? 'Open the listing yourself, with the link above, and change the price there by hand. Then click <b>I updated it</b>.' : 'Open the listing yourself, with the link above, and click Mark as sold or Delete there. Then click <b>I took it down</b>.'}</p>`;
+  else if (up.status === 'open-failed') {
+    // the link above is drawn only with a saved listing link; without one the listing is in Your listings, under its name
+    const where = up.listingUrl ? 'with the link above' : `from Your listings on Marketplace (${esc(up.name)} is there)`;
+    body = `<p class="hint" id="upkeepOpenFailed">${up.kind === 'price' ? `Open the listing yourself, ${where}, and change the price there by hand. Then click <b>I updated it</b>.` : `Open the listing yourself, ${where}, and click Mark as sold or Delete there. Then click <b>I took it down</b>.`}</p>`;
+  }
   else if (up.status === 'gone') body = '<div class="banner warn">The listing tab was closed. Did you finish?</div>';
   else if (up.status === 'done') body = `<div class="banner good" id="upkeepDone">Done. ${esc(up.note)}</div>`;
   else if (up.kind === 'price') {
