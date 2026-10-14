@@ -473,7 +473,9 @@ export function describeSync(r) {
     const posts = (n) => `${n} of your posts ${n === 1 ? 'was' : 'were'} not shared with your dealership`;
     const colleague = c.conflicts > 0 ? ` ${posts(c.conflicts)}: a colleague already has ${c.conflicts === 1 ? 'that car' : 'those cars'} listed (My listings shows which).` : '';
     const clock = c.rejected > 0 ? ` ${posts(c.rejected)}: ${c.rejected === 1 ? 'its' : 'their'} posting time is ahead of the server's clock, so check this computer's date and time.` : '';
-    return `Synced${who}${role}: ${r.listed} listing${r.listed === 1 ? '' : 's'} shared, ${sent} of yours sent${down}.${colleague}${clock}`;
+    // a scan stamped that far ahead is not saved (supabase sync counts it as scanRejected), and is no post
+    const scan = c.scanRejected > 0 ? ` Your scan was not saved: its time is ahead of the server's clock, so check this computer's date and time.` : '';
+    return `Synced${who}${role}: ${r.listed} listing${r.listed === 1 ? '' : 's'} shared, ${sent} of yours sent${down}.${colleague}${clock}${scan}`;
   }
   if (r.notConfigured) return r.error || NOT_CONFIGURED;
   if (r.code === LAPSED_CODE || r.lapsed) return `Not synced: ${r.error || LAPSED_MESSAGE}.`;

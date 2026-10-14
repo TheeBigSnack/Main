@@ -1334,6 +1334,41 @@ Change made: the branding flow now says what the Ready tab showed when `#pickAll
 - The round-5 list stands (section 30.7): the production Supabase drift decision (section 25 and HANDOFF section C), the redeploy of the `rewrite` function for the hosted guard's parity (30.2), and the owner decisions in 30.4.
 - Merge order when he asks: #16, #17, #18, #19, #20, #21, then this round's PR (#22).
 
+## 32. The third ten-improvements round, round 7 (2026-10-14, branch `claude/project-thread-ofbx1q-round7`, based on the default branch `claude/fervent-fermi-exkhz9` at `4434e3a`, after #16 to #22 were merged)
+
+The owner's instruction (2026-10-14, "continue improving the app until the session limit is used up"): one PR for the round, one commit per item, each item tested and reviewed, the project rules in `CLAUDE.md` in force, and a message only when the round is finished or blocked.
+
+The items came from an audit of the whole project. Each finding was checked against the code before it was changed, and each change was test first: the new test was run and failed for the stated reason, then the change was made.
+
+### 32.1 What each commit does
+
+1. `e3e512f` **The make is compared without its case, spaces or punctuation** (`extension/src/vin.js`). The decode writes "MERCEDES-BENZ" and a website "Mercedes Benz"; they now agree.
+2. `f673583` **A doc-fee note is suggested only when two cars agree** (`extension/src/settings.js` `feeGap`). One car is no usual gap; the floor holds on a small lot and a large one alike.
+3. `8fe2e0a` **Days on the lot count only from a stock date that is a calendar date** (`calendarDate` in `extension/src/normalize.js`, used by the Dealer Inspire and inventory-list readers and the Ready list's stored date). `Date.parse("12")` is December 2001 and `Date.parse("Stock #4512")` is year 4512 in V8, so a stock field that is not a date no longer reaches the days-on-lot count.
+4. `caf683f` **A scan stamped ahead of the server's clock counts as a scan, not a post** (`supabase/functions/sync/index.ts` `counts.scanRejected`; `describeSync` in `extension/src/accountFlow.js` says the scan was not saved and to check the computer's date and time).
+5. `e808b5c` **The sign-in check answers 503, not 401, when the auth server cannot be reached** (`supabase/functions/_shared/auth.ts` `requireUser`; the verdict is `_shared/authVerdict.mjs`, tested in `test/authVerdict.test.js`). Only a 4xx from the auth server refuses the token. The extension signs out only on a 401, so an outage keeps the session.
+6. `7324752` **Sync and the monthly rewrite cap read every row whatever the API answers per request** (`selectAll` in `sync/index.ts`, `monthSpend` in `rewrite/index.ts`). Each page starts after the rows the last answer carried and the read stops on an empty page. Before, a server answering fewer rows than a page (400 was seen in the audit) lost the rest without an error. Each read now costs one small request more; the tests that pinned the old page ranges were updated.
+7. `b82cc3e` **The side panel's checking view has a Back button for a single post** (`viewChecking` in `extension/sidepanel.js`). Back leaves the check the way Back does from the blocked view. A queued car keeps the queue bar's Stop queue. `test/e2e/panel.e2e.mjs` presses Back while the mock dealer site answers three seconds late (`/search-delay` in `test/e2e/mock-dealer-site.mjs`), then checks the list is back and nothing is said about the car.
+8. `603b69d` **The set-up's scan step warns when the website gave no used car** (`scanLine` in `extension/src/wizardSteps.js`). It had shown "0 used cars read" in a good banner.
+9. `496d0a8` **Upkeep says when its listing tab has moved off Marketplace** (`unreadTabNote` in `extension/upkeep.js`). The poll's failed read of a tab that still existed used to leave the panel with no reason. A tab whose address Chrome hides (the extension has no `tabs` permission) is said to maybe have moved.
+10. `ecf9a12` **The open-failed hint names Your listings when no listing link was saved** (`upkeepHtml`). It said "with the link above", but no link is drawn without a saved one.
+
+### 32.2 How it was checked
+
+- `npm test`: 1969 of 1969 at `ecf9a12`. The README count (`test/docs.test.js`) is 1969.
+- Browser flows, run one at a time with `PLAYWRIGHT_BROWSERS_PATH` pointing at a scratch directory whose `chromium-1243/chrome-linux64/chrome` links to the pre-installed `/opt/pw-browsers/chromium-1194` build (Playwright in this repo expects 1243, which is not installed here). The panel, wizard and upkeep flows passed after the change that touched each. The full nine-flow run is in 32.4.
+- Not run here: `npm run test:stack` (needs a local Supabase stack), and the Deno type check of the two Edge Functions (not installed here). The changed TypeScript is small; CI and a deploy check are the real test.
+
+### 32.3 Not done in this round
+
+- Queued cars have no Back on the checking view (their queue bar has Stop queue). This is deliberate, not an oversight.
+- The branding flake (section 31.3) is unchanged: not fixed, not explained.
+
+### 32.4 Still on Brandon
+
+- Everything in 31.4 stands: the production Supabase drift decision (section C), whether the Supabase GitHub integration applies migrations on merge (D.1), the redeploy of the `rewrite` function for the hosted guard's parity, and the owner decisions in 30.4.
+- Merge order when he asks: #16 to #22 are merged; then this round's PR, based on the default branch.
+
 ## 11. Quick reference
 ```
 # tests

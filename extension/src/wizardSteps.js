@@ -65,6 +65,14 @@ export function readyLine(ready) {
   if (!(ready > 0)) return 'No car is ready yet. Click the Lot Current icon and open <b>Not ready</b> to see why each one is held back.';
   return `${ready} car${ready === 1 ? ' is' : 's are'} ready to post. Click the Lot Current icon and open <b>Ready to post</b>.`;
 }
+// The scan step's line under the Read button (wizard.js): the cars and stores the read found, in a good banner; or,
+// when the website's used inventory gave no car at all, a warning in its place. Set-up can go on from there, but no
+// car is ready to post until a scan reads some, so the step must not show zero cars as a result.
+export function scanLine({ cars = 0, siteName = '', stores = [] } = {}) {
+  const name = siteName || 'the website';
+  if (!(cars > 0)) return { tone: 'warn', text: `No used cars were read from ${name}. Set-up can go on, but no car can be posted until a scan reads some.` };
+  return { tone: 'good', text: `${cars} used cars read from ${name}. ${stores.length} store${stores.length === 1 ? '' : 's'} found.` };
+}
 // The control that gets the keyboard focus back when the set-up step is drawn
 // again (sidepanel.js refocusWizard): the one that had it, when the step still
 // draws its id; else the step's Next button (Read is gone once the scan is

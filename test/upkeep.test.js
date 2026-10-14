@@ -16,7 +16,7 @@ import assert from 'node:assert/strict';
 import { readListingInPage, fillPriceInPage } from '../extension/facebook/fillForm.js';
 import { LISTING_SIGNS } from '../extension/facebook/listingSigns.js';
 import { FORM_MAP } from '../extension/facebook/formMap.js';
-import { onListing, listingIdFrom, startUpkeep, endUpkeep, up, namesakesOf, namesakesNow, offTargetNote, upkeepHtml, handleUpkeepClick } from '../extension/upkeep.js';
+import { onListing, listingIdFrom, startUpkeep, endUpkeep, up, namesakesOf, namesakesNow, offTargetNote, unreadTabNote, upkeepHtml, handleUpkeepClick } from '../extension/upkeep.js';
 import { noteTakenDown } from '../extension/src/takenDown.js';
 import { siteKeys } from '../extension/src/storageKeys.js';
 import { fakeChrome } from './helpers.js';
@@ -528,4 +528,31 @@ test('when Chrome cannot open the listing tab, upkeep says so and asks for the l
     endUpkeep();
     delete globalThis.chrome;
   }
+});
+
+// What the poll says when the listing tab cannot be read (upkeep.js poll): a tab that has moved off Marketplace is said so,
+// because Lot Current reads a listing only on a Marketplace page; on a Marketplace page the read is simply tried again;
+// with no address to see (Chrome hides it outside the Marketplace permission), it says the tab may have moved.
+test('a listing tab that has moved off Marketplace is said so; one still on Marketplace is tried again; one with no address is said to maybe have moved', () => {
+  const name = '2019 Ram 1500 Classic';
+  const moved = unreadTabNote('https://www.facebook.com/home', name);
+  assert.match(moved, /^The listing tab isn't on Facebook Marketplace any more, so Lot Current can't read the listing for 2019 Ram 1500 Classic\./);
+  assert.match(moved, /Open that listing again and it continues\.$/);
+  assert.equal(unreadTabNote('https://www.facebook.com/marketplace/item/123/', name), '', 'on Marketplace, nothing is said: the next read tries again');
+  assert.match(unreadTabNote(undefined, name), /^The listing tab may have moved off Facebook Marketplace, so Lot Current can't read the listing for 2019 Ram 1500 Classic right now\./);
+});
+
+// The open-failed hint (upkeepHtml): with a saved listing link it says the link above; with none, the link is not drawn, so the
+// hint names Your listings and the car in it instead (the link above is then no link at all).
+test('an open-failed listing with no saved link says to open it from Your listings, not from a link above', () => {
+  const failed = { status: 'open-failed', vin: 'VIN1', name: '2019 Ram 1500 Classic', error: "Couldn't open the listing: no tab", note: '', why: '', listedPrice: null, price: 19995, listingUrl: '' };
+  Object.assign(up, { ...failed, kind: 'price' });
+  const bare = upkeepHtml();
+  assert.match(bare, /id="upkeepOpenFailed"[^>]*>Open the listing yourself, from Your listings on Marketplace \(2019 Ram 1500 Classic is there\), and change the price there by hand\./);
+  assert.doesNotMatch(bare, /with the link above/, 'no link is drawn above, so none is named');
+  Object.assign(up, { kind: 'takeDown' });
+  assert.match(upkeepHtml(), /Open the listing yourself, from Your listings on Marketplace \(2019 Ram 1500 Classic is there\), and click Mark as sold or Delete there\./);
+  Object.assign(up, { kind: 'price', listingUrl: 'https://www.facebook.com/marketplace/item/123/' });
+  assert.match(upkeepHtml(), /Open the listing yourself, with the link above, and change the price there by hand\./, 'with a saved link, the link above is named');
+  Object.assign(up, { status: 'idle', error: '', listingUrl: '' });
 });

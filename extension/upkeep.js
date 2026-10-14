@@ -216,6 +216,16 @@ export function onListing(seen, { id = '', yourListingsUrl = '', namesakes = 0 }
   return Boolean(seen.matchesName && seen.matchesPrice);
 }
 
+// What the poll says when it cannot read the listing tab (executeScript failed): a tab that has moved off Marketplace
+// is said so, since Lot Current reads a listing only on a Marketplace page; a tab on Marketplace is read again on the
+// next tick (''). Chrome hides a tab's address outside the Marketplace permission, so with no address the words say
+// it may have moved.
+export function unreadTabNote(url, name) {
+  if (!url) return `The listing tab may have moved off Facebook Marketplace, so Lot Current can't read the listing for ${name} right now. Open that listing on Marketplace again and it continues.`;
+  if (/^https:\/\/www\.facebook\.com\/marketplace\//.test(url)) return '';
+  return `The listing tab isn't on Facebook Marketplace any more, so Lot Current can't read the listing for ${name}. Open that listing again and it continues.`;
+}
+
 // Every 1.5 s: read the tab; for a price update, fill the box when it shows
 // up on this car's edit form (again if the loading form overwrites it); for
 // either kind, notice when this car's page shows the change.
@@ -232,7 +242,14 @@ async function poll(ctx) {
       seen = inj && inj.result;
     } catch (e) {
       // the tab closed, or is on a page Lot Current may not read (outside /marketplace/)
-      try { await chrome.tabs.get(up.tabId); } catch (gone) { up.status = 'gone'; stopPolling(); ctx.render(); }
+      let tab = null;
+      try { tab = await chrome.tabs.get(up.tabId); } catch (gone) { up.status = 'gone'; stopPolling(); ctx.render(); return; }
+      const note = unreadTabNote(tab && tab.url, up.name);
+      if (note && (!up.offTarget || up.note !== note)) {
+        up.offTarget = true;
+        up.note = note;
+        ctx.render();
+      }
       return;
     }
     if (!seen) return;
@@ -381,7 +398,11 @@ export function upkeepHtml() {
   if (up.status === 'checking') body = `<p id="priceChecking">Checking this car's price on the website first…</p>`;
   else if (up.status === 'stopped') body = `<div class="banner warn" id="upkeepStopped">${esc(up.note)}</div>`;
   else if (up.status === 'opening') body = '<p>Opening your listing…</p>';
-  else if (up.status === 'open-failed') body = `<p class="hint" id="upkeepOpenFailed">${up.kind === 'price' ? 'Open the listing yourself, with the link above, and change the price there by hand. Then click <b>I updated it</b>.' : 'Open the listing yourself, with the link above, and click Mark as sold or Delete there. Then click <b>I took it down</b>.'}</p>`;
+  else if (up.status === 'open-failed') {
+    // the link above is drawn only with a saved listing link; without one the listing is in Your listings, under its name
+    const where = up.listingUrl ? 'with the link above' : `from Your listings on Marketplace (${esc(up.name)} is there)`;
+    body = `<p class="hint" id="upkeepOpenFailed">${up.kind === 'price' ? `Open the listing yourself, ${where}, and change the price there by hand. Then click <b>I updated it</b>.` : `Open the listing yourself, ${where}, and click Mark as sold or Delete there. Then click <b>I took it down</b>.`}</p>`;
+  }
   else if (up.status === 'gone') body = '<div class="banner warn">The listing tab was closed. Did you finish?</div>';
   else if (up.status === 'done') body = `<div class="banner good" id="upkeepDone">Done. ${esc(up.note)}</div>`;
   else if (up.kind === 'price') {

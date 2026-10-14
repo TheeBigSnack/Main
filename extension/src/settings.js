@@ -27,7 +27,8 @@ export function feeGap(entries) {
   const gaps = new Map();
   for (const e of priced) gaps.set(e.price - e.priceBeforeFees, (gaps.get(e.price - e.priceBeforeFees) || 0) + 1);
   const [gap, count] = [...gaps.entries()].sort((a, b) => b[1] - a[1])[0] || [0, 0];
-  const usual = gap > 0 && count >= priced.length * 0.6;
+  // two cars must agree at least: one car is not a usual gap (the floor holds for a small lot and a large one alike)
+  const usual = gap > 0 && count >= 2 && count >= priced.length * 0.6;
   return { gap: usual ? gap : 0, count, total: priced.length, example: usual ? priced.find((e) => e.price - e.priceBeforeFees === gap) : null };
 }
 

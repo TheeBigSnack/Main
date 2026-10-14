@@ -469,6 +469,8 @@ test('syncOnce: signed out means no request; a first sync sends the whole regist
   // a post the function would not share is named, never passed over
   assert.equal(describeSync({ ...r, counts: { ...r.counts, conflicts: 1 } }), 'Synced with Example Motors as salesperson: 2 listings shared, 1 of yours sent. 1 of your posts was not shared with your dealership: a colleague already has that car listed (My listings shows which).');
   assert.equal(describeSync({ ...r, counts: { ...r.counts, conflicts: 2, rejected: 1 } }), "Synced with Example Motors as salesperson: 2 listings shared, 1 of yours sent. 2 of your posts were not shared with your dealership: a colleague already has those cars listed (My listings shows which). 1 of your posts was not shared with your dealership: its posting time is ahead of the server's clock, so check this computer's date and time.");
+  // a scan stamped ahead of the server's clock is a scan that was not saved, never a post
+  assert.equal(describeSync({ ...r, counts: { ...r.counts, scanRejected: 1 } }), "Synced with Example Motors as salesperson: 2 listings shared, 1 of yours sent. Your scan was not saved: its time is ahead of the server's clock, so check this computer's date and time.");
   // merged into storage
   const merged = storage.data[K.posted];
   assert.deepEqual(Object.keys(merged).sort(), [VIN_A, VIN_C].sort(), 'the colleague\'s Honda arrived');

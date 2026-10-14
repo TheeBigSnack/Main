@@ -2482,3 +2482,11 @@ test('Rule 4: an empty price that says final still holds the car beside a sellin
     }
   }
 });
+
+test('an inventory list date in stock is kept only when it is a calendar date', () => {
+  const [c] = platformCars(1, { from: 1 });
+  const card = { vin: c.vin, year: c.year, make: c.make, model: c.model, link: dealerComPath(c), dateinstock: '12' };
+  assert.equal(normalizeInventoryRecord(card, { origin: DEALERCOM_ORIGIN }).dateInStock, null);
+  assert.equal(normalizeInventoryRecord({ ...card, dateinstock: 'Stock 12' }, { origin: DEALERCOM_ORIGIN }).dateInStock, null);
+  assert.equal(normalizeInventoryRecord({ ...card, dateinstock: '2026-09-21T00:00:00.000Z' }, { origin: DEALERCOM_ORIGIN }).dateInStock, '2026-09-21T00:00:00.000Z');
+});

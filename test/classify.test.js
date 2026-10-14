@@ -502,3 +502,9 @@ test('a "Loaner" inventory type is called a loaner in the reason, not a demo', (
   const demo = assessVehicle({ ...plain, inventoryType: 'Demo' }, MY_STORE);
   assert.equal(demo.reason, "Demo unit, sold as new, so it can't go on Marketplace.");
 });
+
+test('a Dealer Inspire date in stock is kept only when it is a calendar date: "12" and "Stock 12" give no date', () => {
+  assert.equal(normalizeVehicle(raw('usedNormal', { date_in_stock: '2026-09-21T00:00:00.000Z' })).dateInStock, '2026-09-21T00:00:00.000Z');
+  assert.equal(normalizeVehicle(raw('usedNormal', { date_in_stock: '12' })).dateInStock, null);
+  assert.equal(normalizeVehicle(raw('usedNormal', { date_in_stock: 'Stock 12' })).dateInStock, null);
+});

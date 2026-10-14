@@ -137,7 +137,9 @@ export function manufacturerFromVin(vin) {
   return best ? { group: best.group, makes: best.makes } : null;
 }
 
-const same = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+// Two makes agree when they read the same without case, spaces or punctuation: the decode writes "MERCEDES-BENZ", a website "Mercedes Benz".
+const makeKey = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const same = (a, b) => makeKey(a) !== '' && makeKey(a) === makeKey(b);
 
 // Everything that can be checked without the network.
 export function localVinCheck(vehicle = {}) {

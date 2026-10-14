@@ -100,6 +100,22 @@ test('sync: no token and a rejected token are 401; the token is checked with the
   assert.deepEqual([r.status, r.body.error], [500, 'the function is missing SUPABASE_URL or a publishable key (SUPABASE_PUBLISHABLE_KEYS or SUPABASE_ANON_KEY)']);
 });
 
+test('sync: a sign-in check that cannot be reached is 503, not a refused token, so the session is kept; a refusal from the auth server is still 401', async () => {
+  world();
+  const handler = await load();
+  const check = (error) => (c) => (c.kind === 'auth' && c.op === 'getUser' ? { data: { user: null }, error } : undefined);
+  fake.script = check({ message: 'fetch failed' });
+  const down = await sync(handler, TOKEN.u1);
+  assert.deepEqual([down.status, down.body], [503, { ok: false, error: 'the sign-in check could not be reached; try again shortly' }]);
+  fake.script = check({ message: 'upstream timed out', status: 504 });
+  assert.equal((await sync(handler, TOKEN.u1)).status, 503, 'a 5xx from the auth server is an outage too');
+  fake.script = check({ message: 'invalid JWT: token is expired', status: 401 });
+  const expired = await sync(handler, TOKEN.u1);
+  assert.deepEqual([expired.status, expired.body.error], [401, 'sign in again (the token was rejected or has expired)']);
+  fake.script = null;
+  assert.equal((await sync(handler, TOKEN.u1)).status, 200, 'the same token passes once the check answers');
+});
+
 test('sync: a person in no dealership, or in another one, is 403; the origin is matched without case or a trailing slash; none is 400', async () => {
   world();
   const handler = await load();
@@ -212,7 +228,7 @@ test('sync: a first sync writes the registry, the attempts, the flags and the sc
   assert.equal(a.role, 'salesperson');
   assert.deepEqual(keysOf(a.plan), ['currentPeriodEnd', 'pilotEndsAt', 'seats', 'state']);
   assert.equal(a.postsToday, 2);
-  assert.deepEqual(a.counts, { listingsInserted: 2, listingsUpdated: 0, takenDown: 0, rejected: 0, conflicts: 0, attempts: 1, todoItems: 1, scans: 1 });
+  assert.deepEqual(a.counts, { listingsInserted: 2, listingsUpdated: 0, takenDown: 0, rejected: 0, scanRejected: 0, conflicts: 0, attempts: 1, todoItems: 1, scans: 1 });
   assert.equal(a.listings.length, 2);
   for (const l of a.listings) assert.deepEqual(keysOf(l), LISTING_COLUMNS);
   assert.deepEqual(a.listings.map((l) => l.vin), [VIN(2), VIN(1)], 'newest post first');
@@ -252,7 +268,7 @@ test('sync: an upload never changes another member\'s row or a taken-down row, a
     },
   });
   assert.equal(r.status, 200);
-  assert.deepEqual(r.body.counts, { listingsInserted: 0, listingsUpdated: 0, takenDown: 0, rejected: 0, conflicts: 1, attempts: 0, todoItems: 0, scans: 0 });
+  assert.deepEqual(r.body.counts, { listingsInserted: 0, listingsUpdated: 0, takenDown: 0, rejected: 0, scanRejected: 0, conflicts: 1, attempts: 0, todoItems: 0, scans: 0 });
   assert.deepEqual(fake.rows('listings'), before, 'every row as it was');
   assert.deepEqual(fake.writes('listings'), []);
 
@@ -341,8 +357,9 @@ test('sync: dropping more than 100 known posts looks them up and takes them down
   const r = await sync(handler, TOKEN.u1, { known: rows.map((l) => `${l.vin}@${l.posted_at}`) });
   assert.equal(r.body.counts.takenDown, 150);
   assert.ok(fake.rows('listings').every((l) => l.status === 'taken_down'));
+  // each chunk's page is followed by the empty page that ends its read
   const lookups = fake.queries('listings', 'select').filter((c) => c.filters.some((f) => f.column === 'user_id'));
-  assert.deepEqual(lookups.map((c) => c.filters.find((f) => f.op === 'in').value.length), [100, 50]);
+  assert.deepEqual(lookups.map((c) => c.filters.find((f) => f.op === 'in').value.length), [100, 100, 50, 50]);
   assert.deepEqual(fake.writes('listings').map((w) => w.filters.find((f) => f.op === 'in').value.length), [100, 50]);
 });
 
@@ -389,13 +406,13 @@ test('sync: a scan stamped more than 5 minutes ahead of the server is not stored
   // a laptop whose clock runs a month ahead syncs its scan
   const ahead = await sync(handler, TOKEN.u1, { scan: { takenAt: at(30 * 24 * 60), cars: 12, ready: 9, takeDownCount: 0, priceUpdateCount: 0 } });
   assert.equal(ahead.status, 200);
-  assert.deepEqual([ahead.body.counts.rejected, ahead.body.counts.scans], [1, 0]);
+  assert.deepEqual([ahead.body.counts.scanRejected, ahead.body.counts.rejected, ahead.body.counts.scans], [1, 0, 0], 'a scan is counted as a scan, not as a post');
   assert.equal(fake.rows('scan_summaries').length, 0, 'nothing from the future is stored');
   // ten minutes ahead is still too far; four minutes is within the same margin listings get
   const ten = await sync(handler, TOKEN.u1, { scan: { takenAt: at(10), cars: 12, ready: 9 } });
-  assert.deepEqual([ten.body.counts.rejected, ten.body.counts.scans], [1, 0]);
+  assert.deepEqual([ten.body.counts.scanRejected, ten.body.counts.rejected, ten.body.counts.scans], [1, 0, 0]);
   const four = await sync(handler, TOKEN.u1, { scan: { takenAt: at(4), cars: 12, ready: 9 } });
-  assert.deepEqual([four.body.counts.rejected, four.body.counts.scans], [0, 1]);
+  assert.deepEqual([four.body.counts.scanRejected, four.body.counts.scans], [0, 1]);
   assert.equal(fake.rows('scan_summaries').length, 1);
 });
 
@@ -654,7 +671,7 @@ test('sync: every listed row and every page comes back past 1,000 rows; VINs are
   assert.equal(r.body.counts.listingsInserted, 150);
   assert.equal(r.body.listings.length, 1151);
   assert.deepEqual(new Set(r.body.listings.map((l) => l.id)), new Set(fake.rows('listings').map((l) => l.id)), 'every row once, none twice: 1,001 rows share one posted_at, and the pages fit only with the id as the last key');
-  assert.deepEqual(ranges('listings', (f) => f.value === 'listed'), [[0, 999], [1000, 1999]], 'two pages of listed rows');
+  assert.deepEqual(ranges('listings', (f) => f.value === 'listed'), [[0, 999], [1000, 1999], [1151, 2150]], 'two pages of listed rows, then the empty page that ends the read');
   const lookups = fake.queries('listings', 'select').filter((c) => c.filters.some((f) => f.op === 'in'));
   assert.deepEqual(lookups.map((c) => c.filters.find((f) => f.op === 'in').value.length), [100, 50]);
   const again = await sync(handler, TOKEN.u1, { posted });
@@ -677,9 +694,20 @@ test('sync: take-downs, open and closed to-do items past 1,000 rows come back wh
   // the second page from repeating rows of the first and losing others
   assert.deepEqual(new Set(r.body.listings.map((l) => l.vin)), new Set(down.map((l) => l.vin)), 'every take-down once');
   assert.deepEqual(new Set(r.body.todoItems.map((t) => t.vin)), new Set([...open, ...closed].map((t) => t.vin)), 'every open and closed to-do item once');
-  assert.deepEqual(ranges('listings', (f) => f.value === 'taken_down'), [[0, 999], [1000, 1999]]);
-  assert.deepEqual(ranges('todo_items', (f) => f.op === 'is'), [[0, 999], [1000, 1999]]);
-  assert.deepEqual(ranges('todo_items', (f) => f.op === 'not.is'), [[0, 999], [1000, 1999]]);
+  assert.deepEqual(ranges('listings', (f) => f.value === 'taken_down'), [[0, 999], [1000, 1999], [1001, 2000]]);
+  assert.deepEqual(ranges('todo_items', (f) => f.op === 'is'), [[0, 999], [1000, 1999], [1001, 2000]]);
+  assert.deepEqual(ranges('todo_items', (f) => f.op === 'not.is'), [[0, 999], [1000, 1999], [1001, 2000]]);
+});
+
+test('sync: a read goes on from the rows the API actually answered, so a server that answers 400 at a time loses none, and stops on an empty page', async () => {
+  world({ rows: { listings: Array.from({ length: 1001 }, (_, i) => listing({ vin: `OTHER${String(i).padStart(12, '0')}`, user_id: U2, posted_at: at(-3000), created_at: at(-3000) })) } });
+  fake.maxRows = 400;
+  const handler = await load();
+  const r = await sync(handler, TOKEN.u1);
+  assert.equal(r.status, 200);
+  assert.equal(r.body.listings.length, 1001, 'every listed row, though no answer carries more than 400');
+  assert.deepEqual(new Set(r.body.listings.map((l) => l.id)), new Set(fake.rows('listings').map((l) => l.id)), 'every row once');
+  assert.deepEqual(ranges('listings', (f) => f.value === 'listed'), [[0, 999], [400, 1399], [800, 1799], [1001, 2000]], 'each page starts where the last answer ended; the read stops on the empty page');
 });
 
 test('sync: 100 VINs with more than 1,000 to-do rows between them are all found, so an upload of every flag adds none twice', async () => {
@@ -692,7 +720,7 @@ test('sync: 100 VINs with more than 1,000 to-do rows between them are all found,
   assert.equal(r.body.counts.todoItems, 0, 'every flag was found and none changed');
   assert.equal(fake.rows('todo_items').length, 1100);
   const lookups = fake.queries('todo_items', 'select').filter((c) => c.filters.some((f) => f.op === 'in'));
-  assert.deepEqual(lookups.map((c) => c.range), [[0, 999], [1000, 1999]], 'one chunk of 100 VINs, two pages');
+  assert.deepEqual(lookups.map((c) => c.range), [[0, 999], [1000, 1999], [1100, 2099]], 'one chunk of 100 VINs: two pages, then the empty page that ends the read');
 });
 
 test('sync: a refusal from row-level security (42501) is 403 with the reason; any other database error is 500', async () => {

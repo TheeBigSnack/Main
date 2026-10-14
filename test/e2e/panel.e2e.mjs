@@ -201,6 +201,18 @@ try {
   await panel.click('#back');
   await panel.waitForSelector('#panelReady');
 
+  // ---- 3b. Back while the website's answer is still out: the panel goes back to the list, and the late answer changes nothing ----
+  await get('/search-delay?ms=3000');
+  await panel.click(`button[data-post-vin="${WAGONEER}"]`);
+  await panel.waitForFunction(() => /Re-checking/.test(document.getElementById('panel').innerText));
+  await panel.click('#back');
+  await panel.waitForSelector('#panelReady');
+  await panel.waitForTimeout(3500); // the answer arrives now, after Back
+  await get('/search-delay?ms=0');
+  assert.equal(await panel.isVisible('#panelReady'), true, 'still the list after the late answer');
+  assert.equal(await panel.isVisible('#blocked'), false, 'the late answer does not stop the car');
+  assert.equal(await panel.textContent('#status'), '', 'nothing is said about the car');
+
   // ---- 4. The Wagoneer's price dropped: posted at the website's price now, not the scan's ----
   // (first started and stopped at review: Stop this post goes back to the list, nothing opened)
   // The list's own hint says so: a changed price is posted as the website shows it, not stopped.
@@ -385,11 +397,11 @@ try {
   assert.match(await panel.textContent('#capReached'), /Daily post cap reached \(1 of 1 today\)/, 'a colleague\'s post does not count against this salesperson\'s cap');
   await panel.screenshot({ path: join(shots, 'panel-5-cap.png'), fullPage: true });
 
-  // ---- 10. The pilot numbers: three attempts from the panel, one blocked as gone, one stopped at review, one posted ----
+  // ---- 10. The pilot numbers: the attempts from the panel: one blocked as gone, two left (Back during the check, and stopped at review), one posted ----
   const pilot = await panel.evaluate(async (o) => (await chrome.storage.local.get(`pilot:${o}`))[`pilot:${o}`], origin);
   const outcome = (vin) => pilot.posts.filter((p) => p.vin === vin).map((p) => [p.outcome, p.reason || '']);
   assert.deepEqual(outcome(RAM), [['blocked', 'not-on-website']]);
-  assert.deepEqual(outcome(WAGONEER), [['abandoned', ''], ['posted', '']]);
+  assert.deepEqual(outcome(WAGONEER), [['abandoned', ''], ['abandoned', ''], ['posted', '']], 'Back during the check, then stopped at review, then posted');
 
   assert.equal(await publishCount(), '1', 'still only the person\'s one click, and no listing marked sold, deleted or edited since');
   assert.deepEqual(errors, [], 'no console errors');

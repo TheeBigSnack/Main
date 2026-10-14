@@ -25,7 +25,7 @@ import { updateKey, withLock, storageErrorText, isStorageFull, STORAGE_FULL } fr
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { signInStart, signInFinish, currentSession, rewriteEndpointFor } from './src/accountFlow.js';
 import { loadSession, redeemInvite } from './src/account.js';
-import { wizardSteps, accountStepModel, joinedFrom, rewriteAtAccount, termsSummary, TERMS_PENDING, addressHint, storeTickReason, GRANT_REFUSED_TEXT, readyLine } from './src/wizardSteps.js';
+import { wizardSteps, accountStepModel, joinedFrom, rewriteAtAccount, termsSummary, TERMS_PENDING, addressHint, storeTickReason, GRANT_REFUSED_TEXT, readyLine, scanLine } from './src/wizardSteps.js';
 import { settingNumberWarning, settingNumberNotice, priceNoteWarning, priceNoteNotice } from './src/rewriteTemplate.js';
 
 const steps = () => wizardSteps(accountsConfigured());
@@ -288,7 +288,7 @@ export function wizardHtml() {
         ${nav(false, 'Start')}`;
     case 'scan':
       return `${progress}<h3>Reading the website</h3>${error}
-        ${wiz.busy ? '<p>Reading the used inventory…</p>' : wiz.scan ? `<div class="banner good">${wiz.scan.cars} used cars read from ${esc(wiz.scan.siteName)}. ${wiz.scan.stores.length} store${wiz.scan.stores.length === 1 ? '' : 's'} found.</div>${(wiz.scan.warnings || []).map((w) => `<div class="banner warn">${esc(w)}</div>`).join('')}` : '<p>Click Read to scan the used inventory.</p>'}
+        ${wiz.busy ? '<p>Reading the used inventory…</p>' : wiz.scan ? `<div class="banner ${scanLine(wiz.scan).tone}">${esc(scanLine(wiz.scan).text)}</div>${(wiz.scan.warnings || []).map((w) => `<div class="banner warn">${esc(w)}</div>`).join('')}` : '<p>Click Read to scan the used inventory.</p>'}
         ${wiz.scan ? nav(true, 'Next') : `<div class="actions"><button type="button" class="plain" id="wizBack">Back</button><button type="button" class="primary" id="wizScan" ${wiz.busy ? 'disabled' : ''}>Read the website</button><button type="button" class="plain" id="wizQuit">Quit set-up</button></div>`}`;
     case 'store': {
       const stores = (wiz.scan && wiz.scan.stores) || [];

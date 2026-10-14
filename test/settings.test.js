@@ -381,3 +381,11 @@ test('with nothing stored yet, the scan\'s settings are what is written', () => 
   const scanned = withDefaults({ myStores: ['Waynesburg'] }, { name: 'Ron Lewis' });
   assert.equal(withScanChanges(undefined, {}, scanned), scanned);
 });
+
+test('a doc-fee note is suggested only when two cars agree: one priced car is not enough to name a fee', () => {
+  const one = [{ price: 20000, priceBeforeFees: 19510 }];
+  assert.equal(feeGap(one).gap, 0, 'one car is no lot');
+  assert.equal(suggestedPriceNote(feeGap(one).gap), '');
+  const two = [{ price: 20000, priceBeforeFees: 19510 }, { price: 25000, priceBeforeFees: 24510 }];
+  assert.equal(feeGap(two).gap, 490, 'two cars that agree still suggest the fee');
+});

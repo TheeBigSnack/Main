@@ -3845,3 +3845,14 @@ test('the Copy buttons in the Couldn\'t fill list are named for their field, as 
   assert.match(src, /copyBtn\(x\.value, x\.label\)/, 'each row passes its field label');
   assert.doesNotMatch(src, /copyBtn\(x\.value\)/, 'no call without the label');
 });
+
+// The checking view is the panel while a post re-checks its car on the website. A single post has a Back
+// button there, which leaves the check the way Back does from the blocked view (clearFlow drops the read's
+// answer). A queued car has none: the queue bar's Stop queue is its way out (queueBar). viewChecking,
+// compiled as written.
+test('the checking view has a Back button for a single post, and none for a queued car', () => {
+  const view = (queueMode) => compile('viewChecking', { state: { vin: 'AAA', message: 'Checking', queueMode }, esc: (s) => String(s) })();
+  assert.match(view(false), /<button type="button" class="plain" id="back">Back<\/button>/);
+  assert.doesNotMatch(view(true), /id="back"/);
+  assert.match(src, /function queueBar\(\)/, 'the queue bar is the queued car\'s way out');
+});

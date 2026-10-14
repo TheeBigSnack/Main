@@ -20,7 +20,7 @@
 // can't name stays empty, and the pre-owned gate and the ready check treat
 // an empty field as they always do (Needs a look, Not ready).
 
-import { toNumber, shortLocation, conditionWordFromPath } from '../src/normalize.js';
+import { toNumber, shortLocation, conditionWordFromPath, calendarDate } from '../src/normalize.js';
 import { parseVehiclePage } from './schemaOrgParse.js';
 import { normalizeVehicle as normalizeStandard, GUIDE_PRICE_WORDS, LABEL_MARKS, LABEL_NOTE } from './schemaOrgNormalize.js';
 
@@ -1021,10 +1021,9 @@ export function mileageOf(card) {
   return { value: null, reason: 'the list does not say the mileage is in miles' };
 }
 
-// A date the website gives, kept only when it reads as one.
+// A date the website gives, kept only when it is a calendar date (src/normalize.js calendarDate).
 function dateOf(value) {
-  const s = textOf(value);
-  return s && !Number.isNaN(Date.parse(s)) ? s : null;
+  return calendarDate(textOf(value));
 }
 
 const strings = (value) => (Array.isArray(value) ? value : []).map((f) => textOf(f)).filter(Boolean);
