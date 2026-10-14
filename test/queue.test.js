@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createQueue, currentVin, advance, pause, resume, summary, describe } from '../extension/src/queue.js';
+import { createQueue, currentVin, advance, pause, resume, summary, describe, capPauseText } from '../extension/src/queue.js';
 
 const VINS = ['1C6RR7FT0KS643289', '1C4SJVDT7NS142834', '2C3CDZC96GH308445'];
 
@@ -64,4 +64,10 @@ test('the queue moves only while it is still on the car the caller finished', ()
   assert.deepEqual(q.results, { [VINS[0]]: 'posted', [VINS[1]]: 'draft' });
   // no car named: the car the queue is on, as before
   assert.equal(currentVin(advance(q, 'skipped')), null);
+});
+
+test('the daily cap pause says the queue waits for Resume once the cap resets, not that it runs again by itself', () => {
+  const text = capPauseText('10 of 10 today');
+  assert.equal(text, 'Daily post cap reached (10 of 10 today). The queue is paused. When the cap resets tomorrow, click Resume on the queue bar to carry on. The dealer can change the cap in Settings.');
+  assert.doesNotMatch(text, /paused until tomorrow/, 'nothing resumes the queue on its own');
 });

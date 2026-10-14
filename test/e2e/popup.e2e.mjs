@@ -90,6 +90,13 @@ try {
 
   await tab(popup, 'ready').click();
   assert.match(await popup.textContent('.rows'), /2019 Ram 1500 Classic Express/);
+  // the keyboard: Enter on a tab selects it, and the focus stays on that tab when the tab bar is drawn again
+  await tab(popup, 'notReady').focus();
+  await popup.keyboard.press('Enter');
+  await popup.waitForFunction(() => document.querySelector('.tabs button[data-view="notReady"]')?.getAttribute('aria-selected') === 'true', null, { timeout: 10000 });
+  assert.equal(await popup.evaluate(() => document.activeElement?.dataset.view), 'notReady', 'the focus stays on the tab that was chosen');
+  assert.equal(await tab(popup, 'ready').getAttribute('aria-selected'), 'false');
+  await tab(popup, 'ready').click();
   // Mark posted asks when the listing went up (Cancel records nothing); this one went up today
   await popup.click('button[data-action="post"]');
   await popup.waitForSelector('.markWhen button[data-action="markBefore"]');

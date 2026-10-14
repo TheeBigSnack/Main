@@ -1620,3 +1620,32 @@ test('a car the last snapshot still names among its missing pages is not a first
   }
   assert.equal((await rescanOf(thinListSite(more), prev, posted)).snapshot.vehicles[newcomer.vin].firstSeenAt, seenAt);
 });
+
+test('scanCar prices a car from the time its details were read, so a reading from before the listing\'s price does not price it', () => {
+  const entry = { updatedAt: '2026-10-01T12:00:00.000Z' };
+  const snap = { takenAt: '2026-10-01T13:00:00.000Z', carriedReadAt: { OLD: '2026-10-01T10:00:00.000Z', NEW: '2026-10-01T12:30:00.000Z', UNKNOWN: null }, vehicles: {
+    OLD: {}, NEW: {}, UNKNOWN: {}, FRESH: {},
+  } };
+  assert.equal(rescan.scanCar(entry, snap, 'OLD'), null, 'carried over from before the price');
+  assert.equal(rescan.scanCar(entry, snap, 'NEW'), snap.vehicles.NEW, 'read after the price');
+  assert.equal(rescan.scanCar(entry, snap, 'UNKNOWN'), null, 'no read time: not priced');
+  assert.equal(rescan.scanCar(entry, snap, 'FRESH'), snap.vehicles.FRESH, 'an entry with no read time keeps the scan time, as before');
+});
+
+test('a car carried over unread keeps the time its details were read, so a listing priced after that reading is not priced from the scan that carried it', async () => {
+  const cars = standardCars(6);
+  const pause = () => new Promise((resolve) => setTimeout(resolve, 5));
+  const day1 = await rescanOf(thinListSite(cars), null);
+  await pause();
+  const bad = cars[2];
+  const day2 = await rescanOf(thinListSite(cars, { [bad.path]: httpError(500) }), day1.snapshot);
+  assert.deepEqual(day2.res.unread, [bad.vin]);
+  assert.equal(day2.snapshot.carriedReadAt[bad.vin], day1.res.fetchedAt, 'the carried car keeps the time its page was last read');
+  // the listing is priced after the car's last reading; the scan that carries the car is later still
+  const entry = { updatedAt: new Date(Date.parse(day1.res.fetchedAt) + 1).toISOString() };
+  assert.equal(rescan.scanCar(entry, day2.snapshot, bad.vin), null, 'a reading from before the price does not price the car');
+  assert.notEqual(rescan.scanCar(entry, day2.snapshot, cars[0].vin), null, 'a car read after the price is priced');
+  await pause();
+  const day3 = await rescanOf(thinListSite(cars), day2.snapshot);
+  assert.equal(rescan.scanCar(entry, day3.snapshot, bad.vin), day3.snapshot.vehicles[bad.vin], 'read again after the price: priced');
+});

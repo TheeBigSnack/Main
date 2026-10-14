@@ -26,7 +26,7 @@ import { samplePhoto, cropPhoto } from './src/photoCanvas.js';
 import { buildListingData, listingChanges, normalizeColor, COLORS } from './src/listingData.js';
 import { capStatus, capCount, logPost } from './src/cap.js';
 import { withDefaults, loadProfile, settingsFromProfile } from './src/settings.js';
-import { createQueue, currentVin, advance, pause as pauseQueue, resume as resumeQueue, describe as describeQueue } from './src/queue.js';
+import { createQueue, currentVin, advance, pause as pauseQueue, resume as resumeQueue, describe as describeQueue, capPauseText } from './src/queue.js';
 import { wiz, startWizard, resumeWizard, wizardHtml, handleWizardClick, handleWizardChange, handleWizardInput } from './wizard.js';
 import { up, startUpkeep, endUpkeep, upkeepHtml, handleUpkeepClick, namesakesOf } from './upkeep.js';
 import { localVinCheck, decodeVinOnline, compareVin, compareSummary, NHTSA_ORIGIN } from './src/vin.js';
@@ -38,6 +38,7 @@ import { watchForListing, isNewListingFromForm, showsPostedCar, onCreatePage, li
 import { LISTING_SIGNS } from './facebook/listingSigns.js';
 import { beginPost, notePostStep, endPost, noteFill, updatePilot } from './src/pilot.js';
 import { relistNotice } from './src/takenDown.js';
+import { queueHoldReasons, holdStatus } from './src/queueHold.js';
 import { notSavedReport } from './src/notSaved.js';
 import { POSTING_RULES } from './src/postingRules.js';
 import { siteKeys, GLOBAL_KEYS, REQUEST_KEYS } from './src/storageKeys.js';
@@ -991,6 +992,7 @@ async function startFlow(req) {
   if (state.queueMode) await photosChecked;
   if (dropped()) return undefined;
   if (state.queueMode && canAutoOpen()) await openForm();
+  else if (state.queueMode) showHoldReason();
 }
 
 // The day's cap for this salesperson: this machine's posts (those taken down
@@ -1022,6 +1024,38 @@ function canAutoOpen() {
   return !dailyCap().reached;
 }
 
+// The facts the gate above reads, for the status line that names its first
+// reason (src/queueHold.js). The same checks in the same order: a test compiles
+// both and keeps them in step.
+function holdFacts() {
+  const listing = currentListing();
+  const checked = state.settings && state.settings.cropBranding !== false && state.branding && state.branding.vin === state.vin && state.branding.photos ? state.branding.photos : null;
+  const cropped = checked ? (listing.photos || []).filter((u) => Object.hasOwn(checked, u) && checked[u] && checked[u].status === 'cropped' && !(state.photoOriginals || []).includes(u)).length : 0;
+  const labels = Object.fromEntries(state.map.fields.map((f) => [f.key, f.label]));
+  const cap = dailyCap();
+  return {
+    guardrails: state.guardrails,
+    relist: state.relist, // the person sees the take-down notice first
+    vinProblems: state.vinCheck && state.vinCheck.local && !state.vinCheck.local.ok ? state.vinCheck.local.problems : [],
+    brandingRunning: Boolean(state.brandingRun),
+    croppedPhotos: cropped,
+    missing: listing.missing.map((key) => ({ key, label: labels[key] || key })),
+    assumed: listing.assumed || [],
+    branded: listing.branded, // the website's own text mentions a branded title: a person picks the title on the form
+    // Chrome asks for a new photo server only from a click: the car waits for Open the Marketplace form
+    unknownPhotoServers: photoPatterns().some((p) => !refusedPhotoServers.has(p)),
+    cap: { reached: cap.reached, count: capCount(cap) },
+  };
+}
+
+// A held queued car's status names the first reason it waits (src/queueHold.js).
+function showHoldReason() {
+  const first = queueHoldReasons(holdFacts())[0];
+  if (!first) return; // canAutoOpen holds a car the list names no reason for: the equivalence test in test/queueHold.test.js keeps the two in step
+  const s = holdStatus(first);
+  setStatus(s.text, s.kind);
+}
+
 // ---------- the queue ----------
 
 const nameOf = (vin) => (state.snapshotVehicles[vin] && state.snapshotVehicles[vin].name) || vin;
@@ -1035,7 +1069,7 @@ async function startNextInQueue() {
     state.queue = pauseQueue(q);
     await saveQueue();
     await clearFlow();
-    setStatus(`Daily post cap reached (${capCount(cap)}). The queue is paused until tomorrow; the dealer can change the cap in Settings.`, 'error');
+    setStatus(capPauseText(capCount(cap)), 'error');
     render();
     return;
   }

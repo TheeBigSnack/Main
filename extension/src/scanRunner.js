@@ -158,9 +158,21 @@ function snapshotOf({ site, res, vehicles, assessments, carry }) {
     if (readNow.has(vin)) entry.pageReadAt = res.fetchedAt;
     else if (typeof before === 'string') entry.pageReadAt = before;
   }
+  // A car carried over unread keeps the time its details were last read, on
+  // the snapshot (carriedReadAt), so scanCar does not date it from this scan:
+  // the time it was read before (carriedReadAt of the previous snapshot), else
+  // its last page read. null when neither is known, so it is not priced until
+  // it is read again. The car itself is kept as it was.
+  const carriedReadAt = {};
+  const priorCarried = (carry.previous && carry.previous.carriedReadAt) || {};
   for (const vin of Array.isArray(carry.unread) ? carry.unread : []) {
-    if (carry.last[vin] && !snapshot.vehicles[vin]) snapshot.vehicles[vin] = carry.last[vin];
+    const last = carry.last[vin];
+    if (last && !snapshot.vehicles[vin]) {
+      snapshot.vehicles[vin] = last;
+      carriedReadAt[vin] = Object.prototype.hasOwnProperty.call(priorCarried, vin) ? priorCarried[vin] : typeof last.pageReadAt === 'string' ? last.pageReadAt : null;
+    }
   }
+  if (Object.keys(carriedReadAt).length) snapshot.carriedReadAt = carriedReadAt;
   const missingPages = {};
   const missingSeen = {};
   const seenBefore = (carry.previous && carry.previous.missingSeen) || {};
@@ -186,6 +198,7 @@ function snapshotOf({ site, res, vehicles, assessments, carry }) {
 // page limit left for the next scan (res.leftForLater) were never asked
 // for, so they are not called unreadable.
 export function incompleteWarning(res) {
+  if (res.homeOnly) return "This website's home page was read as its used list, and it may show only some of the cars. Open the website's used inventory page and scan there.";
   const kept = Array.isArray(res.unread) ? res.unread.length : 0;
   const found = res.records.length + kept;
   const left = Number(res.leftForLater) || 0;

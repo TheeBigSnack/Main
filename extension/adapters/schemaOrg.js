@@ -146,13 +146,15 @@ export function probeInPage() {
   const usedText = /^\s*(?:(?:shop|view|browse|see|all)\s+)*(?:used|pre-?owned)(?:\s+(?:inventory|vehicles|cars))?\s*$/i;
   // A query that selects nothing but used inventory ("?condition=used",
   // "?type=Pre-Owned", "?condition=used&condition=certified"), or none,
-  // besides a page number or a sort order. Any other value (a make, a price,
-  // certified cars alone) narrows the list.
+  // besides a page number, a sort order, a view or page size, or a tracking
+  // tag (DISPLAY_KEY: how the list looks, not which cars it holds). Any other
+  // value (a make, a price, certified cars alone) narrows the list.
   const ORDER_KEY = /^(?:page|p|pg|start|sort|sortby|sort_by|sortorder|sort_order|order|orderby|order_by|dir|direction)$/i;
+  const DISPLAY_KEY = /^(?:view|layout|display|per_?page|page_?size|limit|utm_[a-z_]+|fbclid|gclid|mc_cid|mc_eid)$/i;
   const valueWords = ([k, v]) => String(v || k).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
   const certifiedWord = (w) => w === 'certified' || w === 'cpo';
   const usedQuery = (u) => {
-    const values = [...u.searchParams.entries()].filter(([k]) => !ORDER_KEY.test(k)).map(valueWords);
+    const values = [...u.searchParams.entries()].filter(([k]) => !ORDER_KEY.test(k) && !DISPLAY_KEY.test(k)).map(valueWords);
     if (!values.every((words) => words.length > 0 && words.every((w) => LIST_WORDS.has(w) || certifiedWord(w)))) return false;
     return !values.some((words) => words.some(certifiedWord)) || values.some((words) => !words.some(certifiedWord) && words.some((w) => /^(?:used|pre|owned|preowned|usedcars|usedvehicles|usedinventory|searchused)$/.test(w)));
   };
@@ -1297,6 +1299,12 @@ async function firstListPage(site, startHref, origin, maxPages) {
  *   time; leftForLater the number of car pages the page limit left for the
  *   next scan.
  */
+// The website's home page: an address with no path (or index.html) and no query.
+const isHomeAddress = (href) => {
+  const u = new URL(href);
+  return /^\/(?:index\.(?:html?|php|aspx))?$/i.test(u.pathname) && !u.search;
+};
+
 export async function scan(search, options = {}) {
   const opts = { listUrl: null, origin: null, confirmVins: [], confirmUrls: {}, postedVins: [], lastSeen: null, sitemap: undefined, maxListPages: MAX_LIST_PAGES, maxCarPages: MAX_CAR_PAGES, ...options };
   const origin = originOf(opts.origin) || originOf(opts.listUrl);
@@ -1304,6 +1312,8 @@ export async function scan(search, options = {}) {
   const fail = (error, message) => ({ ok: false, error, message, requests: site.requests });
   const start = onSite(opts.listUrl, null, origin);
   if (!start) return fail('no-list', "Lot Current doesn't know this website's used inventory page yet. Open that page and click Scan website there.");
+  // the home page read as the list may show only some of the cars, so it is never a complete read
+  const homeOnly = isHomeAddress(start.href);
 
   // 1. the list from its first page, and its rel=next pages
   const first = await firstListPage(site, start.href, origin, opts.maxListPages);
@@ -1661,7 +1671,7 @@ export async function scan(search, options = {}) {
   const shapeInDoubt = shapeLeftOut > 0 && (notCarPages > 0 || noneShown > carsFound);
   const total = cars.size - notCarPages;
   // a lot that counted cars and gave none is never a complete read of it
-  const complete = listClean && sitemapClean && readErrors === 0 && untried === 0 && leftForLater === 0 && !shapeInDoubt && !(total > 0 && records.size === 0);
+  const complete = !homeOnly && listClean && sitemapClean && readErrors === 0 && untried === 0 && leftForLater === 0 && !shapeInDoubt && !(total > 0 && records.size === 0);
   const out = { ok: true, fetchedAt: new Date().toISOString(), total, complete, requests: site.requests, records: [...records.values()], confirm };
   if (unread.size) out.unread = [...unread];
   const readCars = [...pagesRead].filter((vin) => records.has(vin));
@@ -1669,6 +1679,7 @@ export async function scan(search, options = {}) {
   const notDescribed = [...records].filter(([, r]) => r.carried).map(([vin]) => vin);
   if (notDescribed.length) out.descriptionsUnread = notDescribed;
   if (leftForLater) out.leftForLater = leftForLater;
+  if (homeOnly) out.homeOnly = true;
   return out;
 }
 

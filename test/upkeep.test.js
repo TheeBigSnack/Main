@@ -407,3 +407,16 @@ test('a price update recorded from the side panel keeps the basis its price was 
     delete globalThis.chrome;
   }
 });
+
+test('a price update whose Price box keeps another price after Lot Current\'s fills says so and asks the person to type the price', () => {
+  Object.assign(up, { active: true, kind: 'price', name: 'Car A', price: 18500, listedPrice: 20000, status: 'waiting', stuck: true, boxShows: '$20,000', fills: 4 });
+  const stuck = upkeepHtml();
+  assert.match(stuck, /id="priceStuck"/);
+  assert.match(stuck, /The Price box shows "\$20,000", not \$18,500/);
+  assert.match(stuck, /Type \$18,500 in the Price box yourself, then click <b>Update<\/b>/);
+  assert.doesNotMatch(stuck, /id="priceWaiting"/, 'it no longer says Lot Current will fill the price');
+  // while the box has not appeared yet, the waiting text stays as it was
+  Object.assign(up, { stuck: false, boxShows: '', fills: 0 });
+  assert.match(upkeepHtml(), /id="priceWaiting"/);
+  endUpkeep();
+});

@@ -41,6 +41,13 @@ export function notificationFor(previousCount, count) {
   return { title: 'Lot Current', message: `${count} of your listings need${count === 1 ? 's' : ''} attention` };
 }
 
+// The count a site records as told about, after a scan. A notice the system
+// refused to show (failed) is not recorded, so the next scan makes it again;
+// otherwise the count is what the scan found.
+export function notifiedAfter(previous, count, failed) {
+  return failed ? (Number(previous) || 0) : count;
+}
+
 // Due when a period has passed since the last attempt, less five minutes of
 // slack: the alarm fires a whole period after the previous firing, but the
 // stored time is when the previous scan finished, which can be a minute or

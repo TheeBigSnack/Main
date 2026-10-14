@@ -47,7 +47,7 @@ export const up = {
   tabId: null, status: 'idle', // idle | checking | stopped | opening | waiting | filled | done | gone
   scanPrice: null, // a price update: the price the last scan found, when the website shows another one now
   basis: null, // a price update: the basis the read worked the price out on, kept on a listing that carries none (markPriceUpdated)
-  note: '', filledShown: '', seen: null, error: '', fills: 0,
+  note: '', filledShown: '', seen: null, error: '', fills: 0, stuck: false, boxShows: '',
   names: null, // the last scan's cars by VIN, read once for a take-down recorded without its name (namesakesNow)
   baseline: null, // { url, sold, unavailable } from the first read of the current page
   offTarget: false, // the tab is showing some other page
@@ -82,7 +82,7 @@ function stopPolling() {
 export async function startUpkeep(req, ctx) {
   stopPolling();
   const run = ++starts;
-  Object.assign(up, { active: true, origin: req.origin, vin: String(req.vin || '').toUpperCase(), kind: req.kind, why: String(req.why || ''), price: req.price || null, scanPrice: null, basis: null, listingUrl: listingLink(req.listingUrl, ctx.map()), name: req.name || req.vin, listedPrice: req.listedPrice || null, listingId: '', tabId: null, status: req.kind === 'price' ? 'checking' : 'opening', note: '', filledShown: '', seen: null, error: '', fills: 0, names: null, baseline: null, offTarget: false });
+  Object.assign(up, { active: true, origin: req.origin, vin: String(req.vin || '').toUpperCase(), kind: req.kind, why: String(req.why || ''), price: req.price || null, scanPrice: null, basis: null, listingUrl: listingLink(req.listingUrl, ctx.map()), name: req.name || req.vin, listedPrice: req.listedPrice || null, listingId: '', tabId: null, status: req.kind === 'price' ? 'checking' : 'opening', note: '', filledShown: '', seen: null, error: '', fills: 0, names: null, baseline: null, offTarget: false, stuck: false, boxShows: '' });
   ctx.render();
   if (up.kind === 'price') {
     let now;
@@ -263,9 +263,17 @@ async function poll(ctx) {
           up.status = 'filled';
           up.filledShown = r.shown;
           up.note = '';
+          up.stuck = false;
         } else if (r && r.reason) {
           up.note = r.reason;
         }
+        ctx.render();
+        return;
+      }
+      if (seen.hasPriceBox && !boxHasIt && up.fills >= MAX_FILLS && !up.stuck && (up.status === 'waiting' || up.status === 'filled')) {
+        // the form keeps another price after the last fill: say so, and stop filling
+        up.stuck = true;
+        up.boxShows = seen.priceBoxValue;
         ctx.render();
         return;
       }
@@ -365,7 +373,9 @@ export function upkeepHtml() {
   else if (up.status === 'gone') body = '<div class="banner warn">The listing tab was closed. Did you finish?</div>';
   else if (up.status === 'done') body = `<div class="banner good" id="upkeepDone">Done. ${esc(up.note)}</div>`;
   else if (up.kind === 'price') {
-    body = up.status === 'filled'
+    body = up.stuck
+      ? `<div class="banner warn" id="priceStuck">The Price box shows "${esc(up.boxShows)}", not ${money(up.price)}. Lot Current has filled it ${MAX_FILLS} times and the form keeps showing that price, so it has stopped filling. Type ${money(up.price)} in the Price box yourself, then click <b>Update</b>.</div>`
+      : up.status === 'filled'
       ? `<div class="banner good" id="priceFilled">New price ${money(up.price)} is in the Price box (it shows "${esc(up.filledShown)}"). Now click <b>Update</b> on Facebook. Lot Current will notice when the listing shows the new price.</div>`
       : `<div class="banner info" id="priceWaiting">On Facebook, click <b>Edit listing</b>. As soon as the Price box appears on this car's form, Lot Current fills in <b>${money(up.price)}</b>${up.listedPrice ? ` (was ${money(up.listedPrice)})` : ''}, the price the website shows now: Lot Current read the car on the website again just before opening the listing${up.scanPrice ? ` (the last scan had found ${money(up.scanPrice)})` : ''}. Then you click <b>Update</b>.</div>`;
   } else {

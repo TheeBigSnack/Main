@@ -1910,3 +1910,59 @@ test('schemaOrg limits: list pages, car pages, sitemaps, the page size and the r
     mock.timers.reset();
   }
 });
+
+test('a scan that reads the home page as the list says the read is partial, since the home page may show only some of the cars', async () => {
+  const cars = LOT.slice(0, 6);
+  const site = standardSite({ cars, perPage: cars.length });
+  site.set(O + '/', site.get(LIST));
+  const home = await scanSite(site, { listUrl: O + '/' });
+  assert.equal(home.ok, true, home.message);
+  assert.equal(home.complete, false, 'the home page is not a full list of the lot');
+  assert.equal(home.homeOnly, true);
+  assert.match(incompleteWarning(home), /home page/);
+  assert.match(incompleteWarning(home), /used inventory page/);
+  // the used list itself is complete as before
+  const list = await scanSite(site);
+  assert.equal(list.complete, true);
+  assert.equal(list.homeOnly, undefined);
+});
+
+test('a Dealer Inspire direct search that never answers is ended by a timeout, so one website\'s search cannot hold up the other rescans', async () => {
+  const { makeDirectSearch } = await import('../extension/adapters/dealerInspire.js');
+  const seen = [];
+  // a service that never answers, until the signal it was given is aborted
+  const hangs = (url, init) => {
+    seen.push(init.signal);
+    return new Promise((resolve, reject) => {
+      init.signal.addEventListener('abort', () => reject(Object.assign(new Error('The operation was aborted.'), { name: 'AbortError' })));
+    });
+  };
+  const service = { search: 'https://example-dealer.test/api/v1/listings/1', apiKey: 'test-key' };
+  const started = Date.now();
+  await assert.rejects(makeDirectSearch(service, hangs, { timeoutMs: 50 })({ page: 1 }), /aborted/);
+  assert.ok(Date.now() - started < 1000, 'the search ends soon after the timeout');
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].aborted, true, 'the request\'s signal was aborted');
+  // a service that answers in time is not cut short
+  const answers = async (url, init) => ({ ok: true, json: async () => ({ data: { records: [1] } }), signal: init.signal });
+  assert.deepEqual(await makeDirectSearch(service, answers, { timeoutMs: 50 })({ page: 1 }), { records: [1] });
+});
+
+test('schemaOrg probe: a used-list link with a view, page size or tracking parameter is the used list; a filter still is not', async () => {
+  const site = standardSite({ cars: LOT });
+  const on = (path, options = {}) => runInPage(fakeStandardPage({ site, path, ...options }), schemaOrg.probeInPage);
+  const cards = LOT.slice(0, 3).map((c) => `<a href="${c.path}">${c.year} ${c.make}</a>`).join(' ');
+  const home = (href) => `<!doctype html><html><head><title>Sample Motors</title></head><body><a href="${href}">Used Cars</a> ${cards}</body></html>`;
+  assert.deepEqual(
+    await on('/', { html: home('/used-vehicles/?view=grid&amp;per_page=24&amp;utm_source=nav') }),
+    { ...SERVICE, listUrl: O + '/used-vehicles/?view=grid&per_page=24&utm_source=nav' },
+    'the used list with display and tracking parameters',
+  );
+  assert.deepEqual(
+    await on('/', { html: home('/used-vehicles/?layout=list&utm_medium=email&fbclid=abc123') }),
+    { ...SERVICE, listUrl: O + '/used-vehicles/?layout=list&utm_medium=email&fbclid=abc123' },
+  );
+  // a filter that narrows the list is not the used list: the home page it is found on stays the list
+  assert.deepEqual(await on('/', { html: home('/used-vehicles/?zip=43215') }), { ...SERVICE, listUrl: O + '/' }, 'a filter by zip');
+  assert.deepEqual(await on('/', { html: home('/used-vehicles/?view=grid&amp;make=honda') }), { ...SERVICE, listUrl: O + '/' }, 'a display parameter does not make a make filter a whole list');
+});
