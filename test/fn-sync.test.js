@@ -100,6 +100,22 @@ test('sync: no token and a rejected token are 401; the token is checked with the
   assert.deepEqual([r.status, r.body.error], [500, 'the function is missing SUPABASE_URL or a publishable key (SUPABASE_PUBLISHABLE_KEYS or SUPABASE_ANON_KEY)']);
 });
 
+test('sync: a sign-in check that cannot be reached is 503, not a refused token, so the session is kept; a refusal from the auth server is still 401', async () => {
+  world();
+  const handler = await load();
+  const check = (error) => (c) => (c.kind === 'auth' && c.op === 'getUser' ? { data: { user: null }, error } : undefined);
+  fake.script = check({ message: 'fetch failed' });
+  const down = await sync(handler, TOKEN.u1);
+  assert.deepEqual([down.status, down.body], [503, { ok: false, error: 'the sign-in check could not be reached; try again shortly' }]);
+  fake.script = check({ message: 'upstream timed out', status: 504 });
+  assert.equal((await sync(handler, TOKEN.u1)).status, 503, 'a 5xx from the auth server is an outage too');
+  fake.script = check({ message: 'invalid JWT: token is expired', status: 401 });
+  const expired = await sync(handler, TOKEN.u1);
+  assert.deepEqual([expired.status, expired.body.error], [401, 'sign in again (the token was rejected or has expired)']);
+  fake.script = null;
+  assert.equal((await sync(handler, TOKEN.u1)).status, 200, 'the same token passes once the check answers');
+});
+
 test('sync: a person in no dealership, or in another one, is 403; the origin is matched without case or a trailing slash; none is 400', async () => {
   world();
   const handler = await load();

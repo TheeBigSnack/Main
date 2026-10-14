@@ -17,6 +17,7 @@
 
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import { isRecord } from './http.ts';
+import { authVerdict } from './authVerdict.mjs';
 
 export interface CallerUser {
   id: string;
@@ -80,6 +81,8 @@ export type AuthResult = { ok: true; caller: Caller } | { ok: false; status: num
 
 // 401 without a user. The token is checked with the auth server
 // (auth.getUser), not just decoded, so a revoked or expired one is refused.
+// 503 when the auth server cannot be reached to check it (authVerdict.mjs):
+// the caller is not refused, so the extension keeps its session and tries again.
 export async function requireUser(req: Request): Promise<AuthResult> {
   const m = /^Bearer\s+(.+)$/i.exec(req.headers.get('authorization') || '');
   if (!m) return { ok: false, status: 401, error: 'sign in to use this (no token was sent)' };
@@ -88,7 +91,8 @@ export async function requireUser(req: Request): Promise<AuthResult> {
   const anon = publishableKey();
   if (!url || !anon) return { ok: false, status: 500, error: 'the function is missing SUPABASE_URL or a publishable key (SUPABASE_PUBLISHABLE_KEYS or SUPABASE_ANON_KEY)' };
   const client = createClient(url, anon, clientOptions(token));
-  const { data, error } = await client.auth.getUser(token);
+  const { data, error } = await client.auth.getUser(token).catch((e: unknown) => ({ data: { user: null }, error: e }));
+  if (error && authVerdict(error) === 'unreachable') return { ok: false, status: 503, error: 'the sign-in check could not be reached; try again shortly' };
   if (error || !data.user) return { ok: false, status: 401, error: 'sign in again (the token was rejected or has expired)' };
   return { ok: true, caller: { user: { id: data.user.id, email: data.user.email ?? null }, token, client } };
 }
