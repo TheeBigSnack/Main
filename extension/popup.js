@@ -608,7 +608,7 @@ function viewReady(l) {
   const lead = `<p class="lead">Pre-owned, at your store, with photos and a price. Click <b>Post</b> on one car, or tick several and <b>Post</b> them as a queue: the side panel pre-fills each form and you click Publish on each. Listed one by hand? Click <b>Mark posted</b>.</p>`;
   if (!l.ready.length) {
     state.picked.clear();
-    return lead + queueStatusHtml() + empty('No cars are ready right now.');
+    return lead + queueStatusHtml() + empty('No cars are ready right now. Open <b>Not ready</b> to see why each car is held back.');
   }
   const cap = dailyCap();
   const capBanner = cap.reached ? `<div class="banner warn" id="capReached">${esc(capText(cap))}</div>` : '';

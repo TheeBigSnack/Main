@@ -59,6 +59,22 @@ export function termsSummary(configured = false) {
 // false): no acceptance is asked for or recorded, but the usage numbers the
 // summary names are recorded from the first post all the same, so the note
 // says which of the two waits.
+// What the set-up's finish says about the ready cars (wizard.js, the done step).
+// With none ready, it sends the person to the Not ready tab, where each car's reason is.
+export function readyLine(ready) {
+  if (!(ready > 0)) return 'No car is ready yet. Click the Lot Current icon and open <b>Not ready</b> to see why each one is held back.';
+  return `${ready} car${ready === 1 ? ' is' : 's are'} ready to post. Click the Lot Current icon and open <b>Ready to post</b>.`;
+}
+// The control that gets the keyboard focus back when the set-up step is drawn
+// again (sidepanel.js refocusWizard): the one that had it, when the step still
+// draws its id; else the step's Next button (Read is gone once the scan is
+// done); else null, and the step's heading takes the focus. drawnIds are the
+// ids the new step draws.
+export function wizardFocusId(kept, drawnIds) {
+  if (!kept || !kept.id) return null;
+  if (drawnIds.includes(kept.id)) return kept.id;
+  return drawnIds.includes('wizNext') ? 'wizNext' : null;
+}
 // The line under the rescan permission step's Allow button after Chrome says no:
 // the rescans stay off, and the button and the popup's Scan still work.
 export const GRANT_REFUSED_TEXT = "Chrome didn't allow automatic rescans, so they stay off. Click Allow automatic rescans to ask again, or Skip for now; the Scan button in the popup still works.";

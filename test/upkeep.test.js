@@ -508,3 +508,24 @@ test('a price typed by hand before any fill is filled, and Update closes the ite
     await rig.started;
   }
 });
+
+// When Chrome cannot open the listing tab, the panel says so and asks for the listing to be opened by hand;
+// it does not show the waiting banner, which says Lot Current will fill the form once Edit listing is clicked.
+test('when Chrome cannot open the listing tab, upkeep says so and asks for the listing to be opened by hand, with no waiting banner', async () => {
+  globalThis.chrome = { tabs: { create: async () => { throw new Error('no tab for you'); } } };
+  const ctx = { render: () => {}, map: () => FORM_MAP, priceNow: async () => ({ ok: true, price: 19000 }) };
+  try {
+    await startUpkeep({ origin: 'https://www.example-motors.test', vin: 'aaa', kind: 'price', price: 19000, listingUrl: 'https://www.facebook.com/marketplace/item/111/', name: 'Car A', listedPrice: 20000 }, ctx);
+    assert.equal(up.status, 'open-failed');
+    const html = upkeepHtml();
+    assert.match(html, /Couldn&#39;t open the listing: no tab for you/, 'the error shows (escaped)');
+    assert.doesNotMatch(html, /priceWaiting|takeDownWaiting/, 'no waiting banner');
+    assert.match(html, /id="upkeepOpenFailed"[^>]*>Open the listing yourself, with the link above, and change the price there by hand\. Then click <b>I updated it<\/b>\./);
+    assert.match(html, /id="upkeepDoneBtn"/, 'the person can still say it is done');
+    up.kind = 'takedown';
+    assert.match(upkeepHtml(), /Open the listing yourself, with the link above, and click Mark as sold or Delete there\. Then click <b>I took it down<\/b>\./);
+  } finally {
+    endUpkeep();
+    delete globalThis.chrome;
+  }
+});

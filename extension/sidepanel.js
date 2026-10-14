@@ -41,6 +41,7 @@ import { relistNotice } from './src/takenDown.js';
 import { queueHoldReasons, holdStatus } from './src/queueHold.js';
 import { notSavedReport } from './src/notSaved.js';
 import { POSTING_RULES } from './src/postingRules.js';
+import { wizardFocusId } from './src/wizardSteps.js';
 import { siteKeys, GLOBAL_KEYS, REQUEST_KEYS } from './src/storageKeys.js';
 import { updateKey, withLock, storageErrorText } from './src/storage.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
@@ -2128,11 +2129,12 @@ function fieldsTable() {
   if (need.exterior || need.interior) {
     const rw = state.settings.rewrite;
     const cg = state.colorGuess;
+    const rwOff = !(rw.enabled && rw.endpoint);
     const which = [need.exterior && 'exterior', need.interior && 'interior'].filter(Boolean).join(' and ');
     const status = cg && cg.error ? `Photo guess failed: ${esc(cg.error)}.` : cg && (cg.exterior || cg.interior) ? `Guessed from the photos with ${esc(cg.confidence)} confidence.` : '';
     colorHint = `<p class="hint" id="colorHint">The website gives no usable ${which} color. ${status}
-      <button type="button" class="copy" id="guessColors" ${rw.enabled && rw.endpoint ? '' : 'disabled title="Turn on the rewrite service in Settings first"'}>${cg && (cg.exterior || cg.interior) ? 'Guess again from the photos' : 'Guess from the photos'}</button>
-      ${rw.enabled && rw.endpoint ? '' : ' (needs the rewrite service; otherwise pick it on the form)'}</p>`;
+      <button type="button" class="copy" id="guessColors" ${rwOff ? 'aria-disabled="true" aria-describedby="guessOffHint"' : ''}>${cg && (cg.exterior || cg.interior) ? 'Guess again from the photos' : 'Guess from the photos'}</button>
+      ${rwOff ? ' <span id="guessOffHint">(needs the rewrite service; otherwise pick it on the form)</span>' : ''}</p>`;
   }
   return `<table class="fields">${rows}<tr><td>Photos</td><td id="photoCount">${l.photos.length} picked from the website</td></tr></table>${locationHint}${colorHint}`;
 }
@@ -2354,6 +2356,7 @@ function viewReview() {
   const waits = Boolean(state.brandingRun) && !formOff;
   const waitsOff = waits ? ' disabled' : '';
   const rw = state.settings.rewrite;
+  const rwOff = !(rw.enabled && rw.endpoint);
   return `${relistHtml()}${carCard()}${readAgainHtml()}
   <section>
     <h3 id="descriptionLabel">Description ${sourcePill()}</h3>
@@ -2361,10 +2364,11 @@ function viewReview() {
     <textarea id="description" spellcheck="true" aria-labelledby="descriptionLabel">${esc(state.description)}</textarea>
     ${checksHtml(state.guardrails, state.descriptionSource)}
     <div class="actions">
-      <button type="button" class="plain" id="rewrite" ${rw.enabled && rw.endpoint ? '' : 'disabled title="Turn on the rewrite service in Settings first"'}>Rewrite with Claude</button>
+      <button type="button" class="plain" id="rewrite" ${rwOff ? 'aria-disabled="true" aria-describedby="rewriteOffHint"' : ''}>Rewrite with Claude</button>
       <button type="button" class="plain" id="resetTemplate">Reset to template</button>
       <button type="button" class="plain" id="copyDescription">Copy</button>
     </div>
+    ${rwOff ? `<p class="hint" id="rewriteOffHint">Rewrite with Claude and Guess from the photos need the rewrite service, which is off. Click the Lot Current icon in Chrome's toolbar, then Settings, and turn it on.</p>` : ''}
     <p class="hint">Edit anything you like; your edits are kept. Facts only: every number is checked against the website.</p>
     ${highlightsHtml()}
   </section>
@@ -2418,8 +2422,8 @@ function viewFilling() {
   return `${carCard()}<p class="lead">${esc(state.message || 'Working…')}</p>`;
 }
 
-function copyBtn(text) {
-  return `<button type="button" class="copy" data-copy="${esc(text)}">Copy</button>`;
+function copyBtn(text, label) {
+  return `<button type="button" class="copy" data-copy="${esc(text)}" aria-label="Copy the ${esc(label.toLowerCase())}">Copy</button>`;
 }
 
 const allowButton = (pattern) => `<button type="button" class="plain" data-allow-photos="${esc(pattern)}">Allow photos from ${esc(patternHost(pattern))}</button>`;
@@ -2517,7 +2521,7 @@ function viewPublish() {
     ${f.partial.length ? `<h3>Needs a click <span class="pill warn">${f.partial.length}</span></h3><ul class="list">${f.partial.map((x) => `<li>${esc(x.label)}: ${esc(x.value)} <span class="why">${esc(x.note || '')}</span></li>`).join('')}</ul>` : ''}
     ${skipped.length ? `<p class="hint">Left alone: ${skipped.map((x) => `${esc(x.label)} (${esc(x.reason)})`).join('; ')}.</p>` : ''}
   </section>
-  ${f.blocked.length ? `<section class="highlight"><h3>Couldn't fill <span class="pill bad">${f.blocked.length}</span></h3><ul class="list">${f.blocked.map((x) => `<li><b>${esc(x.label)}</b>${x.value ? ': ' + esc(x.value).slice(0, 80) + copyBtn(x.value) : ''} <span class="why">${esc(x.reason)}</span>${
+  ${f.blocked.length ? `<section class="highlight"><h3>Couldn't fill <span class="pill bad">${f.blocked.length}</span></h3><ul class="list">${f.blocked.map((x) => `<li><b>${esc(x.label)}</b>${x.value ? ': ' + esc(x.value).slice(0, 80) + copyBtn(x.value, x.label) : ''} <span class="why">${esc(x.reason)}</span>${
     x.candidates && x.candidates.length ? `<div class="why">Similar controls on the page: ${x.candidates.map((c) => `${esc(c.tag)}${c.role ? '[' + esc(c.role) + ']' : ''}${c.type ? '[' + esc(c.type) + ']' : ''}${c.haspopup ? '[popup ' + esc(c.haspopup) + ']' : ''}${c.editable ? '[editable]' : ''} "${esc(c.name || c.near)}"`).join('; ')}</div>` : ''
   }</li>`).join('')}</ul><p class="hint">Copy the report (Copy report on the dry run, or this list) and send it to whoever maintains formMap.js.</p></section>` : ''}
   <section><h3>Photos</h3>${photosHtml()}${photoServersHtml(blockedPatterns())}
@@ -2584,7 +2588,9 @@ function render() {
   $('site').textContent = state.siteName || '';
   const views = { idle: viewIdle, rules: viewRules, checking: viewChecking, blocked: viewBlocked, review: viewReview, filling: viewFilling, probe: viewProbe, publish: viewPublish, done: viewDone, notSaved: viewNotSaved, queueDone: viewQueueDone, wizard: wizardHtml };
   if (state.step === 'wizard') {
+    const kept = focusNow();
     $('panel').innerHTML = wizardHtml();
+    refocusWizard(kept);
     return;
   }
   if (state.step === 'upkeep') {
@@ -2594,6 +2600,20 @@ function render() {
   const kept = (state.step === 'idle' && $('panelReady')) || state.step === 'publish' ? focusNow() : null; // the list, or the publish step (the Listing link box), redrawn under the person
   $('panel').innerHTML = queueBar() + (views[state.step] || viewIdle)();
   if (kept) refocus(kept);
+}
+
+// The set-up is drawn again on every press, which removes the focused button:
+// the control the step keeps (wizardFocusId) takes the focus, else the heading.
+function refocusWizard(kept) {
+  const drawn = [...$('panel').querySelectorAll('[id]')].map((el) => el.id);
+  const id = wizardFocusId(kept, drawn);
+  const el = id ? $(id) : null;
+  if (el) return el.focus();
+  const heading = $('panel').querySelector('h3');
+  if (heading) {
+    heading.tabIndex = -1;
+    heading.focus();
+  }
 }
 
 // The list part only, after a keystroke in the search box: the box keeps its focus and caret.
@@ -3054,6 +3074,7 @@ async function copy(text) {
 async function onClick(ev) {
   const btn = ev.target.closest('button');
   if (!btn) return;
+  if (btn.ariaDisabled === 'true') return undefined; // drawn off (the reason is under the buttons)
   if (btn.dataset.copy !== undefined) return copy(btn.dataset.copy);
   if (promptOpen) return undefined; // Chrome's prompt is open: its answer comes first
   // Every Chrome prompt for photo servers is asked from here, first thing in

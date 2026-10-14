@@ -3817,3 +3817,31 @@ test('the side panel writes its queue copy under the queue\'s lock, as the queue
   assert.match(body, /withLock\(key, write\)/, 'saveQueue writes under withLock on the queue key');
   assert.doesNotMatch(body.slice(0, body.indexOf('\n};')), /await ownSet\(\{ \[key\]: state\.queue \}\);\n\s+else/, 'no bare write outside the lock');
 });
+
+// Rewrite with Claude and Guess from the photos are drawn while the rewrite service is off, as
+// aria-disabled rather than disabled, so a keyboard person can reach them and hear why: the reason is
+// visible text under the buttons, and a click on them does nothing.
+test('Rewrite and Guess from the photos stay in the keyboard order while the rewrite service is off, with the reason in visible text', () => {
+  // the Rewrite button and its visible reason, under the actions row
+  assert.match(src, /const rwOff = !\(rw\.enabled && rw\.endpoint\);\n\s+return `\$\{relistHtml\(\)\}\$\{carCard\(\)\}\$\{readAgainHtml\(\)\}/);
+  assert.match(src, /id="rewrite" \$\{rwOff \? 'aria-disabled="true" aria-describedby="rewriteOffHint"' : ''\}/);
+  assert.match(src, /<p class="hint" id="rewriteOffHint">Rewrite with Claude and Guess from the photos need the rewrite service, which is off\. Click the Lot Current icon in Chrome's toolbar, then Settings, and turn it on\.<\/p>/);
+  assert.doesNotMatch(src, /id="rewrite" \$\{rw\.enabled && rw\.endpoint \? '' : 'disabled/, 'Rewrite is not disabled any more');
+  // the Guess button, linked to its reason
+  assert.match(src, /id="guessColors" \$\{rwOff \? 'aria-disabled="true" aria-describedby="guessOffHint"' : ''\}/);
+  assert.match(src, /<span id="guessOffHint">\(needs the rewrite service; otherwise pick it on the form\)<\/span>/);
+  assert.doesNotMatch(src, /id="guessColors" \$\{rw\.enabled && rw\.endpoint \? '' : 'disabled/, 'Guess is not disabled any more');
+  // a click on an aria-disabled button does nothing, from the mouse or the keyboard
+  assert.match(src, /async function onClick\(ev\) \{\n  const btn = ev\.target\.closest\('button'\);\n  if \(!btn\) return;\n  if \(btn\.ariaDisabled === 'true'\) return undefined;/);
+  // and it looks disabled, as the popup's disabled buttons do
+  const css = readFileSync(new URL('../extension/sidepanel.css', import.meta.url), 'utf8');
+  assert.match(css, /button\[aria-disabled="true"\] \{ opacity: 0\.55; cursor: default; \}/);
+});
+
+// Each Copy button in the "Couldn't fill" list names the field it copies, as the "Not saved" list's do:
+// a screen-reader person hears "Copy the price", not a bare "Copy" for each row.
+test('the Copy buttons in the Couldn\'t fill list are named for their field, as the Not saved list\'s are', () => {
+  assert.match(src, /function copyBtn\(text, label\) \{\n  return `<button type="button" class="copy" data-copy="\$\{esc\(text\)\}" aria-label="Copy the \$\{esc\(label\.toLowerCase\(\)\)\}">Copy<\/button>`;\n\}/);
+  assert.match(src, /copyBtn\(x\.value, x\.label\)/, 'each row passes its field label');
+  assert.doesNotMatch(src, /copyBtn\(x\.value\)/, 'no call without the label');
+});

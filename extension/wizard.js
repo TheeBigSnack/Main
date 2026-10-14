@@ -25,7 +25,7 @@ import { updateKey, withLock, storageErrorText, isStorageFull, STORAGE_FULL } fr
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { signInStart, signInFinish, currentSession, rewriteEndpointFor } from './src/accountFlow.js';
 import { loadSession, redeemInvite } from './src/account.js';
-import { wizardSteps, accountStepModel, joinedFrom, rewriteAtAccount, termsSummary, TERMS_PENDING, addressHint, storeTickReason, GRANT_REFUSED_TEXT } from './src/wizardSteps.js';
+import { wizardSteps, accountStepModel, joinedFrom, rewriteAtAccount, termsSummary, TERMS_PENDING, addressHint, storeTickReason, GRANT_REFUSED_TEXT, readyLine } from './src/wizardSteps.js';
 import { settingNumberWarning, settingNumberNotice, priceNoteWarning, priceNoteNotice } from './src/rewriteTemplate.js';
 
 const steps = () => wizardSteps(accountsConfigured());
@@ -414,7 +414,7 @@ export function wizardHtml() {
         ${nav(true, wiz.busy ? 'Finishing…' : 'Finish set-up', 'wizFinish', !wiz.termsAccepted || wiz.busy)}${error}`;
     }
     case 'done':
-      return `${progress}<div class="banner good"><b>Set up.</b> ${wiz.scan ? `${wiz.scan.ready} car${wiz.scan.ready === 1 ? ' is' : 's are'} ready to post.` : ''} Click the Lot Current icon and open <b>Ready to post</b>.${wiz.granted ? ' Automatic rescans are on; the icon shows your to-do count.' : ''}</div>
+      return `${progress}<div class="banner good"><b>Set up.</b> ${wiz.scan ? readyLine(wiz.scan.ready) : ''}${wiz.granted ? ' Automatic rescans are on; the icon shows your to-do count.' : ''}</div>
         <div class="actions"><button type="button" class="primary" id="wizClose">Close</button></div>`;
     default:
       return '';

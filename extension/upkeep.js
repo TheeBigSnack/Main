@@ -44,7 +44,7 @@ export const up = {
   origin: null, vin: null, kind: null, price: null, listingUrl: '', name: '', listedPrice: null,
   why: '', // a take-down's reason (src/rescan.js): 'not-pre-owned' is a car not sold, so its listing is deleted
   listingId: '', // the listing's id, from its saved link or from this car's own listing page once opened (onListing)
-  tabId: null, status: 'idle', // idle | checking | stopped | opening | waiting | filled | done | gone
+  tabId: null, status: 'idle', // idle | checking | stopped | opening | open-failed | waiting | filled | done | gone
   scanPrice: null, // a price update: the price the last scan found, when the website shows another one now
   basis: null, // a price update: the basis the read worked the price out on, kept on a listing that carries none (markPriceUpdated)
   note: '', filledShown: '', seen: null, error: '', fills: 0, stuck: false, boxShows: '',
@@ -113,7 +113,7 @@ export async function startUpkeep(req, ctx) {
     up.tabId = tab.id;
   } catch (e) {
     up.error = "Couldn't open the listing: " + ((e && e.message) || e);
-    up.status = 'idle';
+    up.status = 'open-failed'; // no tab, so nothing to wait for: the person opens the listing by hand
     ctx.render();
     return;
   }
@@ -381,6 +381,7 @@ export function upkeepHtml() {
   if (up.status === 'checking') body = `<p id="priceChecking">Checking this car's price on the website first…</p>`;
   else if (up.status === 'stopped') body = `<div class="banner warn" id="upkeepStopped">${esc(up.note)}</div>`;
   else if (up.status === 'opening') body = '<p>Opening your listing…</p>';
+  else if (up.status === 'open-failed') body = `<p class="hint" id="upkeepOpenFailed">${up.kind === 'price' ? 'Open the listing yourself, with the link above, and change the price there by hand. Then click <b>I updated it</b>.' : 'Open the listing yourself, with the link above, and click Mark as sold or Delete there. Then click <b>I took it down</b>.'}</p>`;
   else if (up.status === 'gone') body = '<div class="banner warn">The listing tab was closed. Did you finish?</div>';
   else if (up.status === 'done') body = `<div class="banner good" id="upkeepDone">Done. ${esc(up.note)}</div>`;
   else if (up.kind === 'price') {
