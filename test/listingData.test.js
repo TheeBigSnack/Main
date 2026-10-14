@@ -434,3 +434,12 @@ test('on a website whose cars are all at one store, no car is away, ticked or no
     for (const x of said) assert.match(x, /the last scan (?:did not find|found) every car on the website at that one store/, `${doc}: ${x}`);
   }
 });
+
+test('a lien in the website\'s words, "Lienholder" or "liens", is a branded title: the clean-title box is not ticked for it', () => {
+  assert.equal(brandedTitleSignal({ descriptionRaw: 'Lienholder: Example Bank.' }), 'Lienholder');
+  assert.equal(brandedTitleSignal({ descriptionRaw: 'Liens on file, paid off soon.' }), 'Liens');
+  assert.equal(brandedTitleSignal({ features: ['Lienholder listed'] }), 'Lienholder');
+  // a denial (lien free) is not a lien, and a word that only starts with lien is not one either
+  assert.equal(brandedTitleSignal({ descriptionRaw: 'Lien free, clean history.' }), '', 'a car said to be lien free is not branded');
+  assert.equal(brandedTitleSignal({ descriptionRaw: 'Lienient financing on approved credit.' }), '', 'a word that only starts with lien is not a lien');
+});

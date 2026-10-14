@@ -820,6 +820,8 @@ export const priceNoteNotice = (note, dealer) => priceNoteReasons(note, dealer).
 // between, a comma after any but the last), "only one previous owner", "its
 // sole owner", "its first owner", "owned by one family"; not "One-Touch
 // Windows, Owner's Manual"
+// a claim of a Facebook or Meta partnership, approval, endorsement or verification, in either word order ("Meta Verified", "Facebook partner", "approved by Meta")
+const AFFILIATION_CLAIM = /\bmeta[\s-]+verified\b|\b(?:facebook|meta)[\s-]+(?:partners?|partnership|approved|endorsed|authori[sz]ed|official)\b|\b(?:partnered|partners?|endorsed|approved|authori[sz]ed|official)\s+(?:with\s+|by\s+)?(?:facebook|meta)\b/i;
 const ONE_OWNER = /\b(?:(?:one|1|single)[\s-]+(?:(?:(?!(?:new|next|more|other|of|the|a|an|its|your|lucky)\b)[a-z']+,?[\s-]+){0,2}(?!(?:new|next|more|other|of|the|a|an|its|your|lucky)\b)[a-z']+[\s-]+)?owner(?!['\u2019]s[\s-]+(?:manual|guide|handbook|portal|app)\b)|(?:sole|only|first)[\s-]+owner|owned by (?:one|a single))\b/i;
 
 // "Driven by" the engine is what powers the car, not who drove it ("driven
@@ -1544,19 +1546,24 @@ export function runGuardrails(text, { vehicle = {}, dealer = {}, salesperson = {
   // Where the fees go is fine only where the note stands as a sentence of its own in the text (withoutOwnSentenceNote):
   // words the description joins to the note's sentence ("Taxes are lower when you deal direct, and tax, title and fees go
   // to the state, not the dealer.") make it the description's
-  const besideNote = noteSaid ? without(t, [noteSaid]) : t;
-  const besideOwnNote = noteSaid ? withoutOwnSentenceNote(t, noteSaid) : t;
+  // the dealership's own name is a fact the dealer typed, not the description's claim: a name with a banned phrase in it ("Best Deal Auto") is not checked as one
+  const ownName = String((dealer && dealer.name) || '');
+  const tBanned = BANNED_RE.some(([, re]) => re.test(ownName)) ? without(t, [ownName]) : t;
+  const besideNote = noteSaid ? without(tBanned, [noteSaid]) : tBanned;
+  const besideOwnNote = noteSaid ? withoutOwnSentenceNote(tBanned, noteSaid) : tBanned;
   for (const [phrase, re] of BANNED_RE) {
     if (re.test(besideNote)) problems.push({ code: 'banned-phrase', text: `Says "${phrase}"` });
     else if (noteSaid && NOTE_BANNED_RE.get(phrase).test(noteSaid)) problems.push({ code: 'banned-phrase', text: noteBanned(phrase) });
     else if (noteSaid && noteSteer(phrase, noteSaid, dealer, priceNote)) problems.push({ code: 'banned-phrase', text: noteSteer(phrase, noteSaid, dealer, priceNote) });
-    else if (!re.test(t)) continue;
+    else if (!re.test(tBanned)) continue;
     else if (!(noteSaid && re.test(noteSaid))) problems.push({ code: 'banned-phrase', text: `Says "${phrase}"` });
     else if (re.test(besideOwnNote)) problems.push({ code: 'banned-phrase', text: `Says "${phrase}" with words joined to your price note's sentence; keep the note as a sentence of its own: end the sentence before it, and start the one after it with a capital letter` });
   }
   if (ONE_OWNER.test(t) && !vehicle.carfaxOneOwner) {
     problems.push({ code: 'one-owner', text: "Says one owner, but the Carfax one-owner flag isn't set" });
   }
+  // no claim of a Facebook or Meta partnership, approval or verification: Lot Current never has one (CLAUDE.md, rule 8); a plain mention of Facebook is fine
+  if (AFFILIATION_CLAIM.test(t)) problems.push({ code: 'affiliation', text: 'Says a Facebook or Meta partnership, approval or verification, which no listing may claim' });
   // a banned phrase is said once, as banned, not again as a claim; one owner is held to the Carfax flag above, not again as owner history, but what the wording says about the owner is still checked
   const claimText = withoutOneOwner(BANNED_RE.reduce((s, [, re]) => s.replace(new RegExp(re.source, 'gi'), ' '), aboutCar));
   problems.push(...claimProblems(claimText, { vehicle, priceNote, boilerplate }));
@@ -1590,7 +1597,7 @@ export function runGuardrails(text, { vehicle = {}, dealer = {}, salesperson = {
 // these or one of STYLE_PROBLEMS (test/rewriteTemplate.test.js checks it).
 export const RULE_PROBLEM_CODES = Object.freeze([
   'no-dealer', 'no-role', 'unknown-number', 'setting-number', 'price-mismatch', 'mileage-mismatch', 'price-change', 'unsupported-claim', 'one-owner', 'banned-phrase',
-  'price-note-amount', 'no-price-note', 'no-vin', 'closing-price', 'closing-number', 'closing-one-owner', 'closing-banned',
+  'price-note-amount', 'no-price-note', 'no-vin', 'closing-price', 'closing-number', 'closing-one-owner', 'closing-banned', 'affiliation',
 ]);
 
 // The problems in a runGuardrails result that keep the form from being

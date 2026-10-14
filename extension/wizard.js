@@ -13,7 +13,7 @@
 
 import { performScan, rememberSite, keepSeenBasis } from './src/scanRunner.js';
 import { withDefaults, saveProfile, loadProfile, settingsFromProfile, DEFAULT_SALESPERSON_TITLE, priceStepModel, suggestedPriceNote, chooseBasis, basisChangeNote, NO_DEALER_NAME, dealerNameMissing } from './src/settings.js';
-import { originsFor } from './src/rescanSchedule.js';
+import { originsFor, httpOnlyWebsite } from './src/rescanSchedule.js';
 import { askChrome } from './src/askChrome.js';
 import { shortLocation, storeNames, matchStore } from './src/normalize.js';
 import { POSTING_RULES } from './src/postingRules.js';
@@ -379,9 +379,11 @@ export function wizardHtml() {
     }
     case 'permission': {
       const origins = originsFor(wiz.site, wiz.service);
-      // nothing to ask for (a site or service on Facebook's servers, which askChrome refuses): say so instead of offering a button that can't work
+      // nothing to ask for (a plain http site, which Chrome cannot grant, or a site or service on Facebook's servers, which askChrome refuses): say so instead of offering a button that can't work
       const ask = !origins.length
-        ? '<p class="hint">Lot Current can\'t read this website in the background, so automatic rescans stay off for it. The Scan button in the popup still works by hand.</p>'
+        ? (httpOnlyWebsite(wiz.site?.origin)
+          ? '<p class="hint">Chrome allows the automatic check only for https sites, so this site is checked by hand. The Scan button in the popup still works.</p>'
+          : '<p class="hint">Lot Current can\'t read this website in the background, so automatic rescans stay off for it. The Scan button in the popup still works by hand.</p>')
         : wiz.granted ? '<div class="banner good">Permission granted. Automatic rescans are on.</div>' : `<div class="actions"><button type="button" class="primary" id="wizGrant">Allow automatic rescans</button></div><p class="hint">Or skip: the Scan button in the popup still works by hand.</p>`;
       return `${progress}<h3>Automatic rescans</h3>
         <p>Every 3 hours while Chrome is open, Lot Current can re-read the website and put your to-do count on its toolbar icon: sold cars to take down, prices to update.${accountsConfigured() ? " While you are signed in to a Lot Current account, it also sends that rescan's results (your posted list, post records, to-do items and the scan's counts) to your dealership's account." : ''}${origins.length ? ` For that it needs permission to read ${origins.map((o) => `<b>${esc(o.replace(/\/\*$/, ''))}</b>`).join(' and ')} in the background.${wiz.granted ? '' : ' Chrome will ask.'}` : ''} It never touches Facebook.</p>

@@ -387,7 +387,10 @@ export async function fillFormInPage(map, data) {
       const shown = readBack(el);
       return fits(shown) ? { ok: true, shown } : { ok: false, reason: `typed "${value}" but the box shows "${shown.slice(0, 40)}"` };
     }
-    const matching = options.filter((o) => alternatives.some((words) => words.every((w) => has(text(o), w))));
+    const matching0 = options.filter((o) => alternatives.some((words) => words.every((w) => has(text(o), w))));
+    // a suggestion that is exactly what was typed wins over a longer one that also contains it (Grand Cherokee over Grand Cherokee L)
+    const exact = matching0.filter((o) => norm(text(o)) === norm(value));
+    const matching = exact.length ? exact : matching0;
     const shownList = options.slice(0, 5).map(text).join('; ');
     if (!matching.length || (matching.length > 1 && !strict)) {
       key(el, 'Escape');

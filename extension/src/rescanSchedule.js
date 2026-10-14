@@ -80,10 +80,27 @@ export function latestOf(...isos) {
   return best;
 }
 
+// This computer's own address: the browser tests' mock sites run on it, and a
+// dealership is never there. Chrome grants the automatic check only for https
+// websites (the manifest's optional host permission is https only).
+const LOOPBACK = /^(localhost|127(\.\d{1,3}){3}|\[::1\])$/;
+
+/** True for a dealership website the automatic check cannot be granted for: plain http, not this computer. */
+export function httpOnlyWebsite(origin) {
+  try {
+    const url = new URL(String(origin));
+    return url.protocol === 'http:' && !LOOPBACK.test(url.hostname);
+  } catch (e) {
+    return false;
+  }
+}
+
 /**
  * The host-permission patterns a site needs for background rescans: its own
  * origin (for the page probe) plus what its adapter needs to reach the
- * inventory service (adapter.origins(service)).
+ * inventory service (adapter.origins(service)). Only https origins are
+ * named, and this computer's own address; an http dealer site gets none of
+ * its own (httpOnlyWebsite says so to the person).
  * @param site  { origin, adapter? }
  * @param needs either the adapter's list (adapter.origins(service)) or, as
  *   the wizard and the popup pass it, the site's stored service: then the
@@ -101,8 +118,9 @@ export function originsFor(site, needs) {
   // the pattern's '/' + '*' is split so the guard test's comment stripper never sees a block-comment opener
   const add = (u) => {
     try {
+      const url = new URL(u);
       if (isFacebookServer(u)) facebook = true;
-      else out.add(new URL(u).origin + '/' + '*');
+      else if (url.protocol === 'https:' || (url.protocol === 'http:' && LOOPBACK.test(url.hostname))) out.add(url.origin + '/' + '*');
     } catch (e) { /* skip */ }
   };
   if (site && site.origin) add(site.origin);

@@ -464,3 +464,10 @@ test('the field notes and the README describe the gate as it decides: its signs 
   assert.doesNotMatch(readme, /a missing one never blocks a car/);
   assert.match(readme, /a car with only one pre-owned sign [^.]*needs the report, or it goes to \*\*Needs a look\*\*/);
 });
+
+test('"Certified New" is a new car, not a pre-owned one; "Certified Pre-Owned" stays pre-owned', () => {
+  assert.equal(readCondition('Certified New'), 'new');
+  assert.equal(readCondition('Certified New 2027 Jeep Grand Cherokee Limited'), 'new');
+  assert.equal(readCondition('Certified Pre-Owned 2022 Jeep Wagoneer'), 'pre-owned', 'the control: pre-owned stays pre-owned');
+  assert.equal(readCondition('Certified 2022 Jeep Wagoneer'), 'pre-owned');
+});

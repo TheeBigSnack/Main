@@ -515,3 +515,14 @@ test('clearNumbers keeps the closed flags it is told to keep (matched by VIN, ki
   assert.deepEqual(clearNumbers(p, { keep: 'garbage' }).flags, []);
   assert.deepEqual(clearNumbers(p, { keep: [null, 7] }).flags, []);
 });
+
+test('a price flag stays open when its car moves to Needs a look (the website no longer shows a price), and is cleared only when a complete scan has nothing for it', () => {
+  const open = noteFlags(null, { warnings: [], takenAt: T(0), takeDown: [], priceUpdates: [{ vin: WAGONEER, yours: true, name: 'Wagoneer', from: 38383, to: 36883 }] });
+  assert.deepEqual(open.flags.map((f) => [f.vin, f.kind, f.doneAt]), [[WAGONEER, 'price', undefined]]);
+  // a complete scan where the website shows no price for it: it is in Needs a look, not priced, so the flag is still open
+  const looked = noteFlags(open, { warnings: [], takenAt: T(60), takeDown: [], priceUpdates: [], needsALook: [{ vin: WAGONEER, yours: true, name: 'Wagoneer', text: 'Website no longer shows a price (call for price)' }] });
+  assert.deepEqual(looked.flags.map((f) => [f.vin, f.kind, f.doneAt]), [[WAGONEER, 'price', undefined]], 'still open while the car needs a look');
+  // the control: a complete scan that says nothing about the car closes its flag as cleared by the website
+  const cleared = noteFlags(open, { warnings: [], takenAt: T(60), takeDown: [], priceUpdates: [], needsALook: [] });
+  assert.deepEqual(cleared.flags.map((f) => [f.vin, f.how]), [[WAGONEER, 'cleared']]);
+});

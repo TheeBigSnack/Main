@@ -24,13 +24,23 @@ const unreadable = (value) => typeof value === 'string' && /\d/.test(value) && t
 // "Please call for price" there is no price, even if a number exists elsewhere
 // in the record. A main price that can't be read as one amount is no price:
 // the second line (often the "Was" price) never stands in for it.
+// A line labelled as a reference price (MSRP, was, original, retail, sticker) is
+// never the selling price, so a car shown only with one has no price
+const REFERENCE_LABEL = /\b(msrp|was|original|retail|sticker|list price)\b/i;
+const isReference = (line) => Boolean(line && REFERENCE_LABEL.test(String(line.label || '')));
+
 export function websitePrice(raw) {
   const display = raw?.extra_fields?.lightning?.pricing;
   if (display && typeof display === 'object') {
-    if (display.low && unreadable(display.low.value)) return { value: null, label: UNREADABLE };
-    const low = display.low && positive(display.low.value);
+    if (display.low && !isReference(display.low) && unreadable(display.low.value)) return { value: null, label: UNREADABLE };
+    const low = display.low && !isReference(display.low) && positive(display.low.value);
     if (low) return { value: low, label: display.low.label || 'Price' };
-    if (display.high && unreadable(display.high.value)) return { value: null, label: UNREADABLE };
+    if (display.high && !isReference(display.high) && unreadable(display.high.value)) return { value: null, label: UNREADABLE };
+    if (isReference(display.high)) {
+      // the website's own note ("Please call for price") is the label; a reference amount gets the generic one
+      const note = typeof display.high.value === 'string' && !/\d/.test(display.high.value) ? display.high.value.trim() : '';
+      return { value: null, label: note || 'Call for price' };
+    }
     const high = display.high && positive(display.high.value);
     if (high) return { value: high, label: display.high.label || 'Price' };
     const text = display.high && typeof display.high.value === 'string' ? display.high.value : '';
