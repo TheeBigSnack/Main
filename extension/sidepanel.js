@@ -19,7 +19,7 @@ import { readCarForPost, recheck } from './src/vehicleDetails.js';
 import { readyRows, nextToPost, siteChoices, defaultOrigin, siteReadOrigins, missingOrigins, siteAskText } from './src/panelList.js';
 import { SORT_ORDERS, sortOrder } from './src/readyList.js';
 import { generateDescription, guessColorsWithBackend } from './src/rewriter.js';
-import { runGuardrails, ruleProblems, featureChoices, settleHighlights, usableClosingLine, MAX_HIGHLIGHTS } from './src/rewriteTemplate.js';
+import { runGuardrails, ruleProblems, featureChoices, settleHighlights, toggleHighlight, usableClosingLine, MAX_HIGHLIGHTS } from './src/rewriteTemplate.js';
 import { usablePhotos, settlePick, togglePhoto, makeCover, pickSummary } from './src/photoPick.js';
 import { MAX_CHECK_PHOTOS, findBranding, lotSample, withCover, otherCovers, cropPlan, insetOf, fileNameFor, brandingSummary, photoNote } from './src/photoBranding.js';
 import { samplePhoto, cropPhoto } from './src/photoCanvas.js';
@@ -3020,15 +3020,10 @@ async function onPickChange(target) {
   }
   if (target.classList.contains('featureTick')) {
     const t = featureChoices(state.vehicle.features)[Number(target.dataset.feature)];
-    const now = settleHighlights(state.highlights, state.vehicle.features);
-    let next = now.includes(t) ? now.filter((x) => x !== t) : [...now, t];
-    if (next.length > MAX_HIGHLIGHTS) {
-      next = now;
-      setStatus(`Up to ${MAX_HIGHLIGHTS} highlights: untick one first.`, 'error');
-    } else {
-      setStatus('');
-    }
-    state.highlights = next;
+    const r = toggleHighlight(state.highlights, state.vehicle.features, t);
+    if (r.full) setStatus(`Up to ${MAX_HIGHLIGHTS} highlights: untick one first.`, 'error');
+    else setStatus('');
+    state.highlights = r.pick;
     redraw('highlights', highlightsHtml(), target.id);
     await saveFlow();
     return true;

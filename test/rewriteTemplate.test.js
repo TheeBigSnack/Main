@@ -216,7 +216,7 @@ test('a plain-English problem list comes back for the side panel', () => {
 });
 
 // ---------- the salesperson's highlights and closing line ----------
-import { featureChoices, settleHighlights, checkClosingLine, ensureClosingLine, usableClosingLine, spelledQuantities, MAX_HIGHLIGHTS, CLOSING_LINE_MAX_WORDS } from '../extension/src/rewriteTemplate.js';
+import { featureChoices, settleHighlights, toggleHighlight, checkClosingLine, ensureClosingLine, usableClosingLine, spelledQuantities, MAX_HIGHLIGHTS, CLOSING_LINE_MAX_WORDS } from '../extension/src/rewriteTemplate.js';
 
 const SAMPLE_DEALER = { name: 'Example Auto Outlet', city: 'Springfield' };
 
@@ -231,6 +231,29 @@ test('the salesperson\'s highlights: only the website\'s features, as the websit
   assert.deepEqual(settleHighlights(['cruise control', 'Heated Seats', 'Heated seats', 'Leather everything', 'Free gas for a year'], FEATURES), ['Cruise Control', 'Heated Seats']);
   assert.deepEqual(settleHighlights([], FEATURES), []);
   assert.equal(settleHighlights(FEATURES, FEATURES).length, MAX_HIGHLIGHTS);
+});
+
+test('a refused seventh highlight leaves the usual pick as no pick, so later scans still follow the website', () => {
+  const usual = pickFeatures(FEATURES);
+  const extra = featureChoices(FEATURES).find((t) => !usual.includes(t));
+  assert.equal(usual.length, MAX_HIGHLIGHTS, 'the usual pick is already at the limit');
+  const r = toggleHighlight(null, FEATURES, extra);
+  assert.deepEqual(r, { pick: null, full: true });
+  assert.equal(settleHighlights(r.pick, FEATURES).length, MAX_HIGHLIGHTS);
+});
+
+test('a refused highlight keeps an explicit pick exactly as it was', () => {
+  const six = ['Cruise Control', 'Heated Seats', 'Power Windows', 'Bluetooth', 'Backup Camera', 'Keyless Entry'];
+  const r = toggleHighlight(six, FEATURES, 'Tow Package');
+  assert.equal(r.full, true);
+  assert.deepEqual(r.pick, six);
+});
+
+test('ticking a highlight within the limit adds it last; unticking removes it; both settle the pick', () => {
+  assert.deepEqual(toggleHighlight(['Heated Seats'], FEATURES, 'Bluetooth'), { pick: ['Heated Seats', 'Bluetooth'], full: false });
+  assert.deepEqual(toggleHighlight(['Heated Seats', 'Bluetooth'], FEATURES, 'Heated Seats'), { pick: ['Bluetooth'], full: false });
+  const usual = pickFeatures(FEATURES);
+  assert.deepEqual(toggleHighlight(null, FEATURES, usual[0]), { pick: usual.slice(1), full: false }, 'unticking one of the usual six makes an explicit pick of the rest');
 });
 
 test('the template names the picked highlights, and none when all are unticked', () => {

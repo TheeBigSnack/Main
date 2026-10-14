@@ -443,6 +443,16 @@ export function settleHighlights(pick, features) {
   return out.slice(0, MAX_HIGHLIGHTS);
 }
 
+// One tick of the salesperson's highlights. A tick past the limit is refused
+// (full: true) and the pick comes back as it was, so a refused tick on the
+// usual pick (null) keeps following the website's features on later scans.
+export function toggleHighlight(pick, features, feature) {
+  const now = settleHighlights(pick, features);
+  if (now.includes(feature)) return { pick: now.filter((x) => x !== feature), full: false };
+  if (now.length >= MAX_HIGHLIGHTS) return { pick, full: true };
+  return { pick: [...now, feature], full: false };
+}
+
 // ---------- the salesperson's closing line ----------
 // One sentence or two of the salesperson's own, typed in Settings and added
 // after the sign-off of every description ("Ask for me by name; I'm in
