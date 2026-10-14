@@ -310,3 +310,8 @@ test("the two date orders agree with the lines shown in every time zone: the web
     else process.env.TZ = was;
   }
 });
+
+test('a stored in-stock date that is no calendar date ("12", saved before the scan kept only dates) falls back to when the car was first seen', () => {
+  assert.deepEqual(lotDate(car('A', { dateInStock: '12', firstSeenAt: SEEN })), { at: Date.parse(SEEN), dateOnly: false, source: 'lotSync' });
+  assert.deepEqual(lotDate(car('A', { dateInStock: 'Stock 12', firstSeenAt: SEEN })), { at: Date.parse(SEEN), dateOnly: false, source: 'lotSync' });
+});

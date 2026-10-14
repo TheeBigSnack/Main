@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
-import { shortLocation, storeNames, matchStore, conditionFromSchemaOrg, conditionWordFromPath, toNumber } from '../extension/src/normalize.js';
+import { shortLocation, storeNames, matchStore, conditionFromSchemaOrg, conditionWordFromPath, toNumber, calendarDate } from '../extension/src/normalize.js';
 import { conditionWordFromUrl, websitePrice, normalizeVehicle } from '../extension/adapters/dealerInspireNormalize.js';
 import { fixtures } from './helpers.js';
 
@@ -238,4 +238,9 @@ test('storeMatchRule says which rule ticked the store: the name, the website\'s 
   assert.deepEqual(storeMatchRule({ name: 'Ron Lewis Automotive', title: 'Used | Ron Lewis Automotive', host: 'x.test', address: { city: 'Cranberry' } }, GROUP_STORES), { store: 'Ron Lewis CDJR Cranberry', rule: 'town' });
   assert.equal(storeMatchRule({ name: 'Ron Lewis Automotive' }, GROUP_STORES), null);
   assert.equal(matchStore({ name: 'Used Cars', title: 'Used Cars | Ron Lewis CDJR Cranberry' }, GROUP_STORES), 'Ron Lewis CDJR Cranberry', 'matchStore is unchanged');
+});
+
+test('a stock date is kept only when it is a calendar date: "12", "Stock 12" and "5" are not dates (Date.parse reads them as 2001 or as a month)', () => {
+  for (const s of ['2026-09-21T00:00:00.000Z', '2026-09-21T14:30:00.000Z', '09/20/2026', 'Sep 20 2026']) assert.equal(calendarDate(s), s, s);
+  for (const s of ['12', 'Stock 12', '5', 'Stock #4512', '2026', '', '   ', null, 42]) assert.equal(calendarDate(s), null, String(s));
 });

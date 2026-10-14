@@ -14,6 +14,18 @@ export { VEHICLE_FIELDS } from './vehicle.js';
 // and commas count only as thousands separators.
 const ONE_AMOUNT = /^(-?)\s*\$?\s*(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?$/;
 
+// A date the website wrote as a calendar date: ISO (2026-09-21, with or
+// without a time), month/day/year, or a month name with day and year. Any
+// other text is no date. Date.parse reads "12" as December 2001 and
+// "Stock 12" as a month in 2001, so a stock field that is not a date must not
+// reach the days-on-lot count.
+const CALENDAR_DATE = [/\d{4}-\d{2}-\d{2}/, /\b\d{1,2}\/\d{1,2}\/\d{4}\b/, /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4}\b/i];
+export function calendarDate(value) {
+  if (typeof value !== 'string') return null;
+  const s = value.trim();
+  return s && CALENDAR_DATE.some((re) => re.test(s)) && !Number.isNaN(Date.parse(s)) ? s : null;
+}
+
 export function toNumber(value) {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
   if (typeof value !== 'string') return null;

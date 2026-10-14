@@ -6,7 +6,7 @@
 // generic: a second platform writes its own version of this file next to its
 // adapter, using the neutral helpers from src/normalize.js.
 
-import { toNumber, shortLocation } from '../src/normalize.js';
+import { toNumber, shortLocation, calendarDate } from '../src/normalize.js';
 
 function positive(value) {
   const n = toNumber(value);
@@ -125,7 +125,7 @@ export function normalizeVehicle(raw) {
     locationShort: shortLocation(location), // a guess from brand words: one record has no lot to compare with; scanWithSearch settles it over the lot's store names
     photoCount: Math.max(toNumber(media.image_count) ?? 0, images.length), // a zero count never hides the photos listed (as inventoryJson.js does)
     photos: images, // the bulk scan keeps 3 per car; a post-time fetch keeps them all
-    dateInStock: raw.date_in_stock || null,
+    dateInStock: calendarDate(raw.date_in_stock),
 
     // Text for the description writer. Not kept in the compact snapshot.
     descriptionRaw: typeof raw.description === 'string' && raw.description.trim() ? raw.description : null, // a blank one is no description, so it does not count in the lot

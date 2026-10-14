@@ -11,6 +11,7 @@
 // a date: a car with neither is not new and sorts after the dated ones.
 
 import { basisPrice } from './rescan.js';
+import { calendarDate } from './normalize.js';
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
 export const DEFAULT_NEW_DAYS = 7;
@@ -58,6 +59,7 @@ function parse(value, { calendar = false } = {}) {
   if (typeof value !== 'string' || !value.trim()) return null;
   const text = value.trim();
   if (calendar) {
+    if (!calendarDate(text)) return null; // a stored "12" is no date, even one saved before the scan kept only calendar dates
     const iso = DATE_ONLY.exec(text);
     const mdy = iso ? null : SLASH_DATE.exec(text);
     if (iso || mdy) {
