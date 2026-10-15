@@ -2,7 +2,7 @@
 // settings object saved by v0.1 ({ myStores, basis }) keeps working.
 
 import { storeNames, matchStore } from './normalize.js';
-import { DEFAULT_DAILY_CAP } from './cap.js';
+import { DEFAULT_DAILY_CAP, MAX_DAILY_CAP } from './cap.js';
 import { TITLE_STATUSES, CONDITIONS, DEFAULT_LISTING_DEFAULTS } from './listingData.js';
 import { sortOrder, newDaysOf } from './readyList.js';
 import { todoOrderOf } from './todoOrder.js';
@@ -72,7 +72,7 @@ export function withDefaults(settings, site = {}) {
       zip: String(d.zip || (site.address && site.address.zip) || ''),
     },
     priceNote: typeof s.priceNote === 'string' ? s.priceNote : '',
-    dailyCap: Number.isFinite(s.dailyCap) && s.dailyCap > 0 ? Math.floor(s.dailyCap) : DEFAULT_DAILY_CAP,
+    dailyCap: Number.isFinite(s.dailyCap) && Math.floor(s.dailyCap) >= 1 ? Math.min(MAX_DAILY_CAP, Math.floor(s.dailyCap)) : DEFAULT_DAILY_CAP,
     rewrite: { enabled: Boolean(rw.enabled), endpoint: String(rw.endpoint || ''), key: String(rw.key || '') },
     // the dealership's answers for the two form fields the website can't give
     defaults: {

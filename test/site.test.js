@@ -953,8 +953,8 @@ test('the FAQ, How it works, the sales sheet and the store listing name every we
 // manager view does not lock it. If a dealership-level cap is ever built, this test says to change the copy.
 test('the daily cap is described as the code has it: the dealership chooses, each salesperson enters it, nothing locks it', () => {
   const popup = read('../extension/popup.js');
-  assert.match(popup, /field\('Posts per day, per salesperson', 'dailyCap', s\.dailyCap, 'type="number" min="1" max="100"'\)/, 'the cap field moved or changed its range: change the copy with it');
-  assert.match(popup, /dailyCap: Math\.max\(1, Math\.min\(100, /, 'the saved cap is no longer 1 to 100');
+  assert.match(popup, /field\('Posts per day, per salesperson', 'dailyCap', s\.dailyCap, 'type="number" min="1" max="' \+ MAX_DAILY_CAP \+ '"'\)/, 'the cap field moved or changed its range: change the copy with it');
+  assert.match(popup, /dailyCap: Math\.max\(1, Math\.min\(MAX_DAILY_CAP, /, 'the saved cap is no longer 1 to 100');
   const managerCode = ['../manager/data.js', '../manager/manager.js'].map(read).join('\n');
   const migrations = readdirSync(new URL('../supabase/migrations/', import.meta.url)).filter((f) => f.endsWith('.sql')).map((f) => read(`../supabase/migrations/${f}`)).join('\n');
   assert.doesNotMatch(managerCode + migrations, /daily_?cap/i, 'a dealership-level cap now exists: the home page and For managers can say the dealership sets it');
