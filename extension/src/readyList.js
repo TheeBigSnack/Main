@@ -238,7 +238,7 @@ const HOLD_WORDS = [
 export function holdSummary(entries) {
   const held = (Array.isArray(entries) ? entries : []).filter((e) => {
     const codes = Array.isArray(e && e.blockers) ? e.blockers : [];
-    return codes.some((c) => c !== 'other-store');
+    return !codes.includes('other-store');
   });
   const count = (code) => held.filter((e) => e.blockers.includes(code)).length;
   const counts = HOLD_WORDS.map(([code]) => ({ code, count: count(code) }));

@@ -333,3 +333,8 @@ test('ties in the hold-back count go to the reason listed first, and an empty or
   assert.deepEqual(holdSummary([{ blockers: ['other-store'] }]), { total: 0, top: null, photos: 0 });
   assert.equal(holdSentence(holdSummary([])), '');
 });
+
+test('a car at another store is not held back here, even when it also has a reason of its own', () => {
+  assert.deepEqual(holdSummary([{ blockers: ['other-store', 'no-price'] }, { blockers: ['no-photos'] }]), { total: 1, top: { code: 'no-photos', count: 1 }, photos: 1 });
+  assert.deepEqual(holdSummary([{ blockers: ['other-store', 'no-photos'] }]), { total: 0, top: null, photos: 0 });
+});

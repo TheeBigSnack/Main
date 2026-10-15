@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { todoCountFor, badgeText, notificationFor, notifiedAfter, toldCountAfterChange, isDue, scanIsOld, latestOf, originsFor, httpOnlyWebsite, RESCAN_PERIOD_MINUTES, RESCAN_ALARM, SYNC_RETRY_MINUTES, syncRetryAlarm, originOfSyncRetryAlarm, withSiteFields } from '../extension/src/rescanSchedule.js';
 import { scanWithSearch, siteForSnapshot, performScan, probeTab, UNSUPPORTED_MESSAGE } from '../extension/src/scanRunner.js';
 import dealerInspire from '../extension/adapters/dealerInspire.js';
@@ -257,4 +258,13 @@ test('a scan is old once a whole rescan period has passed; no date or a bad date
   assert.equal(scanIsOld(hoursAgo(30), now), true);
   assert.equal(scanIsOld(null, now), false, 'no scan yet: the panel shows its empty state instead');
   assert.equal(scanIsOld('not a date', now), false);
+});
+
+// The side panel draws the Ready list's last-scan line from scanIsOld, so the
+// line goes amber with the pure rule above. Source check: the panel's own
+// file is not run here, so its wiring is pinned by its text.
+test('the side panel marks its last-scan line from scanIsOld, and the mark is the stale class', () => {
+  const panel = readFileSync(new URL('../extension/sidepanel.js', import.meta.url), 'utf8');
+  assert.match(panel, /const stale = scanIsOld\(state\.snapshotTakenAt\);/);
+  assert.match(panel, /<span\$\{stale \? ' class="stale"' : ''\}>Last scan/);
 });

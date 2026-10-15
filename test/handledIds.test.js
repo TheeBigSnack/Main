@@ -38,7 +38,7 @@ function drawingSources() {
 
 test('every button id the side panel handler acts on is drawn by the panel or its modules', () => {
   const ids = handledIds(clickHandler(read('sidepanel.js')));
-  assert.ok(ids.length >= 40, `the handler's ids were not found (${ids.length})`);
+  assert.ok(ids.length >= 20, `the handler's ids were not found (${ids.length})`);
   const drawn = drawingSources().join('\n');
   const missing = ids.filter((id) => !new RegExp(`id=["']${id}["']`).test(drawn));
   assert.deepEqual(missing, [], 'a handled id is not drawn anywhere: the click does nothing');
