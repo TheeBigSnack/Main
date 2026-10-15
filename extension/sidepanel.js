@@ -19,7 +19,7 @@ import { readCarForPost, recheck } from './src/vehicleDetails.js';
 import { readyRows, nextToPost, siteChoices, defaultOrigin, siteReadOrigins, missingOrigins, siteAskText } from './src/panelList.js';
 import { SORT_ORDERS, sortOrder } from './src/readyList.js';
 import { generateDescription, guessColorsWithBackend } from './src/rewriter.js';
-import { runGuardrails, ruleProblems, featureChoices, settleHighlights, usableClosingLine, MAX_HIGHLIGHTS } from './src/rewriteTemplate.js';
+import { runGuardrails, ruleProblems, featureChoices, settleHighlights, toggleHighlight, usableClosingLine, MAX_HIGHLIGHTS } from './src/rewriteTemplate.js';
 import { usablePhotos, settlePick, togglePhoto, makeCover, pickSummary } from './src/photoPick.js';
 import { MAX_CHECK_PHOTOS, findBranding, lotSample, withCover, otherCovers, cropPlan, insetOf, fileNameFor, brandingSummary, photoNote } from './src/photoBranding.js';
 import { samplePhoto, cropPhoto } from './src/photoCanvas.js';
@@ -46,6 +46,7 @@ import { siteKeys, GLOBAL_KEYS, REQUEST_KEYS } from './src/storageKeys.js';
 import { updateKey, withLock, storageErrorText } from './src/storage.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { currentSession, rewriteKeyFor, LAPSED_MESSAGE, LAPSED_SENTENCE } from './src/accountFlow.js';
+import { scanIsOld } from './src/rescanSchedule.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -2071,7 +2072,8 @@ function viewIdle() {
   const cap = dailyCap();
   const list = readyNow();
   const order = sortOrder(state.settings && state.settings.readySort);
-  const meta = `Last scan ${esc(when(state.snapshotTakenAt))} · ${list.total} ready to post · ${cap.remaining} more post${cap.remaining === 1 ? '' : 's'} allowed today`;
+  const stale = scanIsOld(state.snapshotTakenAt);
+  const meta = `<span${stale ? ' class="stale"' : ''}>Last scan ${esc(when(state.snapshotTakenAt))}${stale ? ': out of date, rescan before you post' : ''}</span> · ${list.total} ready to post · ${cap.remaining} more post${cap.remaining === 1 ? '' : 's'} allowed today`;
   const rescanLabel = state.rescanning ? 'Rescanning…' : 'Rescan the website';
   return `<section id="panelReady" aria-labelledby="panelReadyLabel">
     <h3 id="panelReadyLabel">Ready to post</h3>
@@ -3020,15 +3022,10 @@ async function onPickChange(target) {
   }
   if (target.classList.contains('featureTick')) {
     const t = featureChoices(state.vehicle.features)[Number(target.dataset.feature)];
-    const now = settleHighlights(state.highlights, state.vehicle.features);
-    let next = now.includes(t) ? now.filter((x) => x !== t) : [...now, t];
-    if (next.length > MAX_HIGHLIGHTS) {
-      next = now;
-      setStatus(`Up to ${MAX_HIGHLIGHTS} highlights: untick one first.`, 'error');
-    } else {
-      setStatus('');
-    }
-    state.highlights = next;
+    const r = toggleHighlight(state.highlights, state.vehicle.features, t);
+    if (r.full) setStatus(`Up to ${MAX_HIGHLIGHTS} highlights: untick one first.`, 'error');
+    else setStatus('');
+    state.highlights = r.pick;
     redraw('highlights', highlightsHtml(), target.id);
     await saveFlow();
     return true;

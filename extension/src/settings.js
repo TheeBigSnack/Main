@@ -5,6 +5,7 @@ import { storeNames, matchStore } from './normalize.js';
 import { DEFAULT_DAILY_CAP } from './cap.js';
 import { TITLE_STATUSES, CONDITIONS, DEFAULT_LISTING_DEFAULTS } from './listingData.js';
 import { sortOrder, newDaysOf } from './readyList.js';
+import { todoOrderOf } from './todoOrder.js';
 
 export const SETTINGS_VERSION = 2;
 export const DEFAULT_SALESPERSON_TITLE = 'sales consultant';
@@ -87,9 +88,17 @@ export function withDefaults(settings, site = {}) {
     // the Ready to post list (src/readyList.js): its order and how many days a car counts as new; this website's, never the profile's
     readySort: sortOrder(s.readySort),
     newDays: newDaysOf(s.newDays),
+    // the To do tab's order (src/todoOrder.js): this website's, like the Ready list's
+    todoOrder: todoOrderOf(s.todoOrder),
     // crop the website's dealer branding off the photos (src/photoBranding.js): the dealership's choice for its own website, never the profile's
     cropBranding: s.cropBranding !== false,
   };
+}
+
+// The website's settings with the To do order changed: every other setting is
+// kept as it is (the popup saves it beside the rest, under the key's lock).
+export function withTodoOrder(settings, order, site = {}) {
+  return withDefaults({ ...(settings || {}), todoOrder: todoOrderOf(order) }, site);
 }
 
 // The salesperson's own details, kept in chrome.storage.sync so they follow

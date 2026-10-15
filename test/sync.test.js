@@ -803,3 +803,26 @@ test('mergeRegistry: a colleague\'s newer post never takes over the caller\'s ow
   const down = mergeRegistry({ [VIN_A]: mine }, { listings: [row(VIN_A, { user_id: U1, posted_at: T(0), status: 'taken_down', taken_down_at: T(20) }), row(VIN_A, { user_id: U2, posted_at: T(30) })] }, { userId: U1 });
   assert.notEqual(down[VIN_A] && down[VIN_A].postedAt, T(0), 'a taken-down own row is not kept as the caller\'s live entry');
 });
+
+// The privacy line: what the sync payload carries is named field by field.
+// A stored entry can hold anything the side panel once kept (a description,
+// a buyer's name, an email, a phone, a message); none of it may go up.
+test('the sync payload carries only its named fields: no description, buyer, email or phone, however the stored entry is written', () => {
+  const posted = {
+    SALGS2RE7LA123456: {
+      vin: 'SALGS2RE7LA123456', name: '2020 Land Rover Range Rover', price: 45000, postedAt: T(0), userId: 'u', salesperson: 'Dana Seller',
+      description: 'Clean one-owner car. Call Jane Buyer at 555-0100.', buyerName: 'Jane Buyer', buyerEmail: 'jane@example.test',
+      email: 'jane@example.test', phone: '555-0100', message: 'Is it still available?', fbSellerNote: 'chat id 991',
+    },
+  };
+  const body = syncPayload({ origin: 'https://www.example-motors.test', posted, pilot: null, scan: null, since: null, userId: 'u' });
+  const json = JSON.stringify(body);
+  for (const word of ['Clean one-owner', 'Jane Buyer', 'jane@example.test', '555-0100', 'still available', 'chat id']) assert.ok(!json.includes(word), `the payload carries "${word}"`);
+  const TOP = ['version', 'origin', 'posted', 'known', 'pilot', 'scan', 'since', 'today'];
+  const ENTRY = ['name', 'price', 'postedAt', 'listingUrl', 'salesperson', 'updatedAt', 'listedBefore', 'basis'];
+  for (const k of Object.keys(body)) assert.ok(TOP.includes(k), `the payload has a top-level field "${k}" that is not named in the sync contract`);
+  for (const e of Object.values(body.posted)) for (const k of Object.keys(e)) assert.ok(ENTRY.includes(k), `a posted entry carries "${k}"`);
+  const keysDeep = (o) => (o && typeof o === 'object' ? Object.entries(o).flatMap(([k, v]) => [k, ...keysDeep(v)]) : []);
+  for (const bad of ['description', 'buyer', 'buyerName', 'buyerEmail', 'email', 'phone', 'message']) assert.ok(!keysDeep(body).includes(bad), `the payload has a "${bad}" key`);
+  assert.equal(body.posted.SALGS2RE7LA123456.salesperson, 'Dana Seller', 'the salesperson name is sent by design');
+});

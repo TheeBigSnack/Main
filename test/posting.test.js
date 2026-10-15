@@ -989,3 +989,17 @@ test('no end-to-end flow waits on an async check with waitForFunction', () => {
     assert.doesNotMatch(readFileSync(new URL(name, dir), 'utf8'), ASYNC_WAIT, `${name}: waits on an async check with waitForFunction; use until() from until.mjs`);
   }
 });
+
+// The listing reader reads the page's static text (up to 6,000 characters) to
+// find the car, its price and the sold and removed signs. That text stays in
+// the page: the reader returns named flags, the prices it found, the title and
+// the address, and the box's value, nothing else.
+test('the listing reader returns its named fields only, never the page text it read', () => {
+  const src = read('../extension/facebook/fillForm.js');
+  const reader = bodyOf(src, 'readListingInPage');
+  const ret = reader.slice(reader.lastIndexOf('  return {'));
+  const keys = [...ret.matchAll(/^    (\w+)(?=:|,$)/gm)].map((m) => m[1]);
+  assert.deepEqual(keys, ['url', 'title', 'prices', 'sold', 'unavailable', 'matchesId', 'matchesName', 'matchesPrice', 'matchesVin', 'vinInText', 'formOnPage', 'hasPriceBox', 'priceBoxValue']);
+  assert.match(reader, /total < 6000/, 'the page text is capped where it is gathered');
+  assert.equal(/\bchunks\b|\bbody\b/.test(ret), false, 'the return names the page text, not only its flags');
+});

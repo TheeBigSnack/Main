@@ -192,6 +192,21 @@ try {
   assert.match(todo, /photos added, now at Waynesburg/);
   assert.equal(await tab(popup, 'todo').locator('.count').textContent(), '1');
   await popup.screenshot({ path: join(shots, '5-rescan-todo.png'), fullPage: true });
+  // The To do order: a take-down and a price change are two items to order, so the Order control is drawn.
+  // Oldest first is saved for this website and kept when the popup opens again. (With one item in each
+  // section the order itself cannot be seen here; test/todoOrder.test.js checks it.)
+  assert.equal(await popup.locator('#todoOrder').count(), 1, 'two items to order: the Order control is drawn');
+  await popup.selectOption('#todoOrder', 'oldest');
+  await popup.waitForFunction(() => document.querySelector('#todoOrder')?.value === 'oldest');
+  await until(popup, async () => {
+    const all = await chrome.storage.local.get(null);
+    return Object.keys(all).some((k) => k.startsWith('settings:') && all[k]?.todoOrder === 'oldest');
+  }, undefined, { what: 'the To do order saved' });
+  await popup.close();
+  popup = await openPopup();
+  await tab(popup, 'todo').click();
+  assert.equal(await popup.locator('#todoOrder').inputValue(), 'oldest', 'the To do order was kept with this website\'s settings');
+  assert.match(await popup.textContent('.panel'), /Take down\s*1[\s\S]*Update price\s*1/, 'the same items are still listed in their sections');
 
   // ---- Ready to post: the order, the New pill, the date line, the search box ----
   // Two ready cars now: the Silverado that arrived today and the Hellcat

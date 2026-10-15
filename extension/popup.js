@@ -4,7 +4,7 @@ import { draftPrice, markDraftPosted, draftPriceUpdate, withPriceUpdate, draftPi
 import { performScan, keepSeenBasis } from './src/scanRunner.js';
 import { todoCountFor, originsFor, syncRetryAlarm } from './src/rescanSchedule.js';
 import { askChrome } from './src/askChrome.js';
-import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, basisChangeNote, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE, NO_DEALER_NAME, dealerNameMissing, withScanChanges } from './src/settings.js';
+import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, basisChangeNote, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE, NO_DEALER_NAME, dealerNameMissing, withScanChanges, withTodoOrder } from './src/settings.js';
 import { capStatus, capCount, logPost, askWhenListed, DEFAULT_DAILY_CAP } from './src/cap.js';
 import { noteTakenDown, stillListedNow } from './src/takenDown.js';
 import { TITLE_STATUSES, CONDITIONS } from './src/listingData.js';
@@ -21,7 +21,8 @@ import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { signInStart, signInFinish, currentSession, signOutAll, rewriteEndpointFor, describeSync, planText, NOT_CONFIGURED } from './src/accountFlow.js';
 import { clearNumbersKeepingUnsynced } from './src/sync.js';
 import { loadSession, redeemInvite } from './src/account.js';
-import { SORT_ORDERS, sortOrder, newDaysOf, isNew, dateLine, filterText, sortEntries, MIN_NEW_DAYS, MAX_NEW_DAYS, DEFAULT_NEW_DAYS } from './src/readyList.js';
+import { SORT_ORDERS, sortOrder, newDaysOf, isNew, dateLine, filterText, sortEntries, MIN_NEW_DAYS, MAX_NEW_DAYS, DEFAULT_NEW_DAYS, holdSummary, holdSentence } from './src/readyList.js';
+import { orderedTodo, todoOrderControl } from './src/todoOrder.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) =>
@@ -511,7 +512,7 @@ function viewTodo(l) {
     html += `<div class="banner info">First scan saved. Start with the <b>Ready to post</b> tab. From now on, each scan compares with the last one and lists what sold, what changed price and what's new. Mark cars as posted so your own listings come first.</div>`;
   }
   const parts = [];
-  const takeDown = d?.takeDown || [];
+  const takeDown = orderedTodo(d?.takeDown || [], 'takeDown', state.pilot?.flags, state.settings?.todoOrder);
   if (takeDown.length) {
     parts.push(
       section('Take down', 'bad', takeDown.map((t) =>
@@ -526,7 +527,7 @@ function viewTodo(l) {
       ))
     );
   }
-  const updates = d?.priceUpdates || [];
+  const updates = orderedTodo(d?.priceUpdates || [], 'price', state.pilot?.flags, state.settings?.todoOrder);
   if (updates.length) {
     parts.push(
       section('Update price', 'warn', updates.map((p) => {
@@ -572,7 +573,8 @@ function viewTodo(l) {
   const dismiss = (n) => (n.yours && n.why === 'review' ? `<span class="actions"><button type="button" class="small" data-action="dismissLook" data-vin="${esc(n.vin)}" title="Your listing stays up; the item comes back if the website gives another reason">Dismiss</button></span>` : '');
   if (look.length) parts.push(section('Needs a look', 'warn', look.map((n) => row(n, { sub: esc(n.text) + (n.yours ? ' · your listing' : colleagueEntry(n.vin) ? notYours(n.vin) : ''), action: dismiss(n) }))));
   if (!parts.length && d && !d.firstScan) html += empty('Nothing changed since the last scan.');
-  return html + parts.join('');
+  // the order control is drawn only where there is an order to choose (todoOrderControl)
+  return html + todoOrderControl(state.settings?.todoOrder, takeDown.length + updates.length) + parts.join('');
 }
 
 // A queue that is still walking (started here or in the side panel): no new queue is built over it, and its Post N and tick boxes wait.
@@ -608,7 +610,8 @@ function viewReady(l) {
   const lead = `<p class="lead">Pre-owned, at your store, with photos and a price. Click <b>Post</b> on one car, or tick several and <b>Post</b> them as a queue: the side panel pre-fills each form and you click Publish on each. Listed one by hand? Click <b>Mark posted</b>.</p>`;
   if (!l.ready.length) {
     state.picked.clear();
-    return lead + queueStatusHtml() + empty('No cars are ready right now. Open <b>Not ready</b> to see why each car is held back.');
+    const why = holdSentence(holdSummary(l.notReady));
+    return lead + queueStatusHtml() + empty(`No cars are ready right now. ${why ? esc(why) + ' ' : ''}Open <b>Not ready</b> to see why each car is held back.`);
   }
   const cap = dailyCap();
   const capBanner = cap.reached ? `<div class="banner warn" id="capReached">${esc(capText(cap))}</div>` : '';
@@ -663,6 +666,17 @@ function renderReadyBody() {
   if (!body) return;
   body.innerHTML = readyBodyHtml(lists(), dailyCap());
   syncPickAll();
+}
+
+// The To do order, kept with this website's settings (never in the synced
+// profile; src/todoOrder.js). The whole panel is drawn again, and render keeps
+// the focus on the order control.
+async function changeTodoOrder(value) {
+  const site = knownSite();
+  state.settings = withTodoOrder(state.settings || {}, value, site);
+  render();
+  if (!state.origin) return;
+  await update('settings', (s) => withTodoOrder(s || state.settings || {}, value, site));
 }
 
 // The sort order, kept with this website's settings (never in the synced
@@ -1849,6 +1863,7 @@ async function init() {
   $('panel').addEventListener('change', (ev) => {
     if (ev.target.id === 'pickAll' || ev.target.classList.contains('pick')) onPickChange(ev.target);
     else if (ev.target.id === 'readySort') changeReadySort(ev.target.value);
+    else if (ev.target.id === 'todoOrder') changeTodoOrder(ev.target.value);
   });
   // the Ready tab's search box: filters as you type, Escape clears it; in
   // Settings, the warning under the name, role, dealership name or price note follows the typing

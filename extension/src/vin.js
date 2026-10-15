@@ -139,6 +139,9 @@ export function manufacturerFromVin(vin) {
 
 // Two makes agree when they read the same without case, spaces or punctuation: the decode writes "MERCEDES-BENZ", a website "Mercedes Benz".
 const makeKey = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+// A make as words for the local check: lower case, each run of punctuation or spacing one space, so "Land-Rover" and
+// the maker list's "land rover" read the same (the list has hyphens too: "mercedes-benz").
+const makeWords = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 const same = (a, b) => makeKey(a) !== '' && makeKey(a) === makeKey(b);
 
 // Everything that can be checked without the network.
@@ -166,11 +169,11 @@ export function localVinCheck(vehicle = {}) {
     checks.push({ code: 'year', label: 'Model year', ok: true, detail: `${vinYear}, website agrees` });
   } else checks.push({ code: 'year', label: 'Model year', ok: false, detail: `VIN says ${said}, the website says ${vehicle.year}` });
 
-  const make = String(vehicle.make || '').trim().toLowerCase();
+  const make = makeWords(vehicle.make);
   if (!readable) checks.push({ code: 'make', label: 'Manufacturer', ok: null, detail: 'not checked: the VIN fails the format check' });
   else if (!maker) checks.push({ code: 'make', label: 'Manufacturer', ok: null, detail: 'this manufacturer code is not in the local list' });
   else if (!make) checks.push({ code: 'make', label: 'Manufacturer', ok: null, detail: `VIN is from ${maker.group}; the website has no make` });
-  else if (maker.makes.some((m) => make === m || make.startsWith(m + ' '))) checks.push({ code: 'make', label: 'Manufacturer', ok: true, detail: `${maker.group}, website's "${vehicle.make}" agrees` });
+  else if (maker.makes.some((m) => make === makeWords(m) || make.startsWith(makeWords(m) + ' '))) checks.push({ code: 'make', label: 'Manufacturer', ok: true, detail: `${maker.group}, website's "${vehicle.make}" agrees` });
   else checks.push({ code: 'make', label: 'Manufacturer', ok: false, detail: `VIN is from ${maker.group}, but the website says ${vehicle.make}` });
 
   const problems = checks.filter((c) => c.ok === false);

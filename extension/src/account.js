@@ -58,12 +58,23 @@ async function call(fetchImpl, url, init) {
   }
 }
 
+// A bearer token, a signed token (three base64 parts from "eyJ"), an API key
+// of the publishable or secret kind, or a token name written with a value.
+// The server's words can carry one of these back; none of them is shown.
+const SECRET_IN_TEXT = [
+  /Bearer\s+[\w.~+/-]+=*/gi,
+  /eyJ[\w-]*\.[\w-]*\.[\w-]*/g,
+  /sb_(?:secret|publishable)_[\w-]+/gi,
+  /\b(?:access_token|refresh_token|api[_-]?key|apikey)\s*[:=]\s*\S+/gi,
+];
+const scrubSecrets = (text) => SECRET_IN_TEXT.reduce((t, re) => t.replace(re, '[removed]'), text);
+
 // The auth server and the database API word their errors differently; this
 // picks the sentence to show.
 export function errorText(body, status = 0) {
   const b = body && typeof body === 'object' ? body : {};
   const text = b.msg || b.message || b.error_description || (typeof b.error === 'string' ? b.error : '') || '';
-  if (text) return String(text);
+  if (text) return scrubSecrets(String(text));
   if (status === 401) return 'not signed in';
   if (status === 403) return 'not allowed';
   if (status === 429) return 'too many requests; wait a minute and try again';
