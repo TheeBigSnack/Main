@@ -5,11 +5,13 @@
 //
 // Run:  npm ci && npm start   (Node 20+). See backend/README.md.
 //
-// Protection: it listens on 127.0.0.1 unless HOST says otherwise (any other
-// address requires REWRITE_KEY), an optional shared key the extension must
-// send (GET /health answers anyone with { ok: true }, and the month's spend,
-// cap and request count only with the key), a per-minute rate limit per
-// caller, and a monthly cost cap (tracked in usage.json).
+// Protection: it refuses to start without REWRITE_KEY, the shared key the
+// extension must send (GET /health answers anyone with { ok: true }, and the
+// month's spend, cap and request count only with the key); it listens on
+// 127.0.0.1 unless HOST says otherwise; browsers are told only an extension
+// page may read an answer (corsFor); a per-minute rate limit per caller; and
+// a monthly cost cap (tracked in usage.json, which stops the service when it
+// cannot be read).
 //
 // Time: the extension waits 25 seconds (extension/src/rewriter.js
 // REWRITE_TIMEOUT_MS) and then shows its template. Each request has one
@@ -41,13 +43,20 @@ const config = {
   port: Number(process.env.PORT) || 8787,
   // Haiku 4.5 by default for cost and speed; REWRITE_MODEL=claude-sonnet-5 to switch.
   model: process.env.REWRITE_MODEL || 'claude-haiku-4-5',
-  key: process.env.REWRITE_KEY || '', // shared secret the extension must send; empty = open (local use only)
+  key: process.env.REWRITE_KEY || '', // shared secret the extension must send; the service does not start without it
   perMinute: Number(process.env.RATE_LIMIT_PER_MINUTE) || 20,
   monthlyCapUsd: Number(process.env.MONTHLY_COST_CAP_USD) || 25,
   deadlineMs: Number(process.env.REWRITE_DEADLINE_MS) || 20_000,
   usageFile: process.env.USAGE_FILE || join(here, 'usage.json'),
 };
 
+// Every caller sends the key, on loopback too: a service that answers
+// anyone would spend the dealer's Anthropic key for any web page the
+// salesperson visits while it runs.
+if (!config.key) {
+  console.error('REWRITE_KEY is required: set a long random string in backend/.env and enter the same string in the extension (Settings, Description writer). Every request must send it.');
+  process.exit(1);
+}
 if (!process.env.ANTHROPIC_API_KEY) {
   console.error('ANTHROPIC_API_KEY is not set. Copy backend/.env.example to backend/.env and add your key.');
   process.exit(1);
@@ -60,12 +69,22 @@ const priceOf = (model) => PRICES[Object.keys(PRICES).find((m) => String(model).
 
 // ---------- monthly cost cap ----------
 const month = () => new Date().toISOString().slice(0, 7);
+// A usage file that exists but cannot be read stops the service for the
+// month: spend it cannot read is not spend it may call for free. A file for
+// another month starts the month again, and no file is the first run.
 function loadUsage() {
+  let text;
   try {
-    const u = JSON.parse(readFileSync(config.usageFile, 'utf8'));
-    if (u && u.month === month()) return u;
-  } catch (e) { /* first run */ }
-  return { month: month(), usd: 0, requests: 0 };
+    text = readFileSync(config.usageFile, 'utf8');
+  } catch (e) {
+    return { month: month(), usd: 0, requests: 0 };
+  }
+  let u = null;
+  try { u = JSON.parse(text); } catch (e) { u = null; }
+  if (u && typeof u === 'object' && u.month !== month()) return { month: month(), usd: 0, requests: 0 };
+  if (u && u.month === month() && Number.isFinite(u.usd) && Number.isFinite(u.requests)) return u;
+  console.error(`${config.usageFile} cannot be read, so the service is stopped until it is fixed or deleted`);
+  return { month: month(), usd: 0, requests: 0, unreadable: true };
 }
 let usage = loadUsage();
 function addUsage(model, u) {
@@ -212,7 +231,15 @@ function readBody(req, limit, cutAt = limit * 16) {
   });
 }
 
-const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Access-Control-Allow-Methods': 'POST, GET, OPTIONS' };
+// Only an extension page may read an answer. A web page gets no
+// Access-Control-Allow-Origin, so the browser keeps the answer from it; the
+// extension's own origin is named back, as its pages send the key.
+const EXTENSION_ORIGIN = /^chrome-extension:\/\/[a-p]{32}$/;
+function corsFor(req) {
+  const origin = String(req.headers.origin || '');
+  if (!EXTENSION_ORIGIN.test(origin)) return { Vary: 'Origin' };
+  return { Vary: 'Origin', 'Access-Control-Allow-Origin': origin, 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Access-Control-Allow-Methods': 'POST, GET, OPTIONS' };
+}
 
 const OUT_OF_TIME = 'Claude took too long to answer, so it was stopped; the template is used instead';
 
@@ -220,11 +247,11 @@ const server = http.createServer(async (req, res) => {
   const clock = clockFor(res);
   const send = (status, body) => {
     if (res.writableEnded || res.destroyed) return; // the caller went away: nobody to answer
-    res.writeHead(status, { ...CORS, 'Content-Type': 'application/json' });
+    res.writeHead(status, { ...corsFor(req), 'Content-Type': 'application/json' });
     res.end(JSON.stringify(body));
   };
-  if (req.method === 'OPTIONS') { res.writeHead(204, CORS); return res.end(); }
-  const keyed = !config.key || req.headers.authorization === `Bearer ${config.key}`;
+  if (req.method === 'OPTIONS') { res.writeHead(204, corsFor(req)); return res.end(); }
+  const keyed = req.headers.authorization === `Bearer ${config.key}`;
   if (req.method === 'GET' && req.url === '/health') {
     // anyone may see that the service is up; the month's spend, cap and volume only with the key
     if (!keyed) return send(200, { ok: true });
@@ -233,6 +260,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method !== 'POST' || !['/rewrite', '/color'].includes(req.url)) return send(404, { ok: false, error: 'not found' });
   if (!keyed) return send(401, { ok: false, error: 'bad or missing service key' });
   if (!allow(req.socket.remoteAddress || 'unknown')) return send(429, { ok: false, error: 'too many requests; slow down' });
+  if (usage.unreadable && usage.month === month()) return send(429, { ok: false, error: `the usage file (${config.usageFile}) cannot be read, so the service is stopped until it is fixed or deleted` });
   if (usage.month === month() && usage.usd >= config.monthlyCapUsd) return send(429, { ok: false, error: `monthly cost cap of $${config.monthlyCapUsd} reached` });
 
   let body;
@@ -276,13 +304,8 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-// Loopback only unless HOST says otherwise. Any other address puts the service
-// on the network, so it must then have the shared key.
+// Loopback unless HOST says otherwise (the key is required either way).
 const host = process.env.HOST || '127.0.0.1';
-if (host !== '127.0.0.1' && host !== 'localhost' && !config.key) {
-  console.error('REWRITE_KEY is required when HOST is not 127.0.0.1');
-  process.exit(1);
-}
 server.listen(config.port, host, () => {
-  console.log(`Lot Current rewrite service on http://${host}:${config.port} (model ${config.model}, cap $${config.monthlyCapUsd}/month${config.key ? ', key required' : ', NO KEY: local use only'})`);
+  console.log(`Lot Current rewrite service on http://${host}:${config.port} (model ${config.model}, cap $${config.monthlyCapUsd}/month, key required)`);
 });

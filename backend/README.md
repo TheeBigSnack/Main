@@ -21,7 +21,7 @@ The extension works without it: descriptions then come from the built-in templat
    npm start
    ```
 
-   You should see `Lot Current rewrite service on http://127.0.0.1:8787`. Check it with `http://localhost:8787/health`: it answers `{"ok":true}`, and, to a call that sends the `REWRITE_KEY` (or when none is set), also the month's spend, the cap and the number of requests.
+   You should see `Lot Current rewrite service on http://127.0.0.1:8787`. Check it with `http://localhost:8787/health`: it answers `{"ok":true}`, and, to a call that sends the `REWRITE_KEY`, also the month's spend, the cap and the number of requests. The service does not start without a `REWRITE_KEY`, on this machine too: a web page the salesperson visits could otherwise spend the Anthropic key.
 4. In the extension: click the Lot Current icon, **Settings**, **Description writer**. Tick "Use the Lot Current rewrite service", enter `http://localhost:8787` as the address and your `REWRITE_KEY` as the key. Save.
 
 From then on the side panel's first draft comes from Claude, and "Rewrite with Claude" asks for another. Every draft still goes through the guardrails (numbers must match the website, prices and mileage must be the listing's own, banned phrases, the dealership's name and the salesperson's role, length); a draft that fails is regenerated once, then the template is used.
@@ -42,7 +42,7 @@ Current model names and prices: https://docs.claude.com/en/docs/about-claude/mod
 ## Cost and limits
 
 - Each description is roughly 1,500 input tokens and 200 output tokens. On Haiku 4.5 that is about $0.0025, so around $2.50 per 1,000 descriptions; a failed check that triggers a second draft doubles it for that car.
-- `MONTHLY_COST_CAP_USD` (default 25) stops the service for the rest of the month once the running total in `usage.json` reaches it. The extension then falls back to the template.
+- `MONTHLY_COST_CAP_USD` (default 25) stops the service for the rest of the month once the running total in `usage.json` reaches it. The extension then falls back to the template. A `usage.json` that exists but cannot be read stops the service the same way until it is fixed or deleted, so a damaged file gives no free calls.
 - `RATE_LIMIT_PER_MINUTE` (default 20) is per caller.
 - `REWRITE_DEADLINE_MS` (default 20000, 20 seconds) is how long one request may spend on Claude. The extension waits 25 seconds and then shows its template, so a call still running at the deadline is stopped (the answer is 504), a second draft starts only while 40% of that time is left, and a call whose caller has gone away is stopped too. A stopped call adds nothing to `usage.json`.
 
@@ -50,7 +50,7 @@ Current model names and prices: https://docs.claude.com/en/docs/about-claude/mod
 
 For a pilot it can run on one PC (`npm start` in a terminal) with the extension pointed at `http://localhost:8787`. By default it listens on `127.0.0.1` only, so nothing else on the network can reach it.
 
-To share it, run it on any small Node host (Railway, Fly.io, Render, a VPS) with `HOST=0.0.0.0` and `REWRITE_KEY` set in `.env` (the service refuses to start on any address other than `127.0.0.1` without a key), use https, and give the salespeople the address and key. The key is a pilot-only shared secret: every salesperson has the same one, so if a salesperson leaves, change it in `.env` and on every machine that still has the old one. Milestone 4 replaces it with per-user sign-in (a Supabase Edge Function behind real accounts).
+To share it, run it on any small Node host (Railway, Fly.io, Render, a VPS) with `HOST=0.0.0.0` and `REWRITE_KEY` set in `.env` (the service refuses to start without a key, whatever the address), use https, and give the salespeople the address and key. The key is a pilot-only shared secret: every salesperson has the same one, so if a salesperson leaves, change it in `.env` and on every machine that still has the old one. Milestone 4 replaces it with per-user sign-in (a Supabase Edge Function behind real accounts).
 
 ## What it stores
 
