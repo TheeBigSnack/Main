@@ -135,15 +135,18 @@ try {
   assert.deepEqual((await rowNames()).sort(), ['2019 Ram 1500 Classic Express', '2022 Jeep Wagoneer Series III'].sort());
   assert.match(await panel.textContent('#panelQueue'), /^Post the next 2$/);
   assert.equal(await panel.getAttribute(`button[data-post-vin="${RAM}"]`, 'aria-label'), 'Post 2019 Ram 1500 Classic Express');
-  // the arrow keys move the focus from row to row (I-11), and moving it posts nothing
-  const focusedRow = () => panel.evaluate(() => document.activeElement.closest('.row')?.textContent || '');
+  // the arrow keys, Home and End move the focus from row to row (I-11), and moving it posts nothing
+  const rowIndex = () => panel.evaluate(() => [...document.querySelectorAll('#panelList .rows > .row')].indexOf(document.activeElement.closest('.row')));
+  const rowCount = await panel.locator('#panelList .rows > .row').count();
   await panel.focus(`button[data-post-vin="${RAM}"]`);
+  await panel.keyboard.press('End');
+  assert.equal(await rowIndex(), rowCount - 1, 'End goes to the last row');
   await panel.keyboard.press('Home');
-  const firstRow = await focusedRow();
+  assert.equal(await rowIndex(), 0, 'Home goes to the first row');
   await panel.keyboard.press('ArrowDown');
-  assert.notEqual(await focusedRow(), firstRow, 'ArrowDown moves to the next row');
+  assert.equal(await rowIndex(), 1, 'ArrowDown moves to the next row');
   await panel.keyboard.press('ArrowUp');
-  assert.equal(await focusedRow(), firstRow, 'ArrowUp goes back to the first row');
+  assert.equal(await rowIndex(), 0, 'ArrowUp goes back to the first row');
   assert.match(await panel.textContent('#panelQueue'), /^Post the next 2$/, 'moving the focus posts nothing');
   await panel.screenshot({ path: join(shots, 'panel-1-list.png'), fullPage: true });
 

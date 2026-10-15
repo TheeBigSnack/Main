@@ -80,6 +80,11 @@ export function storageNearlyFullText(bytesInUse, quota = LOCAL_QUOTA_BYTES) {
   return `Chrome's storage for Lot Current is ${percent}% full. When it is full, saves fail. ${CLEAR_HINT}`;
 }
 
+// The warning the popup draws, or '' below the warning share (or with no count).
+export function storageWarningText(bytesInUse, quota = LOCAL_QUOTA_BYTES) {
+  return storageNearlyFull(bytesInUse, quota) ? storageNearlyFullText(bytesInUse, quota) : '';
+}
+
 // True when a rejected write hit the quota (Chrome names it in the message).
 export const isStorageFull = (e) => /quota/i.test(String((e && e.message) || e || ''));
 

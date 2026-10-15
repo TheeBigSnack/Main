@@ -552,7 +552,11 @@ export function withheldFirstText(diff) {
   const w = diff && typeof diff === 'object' ? diff.withheld : null;
   if (!w || typeof w !== 'object' || Number(w.scans) !== 1 || !Number.isFinite(Number(w.cars))) return '';
   const cars = (n) => `${n} ${n === 1 ? 'car' : 'cars'}`;
-  return `This scan read ${cars(w.cars)} on the website, where the saved list has ${cars(w.saved ?? 0)}. That looks like a website hiccup, so Lot Current holds the read back: the saved list stays as it was and nothing is marked gone. If the next scan reads the same cars too, To do offers to use the new list.`;
+  const head = `This scan read ${cars(w.cars)} on the website, where the saved list has ${cars(w.saved ?? 0)}. That looks like a website hiccup, so Lot Current holds the read back: the saved list stays as it was and nothing is marked gone.`;
+  // sameRead never agrees a read with no cars, or one that did not get the website's whole list
+  const offerable = Number(w.cars) > 0 && !(w.snapshot && w.snapshot.complete === false);
+  if (!offerable) return `${head} A read like this is never offered: the saved list stays until a scan reads the website's whole list.`;
+  return `${head} If the next scan reads the same cars too, To do offers to use the new list.`;
 }
 
 // The words of the hiccup warning that stay the same whatever the counts.

@@ -192,6 +192,7 @@ test('The side panel moves the focus between Ready rows with the arrow keys, and
   const start = panel.indexOf("$('panel').addEventListener('keydown', (ev) => {\n    if (!['ArrowDown'");
   assert.ok(start > 0, 'the arrow-key handler is on the panel');
   const handler = panel.slice(start, panel.indexOf('\n  });', start));
+  assert.match(handler, /if \(!\['ArrowDown', 'ArrowUp', 'Home', 'End'\]\.includes\(ev\.key\)\) return;/, 'the keys it moves for');
   assert.match(handler, /moveIndex\(here, rows\.length, ev\.key\)/);
   assert.match(handler, /rows\[next\]\.querySelector\('a\[href\]'\) \|\| rows\[next\]\.querySelector\('button'\)/, 'the link first (it opens the car), else the Post button');
   assert.doesNotMatch(handler, /Enter/, 'Enter is not intercepted');

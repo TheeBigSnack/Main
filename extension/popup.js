@@ -16,7 +16,7 @@ import { recordFlags, resolveFlag, updatePilot, summarizePilot, pilotText, pilot
 import { LEGAL, acceptLegal, legalIsCurrent, legalHosted } from './src/legalLinks.js';
 import { POSTING_RULES } from './src/postingRules.js';
 import { siteKeys, GLOBAL_KEYS, SITES_KEY } from './src/storageKeys.js';
-import { updateKey, withLock, storageErrorText, clearWebsiteRecords, storageNearlyFull, storageNearlyFullText } from './src/storage.js';
+import { updateKey, withLock, storageErrorText, clearWebsiteRecords, storageWarningText } from './src/storage.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { signInStart, signInFinish, currentSession, signOutAll, rewriteEndpointFor, describeSync, planText, NOT_CONFIGURED } from './src/accountFlow.js';
 import { clearNumbersKeepingUnsynced } from './src/sync.js';
@@ -86,15 +86,23 @@ async function checkRescanPermission() {
   }
 }
 
-// How many bytes Chrome's storage for the extension holds, read once each
-// time the popup loads (I-40): the To do tab warns near the quota before a
-// save fails. Unknown when Chrome will not say, and then no warning.
+// How many bytes Chrome's storage for the extension holds (I-40): read when
+// the popup opens, and the To do tab warns near the quota before a save fails.
+// Unknown when Chrome will not say, and then no warning.
 async function checkStorageUse() {
   try {
     state.storageBytes = await chrome.storage.local.getBytesInUse(null);
   } catch (e) {
     state.storageBytes = null;
   }
+}
+
+// Again on each storage change while the popup is open, so a number cleared
+// or a scan saved meanwhile moves the warning. Redrawn only when its text moves.
+async function refreshStorageUse() {
+  const before = storageBanner();
+  await checkStorageUse();
+  if (storageBanner() !== before) render();
 }
 
 async function loadSaved() {
@@ -124,7 +132,6 @@ async function loadSaved() {
   state.syncState = data[k.sync] || null;
   state.listingMap = applyOverrides(FORM_MAP, data[GLOBAL_KEYS.devOverrides]); // test hook: addresses only, see formMap.js
   await checkRescanPermission();
-  await checkStorageUse();
 }
 
 // The popup's own storage writes come back through storage.onChanged like
@@ -493,8 +500,8 @@ function scheduleBanner() {
 
 // Near the storage quota, say so before a save fails: how full, and what to clear.
 function storageBanner() {
-  if (!storageNearlyFull(state.storageBytes)) return '';
-  return `<div class="banner warn" id="storageWarning">${esc(storageNearlyFullText(state.storageBytes))}</div>`;
+  const text = storageWarningText(state.storageBytes);
+  return text ? `<div class="banner warn" id="storageWarning">${esc(text)}</div>` : '';
 }
 
 // A lot that keeps reading more than half smaller (src/rescan.js
@@ -526,7 +533,7 @@ const notYours = (vin) => (colleagueEntry(vin) ? ` · posted by ${byWhom(colleag
 function viewTodo(l) {
   const d = state.diff;
   if (!state.snapshot && !d) {
-    return setupBanner() + empty("Or just click <b>Scan website</b> on your dealership's used inventory page.");
+    return storageBanner() + setupBanner() + empty("Or just click <b>Scan website</b> on your dealership's used inventory page.");
   }
   let html = setupBanner() + scheduleBanner() + storageBanner() + notSharedBanner();
   html += `<div class="meta">Last scan ${esc(when(d?.takenAt || state.snapshot?.takenAt))} · ${l.all.length} used cars · ${l.ready.length} ready to post</div>`;
@@ -1917,6 +1924,7 @@ async function init() {
     // The popup's own writes come back through here too: a value that is
     // already what the popup holds is not a change, so nothing is redrawn
     // under the person's pointer.
+    if (area === 'local') refreshStorageUse(); // the bytes in use move with every write (I-40)
     if (area !== 'local' || !state.origin) return;
     const k = siteKeys(state.origin);
     const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
@@ -1961,6 +1969,7 @@ async function init() {
     // while a scan runs, its final render draws everything at once
     if (touched && state.view !== 'settings' && !state.scanning) render();
   });
+  await checkStorageUse(); // the bytes in use, whichever tab the popup opened on (I-40)
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     state.tab = tab || null;

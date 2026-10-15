@@ -1662,6 +1662,23 @@ test('The first held-back read says it is held back, that the saved list stays, 
   for (const bad of [null, undefined, {}, { withheld: null }, { withheld: 'x' }, { withheld: { scans: NaN } }]) {
     assert.equal(rescan.withheldFirstText(bad), '', `${JSON.stringify(bad)} holds no read`);
   }
+  // a read that can never be offered (no cars, or not the website's whole list) never promises the offer
+  const never = rescan.withheldFirstText(held({ cars: 0 }));
+  assert.match(never, /^This scan read 0 cars on the website/);
+  assert.match(never, /A read like this is never offered/);
+  assert.doesNotMatch(never, /offers to use the new list/);
+  const partial = rescan.withheldFirstText(held({ snapshot: { complete: false } }));
+  assert.doesNotMatch(partial, /offers to use the new list/);
+  assert.match(partial, /never offered/);
+  // and withWithheld really keeps such a read at one scan, so the promise would be false
+  const diff = { unreliable: true, takenAt: '2026-09-26T12:00:00.000Z', counts: { previous: 12 } };
+  const four = Object.fromEntries(['A', 'B', 'C', 'D'].map((vin) => [vin, {}]));
+  const short = { takenAt: '2026-09-26T12:00:00.000Z', vehicles: four, complete: false };
+  const once = rescan.withWithheld({ ...diff }, short, null);
+  const twice = rescan.withWithheld({ ...diff }, short, once);
+  assert.equal(twice.withheld.scans, 1, 'an incomplete read never agrees with itself');
+  assert.equal(rescan.withheldOffer(twice), null);
+  assert.doesNotMatch(rescan.withheldFirstText(twice), /offers to use the new list/);
   // the popup draws it right after the offer's banner, so the two never sit in the wrong order
   const popup = readFileSync(new URL('../extension/popup.js', import.meta.url), 'utf8');
   assert.match(popup, /html \+= withheldBanner\(d\);\n  html \+= withheldFirstBanner\(d\);/);
