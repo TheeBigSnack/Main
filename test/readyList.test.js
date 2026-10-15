@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   SORT_ORDERS, DEFAULT_SORT, sortOrder, DEFAULT_NEW_DAYS, MIN_NEW_DAYS, MAX_NEW_DAYS, newDaysOf, DAY_MS,
-  lotDate, ageDays, daysOnLot, isNew, shortDate, dateLine, filterText, compareEntries, sortEntries, newCars,
+  lotDate, ageDays, daysOnLot, isNew, shortDate, dateLine, filterText, compareEntries, sortEntries, newCars, holdSummary, holdSentence,
 } from '../extension/src/readyList.js';
 import { snapshot, fixtures } from './helpers.js';
 
@@ -314,4 +314,22 @@ test("the two date orders agree with the lines shown in every time zone: the web
 test('a stored in-stock date that is no calendar date ("12", saved before the scan kept only dates) falls back to when the car was first seen', () => {
   assert.deepEqual(lotDate(car('A', { dateInStock: '12', firstSeenAt: SEEN })), { at: Date.parse(SEEN), dateOnly: false, source: 'lotSync' });
   assert.deepEqual(lotDate(car('A', { dateInStock: 'Stock 12', firstSeenAt: SEEN })), { at: Date.parse(SEEN), dateOnly: false, source: 'lotSync' });
+});
+
+// The empty Ready list names the commonest reason its held-back cars wait
+// (the Not ready tab shows each car's own reason). Only the blocker codes
+// count; a car at another store is not a held-back car here.
+
+test('the empty Ready list names the most common hold-back reason, counted over the held-back cars only', () => {
+  const held = [{ blockers: ['no-photos', 'no-price'] }, { blockers: ['no-photos'] }, { blockers: ['other-store'] }, { blockers: ['sale-pending'] }];
+  const s = holdSummary(held);
+  assert.deepEqual(s, { total: 3, top: { code: 'no-photos', count: 2 }, photos: 2 });
+  assert.equal(holdSentence(s), 'The most common reason is no photos on the website: 2 of 3 held-back cars.');
+});
+
+test('ties in the hold-back count go to the reason listed first, and an empty or other-store-only list names nothing', () => {
+  assert.equal(holdSummary([{ blockers: ['no-price'] }, { blockers: ['no-photos'] }]).top.code, 'no-photos');
+  assert.deepEqual(holdSummary([]), { total: 0, top: null, photos: 0 });
+  assert.deepEqual(holdSummary([{ blockers: ['other-store'] }]), { total: 0, top: null, photos: 0 });
+  assert.equal(holdSentence(holdSummary([])), '');
 });

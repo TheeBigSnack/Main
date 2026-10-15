@@ -345,7 +345,7 @@ test('the set-up finish says when no car is ready yet, and sends the person to t
   assert.equal(readyLine(3), '3 cars are ready to post. Click the Lot Current icon and open <b>Ready to post</b>.');
   // the Ready tab's empty state points to the same tab, as the set-up finish does
   const popup = readFileSync(new URL('../extension/popup.js', import.meta.url), 'utf8');
-  assert.match(popup, /return lead \+ queueStatusHtml\(\) \+ empty\('No cars are ready right now\. Open <b>Not ready<\/b> to see why each car is held back\.'\);/);
+  assert.match(popup, /const why = holdSentence\(holdSummary\(l\.notReady\)\);\s*return lead \+ queueStatusHtml\(\) \+ empty\(`No cars are ready right now\. \$\{why \? esc\(why\) \+ ' ' : ''\}Open <b>Not ready<\/b> to see why each car is held back\.`\);/);
   // and the finish draws the line from the function
   const wizard = readFileSync(new URL('../extension/wizard.js', import.meta.url), 'utf8');
   assert.match(wizard, /<b>Set up\.<\/b> \$\{wiz\.scan \? readyLine\(wiz\.scan\.ready\) : ''\}/);

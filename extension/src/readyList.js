@@ -221,3 +221,34 @@ export function sortEntries(entries, order, options = {}) {
 export function newCars(entries, options = {}) {
   return sortEntries((Array.isArray(entries) ? entries : []).filter((e) => isNew(e, options)), 'newest', options);
 }
+
+// What holds a car back from the Ready list, in the words the empty list
+// uses. Codes are the snapshot's blocker codes (src/classify.js); the order is
+// the tie-break, the first listed reason wins a tie.
+const HOLD_WORDS = [
+  ['no-photos', 'no photos on the website'],
+  ['no-price', 'no price on the website'],
+  ['sale-pending', 'a sale pending or a car marked sold'],
+  ['not-on-lot', 'not on the lot yet'],
+];
+
+// How the held-back cars split by reason: the total held back here (a car at
+// another store is not counted), the commonest reason (null when none), and
+// how many wait on photos.
+export function holdSummary(entries) {
+  const held = (Array.isArray(entries) ? entries : []).filter((e) => {
+    const codes = Array.isArray(e && e.blockers) ? e.blockers : [];
+    return codes.some((c) => c !== 'other-store');
+  });
+  const count = (code) => held.filter((e) => e.blockers.includes(code)).length;
+  const counts = HOLD_WORDS.map(([code]) => ({ code, count: count(code) }));
+  const best = counts.reduce((a, b) => (b.count > a.count ? b : a), { code: '', count: 0 });
+  return { total: held.length, top: best.count ? best : null, photos: count('no-photos') };
+}
+
+// One sentence for the empty Ready list, or '' when no car is held back.
+export function holdSentence(summary) {
+  if (!summary || !summary.top) return '';
+  const word = HOLD_WORDS.find(([code]) => code === summary.top.code)[1];
+  return `The most common reason is ${word}: ${summary.top.count} of ${summary.total} held-back cars.`;
+}

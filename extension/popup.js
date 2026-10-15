@@ -21,7 +21,7 @@ import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { signInStart, signInFinish, currentSession, signOutAll, rewriteEndpointFor, describeSync, planText, NOT_CONFIGURED } from './src/accountFlow.js';
 import { clearNumbersKeepingUnsynced } from './src/sync.js';
 import { loadSession, redeemInvite } from './src/account.js';
-import { SORT_ORDERS, sortOrder, newDaysOf, isNew, dateLine, filterText, sortEntries, MIN_NEW_DAYS, MAX_NEW_DAYS, DEFAULT_NEW_DAYS } from './src/readyList.js';
+import { SORT_ORDERS, sortOrder, newDaysOf, isNew, dateLine, filterText, sortEntries, MIN_NEW_DAYS, MAX_NEW_DAYS, DEFAULT_NEW_DAYS, holdSummary, holdSentence } from './src/readyList.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) =>
@@ -608,7 +608,8 @@ function viewReady(l) {
   const lead = `<p class="lead">Pre-owned, at your store, with photos and a price. Click <b>Post</b> on one car, or tick several and <b>Post</b> them as a queue: the side panel pre-fills each form and you click Publish on each. Listed one by hand? Click <b>Mark posted</b>.</p>`;
   if (!l.ready.length) {
     state.picked.clear();
-    return lead + queueStatusHtml() + empty('No cars are ready right now. Open <b>Not ready</b> to see why each car is held back.');
+    const why = holdSentence(holdSummary(l.notReady));
+    return lead + queueStatusHtml() + empty(`No cars are ready right now. ${why ? esc(why) + ' ' : ''}Open <b>Not ready</b> to see why each car is held back.`);
   }
   const cap = dailyCap();
   const capBanner = cap.reached ? `<div class="banner warn" id="capReached">${esc(capText(cap))}</div>` : '';
