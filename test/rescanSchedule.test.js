@@ -267,4 +267,7 @@ test('the side panel marks its last-scan line from scanIsOld, and the mark is th
   const panel = readFileSync(new URL('../extension/sidepanel.js', import.meta.url), 'utf8');
   assert.match(panel, /const stale = scanIsOld\(state\.snapshotTakenAt\);/);
   assert.match(panel, /<span\$\{stale \? ' class="stale"' : ''\}>Last scan/);
+
+  const css = readFileSync(new URL('../extension/sidepanel.css', import.meta.url), 'utf8');
+  assert.match(css, /\.meta \.stale \{ color: var\(--warn\); font-weight: 600; \}/, 'the stale mark is amber');
 });

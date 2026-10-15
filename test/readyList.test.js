@@ -338,3 +338,8 @@ test('a car at another store is not held back here, even when it also has a reas
   assert.deepEqual(holdSummary([{ blockers: ['other-store', 'no-price'] }, { blockers: ['no-photos'] }]), { total: 1, top: { code: 'no-photos', count: 1 }, photos: 1 });
   assert.deepEqual(holdSummary([{ blockers: ['other-store', 'no-photos'] }]), { total: 0, top: null, photos: 0 });
 });
+
+test('a malformed entry in the held-back list is skipped, not counted and not thrown on', () => {
+  assert.deepEqual(holdSummary([{}, null, { blockers: [] }, { blockers: ['no-photos'] }]), { total: 1, top: { code: 'no-photos', count: 1 }, photos: 1 });
+  assert.deepEqual(holdSummary([null, {}]), { total: 0, top: null, photos: 0 });
+});

@@ -24,8 +24,8 @@ function clickHandler(src) {
 // Every id the handler acts on: a switch case ('name') or a btn.id comparison.
 function handledIds(body) {
   const ids = new Set();
-  for (const m of body.matchAll(/case '([^']+)':/g)) ids.add(m[1]);
-  for (const m of body.matchAll(/btn\.id === '([^']+)'/g)) ids.add(m[1]);
+  for (const m of body.matchAll(/case (['"])([^'"]+)\1:/g)) ids.add(m[2]);
+  for (const m of body.matchAll(/btn\.id === (['"])([^'"]+)\1/g)) ids.add(m[2]);
   return [...ids].sort();
 }
 
@@ -38,10 +38,15 @@ function drawingSources() {
 
 test('every button id the side panel handler acts on is drawn by the panel or its modules', () => {
   const ids = handledIds(clickHandler(read('sidepanel.js')));
-  assert.ok(ids.length >= 20, `the handler's ids were not found (${ids.length})`);
+  // the handler acts on 40 ids today; a reader that finds well under that has broken, not the handler
+  assert.ok(ids.length >= 30, `the handler's ids were not found (${ids.length})`);
   const drawn = drawingSources().join('\n');
   const missing = ids.filter((id) => !new RegExp(`id=["']${id}["']`).test(drawn));
   assert.deepEqual(missing, [], 'a handled id is not drawn anywhere: the click does nothing');
+});
+
+test('the handler reader reads cases in either quote style, and an id comparison too', () => {
+  assert.deepEqual(handledIds(`switch (x) { case "a": f(); case 'b': g(); if (btn.id === "c") h(); if (btn.id === 'd') k(); }`), ['a', 'b', 'c', 'd']);
 });
 
 test('the handler reader finds the cases and id comparisons it is meant to find', () => {

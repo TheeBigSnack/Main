@@ -4,7 +4,7 @@ import { draftPrice, markDraftPosted, draftPriceUpdate, withPriceUpdate, draftPi
 import { performScan, keepSeenBasis } from './src/scanRunner.js';
 import { todoCountFor, originsFor, syncRetryAlarm } from './src/rescanSchedule.js';
 import { askChrome } from './src/askChrome.js';
-import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, basisChangeNote, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE, NO_DEALER_NAME, dealerNameMissing, withScanChanges } from './src/settings.js';
+import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, basisChangeNote, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE, NO_DEALER_NAME, dealerNameMissing, withScanChanges, withTodoOrder } from './src/settings.js';
 import { capStatus, capCount, logPost, askWhenListed, DEFAULT_DAILY_CAP } from './src/cap.js';
 import { noteTakenDown, stillListedNow } from './src/takenDown.js';
 import { TITLE_STATUSES, CONDITIONS } from './src/listingData.js';
@@ -22,7 +22,7 @@ import { signInStart, signInFinish, currentSession, signOutAll, rewriteEndpointF
 import { clearNumbersKeepingUnsynced } from './src/sync.js';
 import { loadSession, redeemInvite } from './src/account.js';
 import { SORT_ORDERS, sortOrder, newDaysOf, isNew, dateLine, filterText, sortEntries, MIN_NEW_DAYS, MAX_NEW_DAYS, DEFAULT_NEW_DAYS, holdSummary, holdSentence } from './src/readyList.js';
-import { TODO_ORDERS, todoOrderOf, oldestFirst, openFlagTime } from './src/todoOrder.js';
+import { orderedTodo, todoOrderControl } from './src/todoOrder.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) =>
@@ -499,11 +499,6 @@ function withheldBanner(d) {
 // Why a to-do item has no buttons: a colleague's listing, or a car nobody marked as posted.
 const notYours = (vin) => (colleagueEntry(vin) ? ` · posted by ${byWhom(colleagueEntry(vin))}` : ' · not marked as posted');
 
-// The To do tab's take-down and price items in the order the salesperson
-// chose (src/todoOrder.js): oldest first by each item's open pilot flag, or the
-// scan's own order. The flag's time is when the item first appeared.
-const todoItems = (items, kind) => (todoOrderOf(state.settings?.todoOrder) === 'oldest' ? oldestFirst(items, (it) => openFlagTime(state.pilot?.flags, it.vin, kind)) : items);
-
 function viewTodo(l) {
   const d = state.diff;
   if (!state.snapshot && !d) {
@@ -517,7 +512,7 @@ function viewTodo(l) {
     html += `<div class="banner info">First scan saved. Start with the <b>Ready to post</b> tab. From now on, each scan compares with the last one and lists what sold, what changed price and what's new. Mark cars as posted so your own listings come first.</div>`;
   }
   const parts = [];
-  const takeDown = todoItems(d?.takeDown || [], 'takeDown');
+  const takeDown = orderedTodo(d?.takeDown || [], 'takeDown', state.pilot?.flags, state.settings?.todoOrder);
   if (takeDown.length) {
     parts.push(
       section('Take down', 'bad', takeDown.map((t) =>
@@ -532,7 +527,7 @@ function viewTodo(l) {
       ))
     );
   }
-  const updates = todoItems(d?.priceUpdates || [], 'price');
+  const updates = orderedTodo(d?.priceUpdates || [], 'price', state.pilot?.flags, state.settings?.todoOrder);
   if (updates.length) {
     parts.push(
       section('Update price', 'warn', updates.map((p) => {
@@ -578,12 +573,8 @@ function viewTodo(l) {
   const dismiss = (n) => (n.yours && n.why === 'review' ? `<span class="actions"><button type="button" class="small" data-action="dismissLook" data-vin="${esc(n.vin)}" title="Your listing stays up; the item comes back if the website gives another reason">Dismiss</button></span>` : '');
   if (look.length) parts.push(section('Needs a look', 'warn', look.map((n) => row(n, { sub: esc(n.text) + (n.yours ? ' · your listing' : colleagueEntry(n.vin) ? notYours(n.vin) : ''), action: dismiss(n) }))));
   if (!parts.length && d && !d.firstScan) html += empty('Nothing changed since the last scan.');
-  // the order control only where there is an order to choose: two or more items to take down or re-price
-  const picked = todoOrderOf(state.settings?.todoOrder);
-  const orderPick = takeDown.length + updates.length > 1
-    ? `<div class="toolbar listControls"><label class="control"><span>Order</span><select id="todoOrder">${TODO_ORDERS.map((o) => `<option value="${o.id}" ${o.id === picked ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select></label></div>`
-    : '';
-  return html + orderPick + parts.join('');
+  // the order control is drawn only where there is an order to choose (todoOrderControl)
+  return html + todoOrderControl(state.settings?.todoOrder, takeDown.length + updates.length) + parts.join('');
 }
 
 // A queue that is still walking (started here or in the side panel): no new queue is built over it, and its Post N and tick boxes wait.
@@ -677,18 +668,20 @@ function renderReadyBody() {
   syncPickAll();
 }
 
+// The To do order, kept with this website's settings (never in the synced
+// profile; src/todoOrder.js). The whole panel is drawn again, and render keeps
+// the focus on the order control.
+async function changeTodoOrder(value) {
+  const site = knownSite();
+  state.settings = withTodoOrder(state.settings || {}, value, site);
+  render();
+  if (!state.origin) return;
+  await update('settings', (s) => withTodoOrder(s || state.settings || {}, value, site));
+}
+
 // The sort order, kept with this website's settings (never in the synced
 // profile): written from what is stored now, under the key's lock, like
 // every other change to a shared key.
-async function changeTodoOrder(value) {
-  const order = todoOrderOf(value);
-  const site = knownSite();
-  state.settings = withDefaults({ ...(state.settings || {}), todoOrder: order }, site);
-  render(); // the whole panel is drawn again; render keeps the focus on the order control
-  if (!state.origin) return;
-  await update('settings', (s) => withDefaults({ ...(s || state.settings || {}), todoOrder: order }, site));
-}
-
 async function changeReadySort(value) {
   const order = sortOrder(value);
   const site = knownSite();

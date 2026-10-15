@@ -1,8 +1,11 @@
 // The order of the To do tab's take-down and price items (popup.js viewTodo):
 // the scan's own order, or oldest first. An item is as old as the open pilot
-// flag the numbers keep for it (src/pilot.js noteFlags); an item with no open
-// flag goes last, in the scan's order. This website's setting (settings.js
-// todoOrder), chosen from the tab; the default is the scan's own order.
+// flag the numbers keep for it (src/pilot.js noteFlags), so an item with no
+// open flag goes last, in the scan's order. That is every take-down for a car
+// now called new, demo or loaner, which the pilot numbers never time: with
+// "Oldest first" such an item sits after the timed ones, whatever its age.
+// This website's setting (settings.js todoOrder), chosen from the tab; the
+// default is the scan's own order.
 
 export const TODO_ORDERS = Object.freeze([
   Object.freeze({ id: 'listed', label: 'As the scan lists them' }),
@@ -34,4 +37,21 @@ export function openFlagTime(flags, vin, kind) {
   const list = Array.isArray(flags) ? flags : [];
   const f = list.find((x) => x && !x.doneAt && x.vin === vin && x.kind === kind);
   return f ? f.flaggedAt || null : null;
+}
+
+// One kind of item (take-downs or price changes) in the order chosen: oldest
+// first by each item's open flag of that kind, or the scan's own order.
+export function orderedTodo(items, kind, flags, order) {
+  if (todoOrderOf(order) !== 'oldest') return Array.isArray(items) ? [...items] : [];
+  return oldestFirst(items, (it) => openFlagTime(flags, it.vin, kind));
+}
+
+// The To do tab's order control: a select of the two orders with the one
+// chosen selected, drawn only when there are two or more items to order.
+// The labels are constants, so nothing here needs escaping.
+export function todoOrderControl(order, count) {
+  if (!(count > 1)) return '';
+  const picked = todoOrderOf(order);
+  const options = TODO_ORDERS.map((o) => `<option value="${o.id}"${o.id === picked ? ' selected' : ''}>${o.label}</option>`).join('');
+  return `<div class="toolbar listControls"><label class="control"><span>Order</span><select id="todoOrder">${options}</select></label></div>`;
 }

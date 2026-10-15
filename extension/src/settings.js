@@ -95,6 +95,12 @@ export function withDefaults(settings, site = {}) {
   };
 }
 
+// The website's settings with the To do order changed: every other setting is
+// kept as it is (the popup saves it beside the rest, under the key's lock).
+export function withTodoOrder(settings, order, site = {}) {
+  return withDefaults({ ...(settings || {}), todoOrder: todoOrderOf(order) }, site);
+}
+
 // The salesperson's own details, kept in chrome.storage.sync so they follow
 // the person's Chrome sign-in to any computer and survive clearing one
 // website's data or reloading the extension. The rewrite-service key stays

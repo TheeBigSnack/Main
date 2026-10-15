@@ -236,10 +236,8 @@ const HOLD_WORDS = [
 // another store is not counted), the commonest reason (null when none), and
 // how many wait on photos.
 export function holdSummary(entries) {
-  const held = (Array.isArray(entries) ? entries : []).filter((e) => {
-    const codes = Array.isArray(e && e.blockers) ? e.blockers : [];
-    return !codes.includes('other-store');
-  });
+  // a car is held back when it has a reason, and that reason is not another store's
+  const held = (Array.isArray(entries) ? entries : []).filter((e) => Array.isArray(e && e.blockers) && e.blockers.length > 0 && !e.blockers.includes('other-store'));
   const count = (code) => held.filter((e) => e.blockers.includes(code)).length;
   const counts = HOLD_WORDS.map(([code]) => ({ code, count: count(code) }));
   const best = counts.reduce((a, b) => (b.count > a.count ? b : a), { code: '', count: 0 });
