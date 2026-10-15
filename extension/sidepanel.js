@@ -2605,8 +2605,8 @@ function render() {
   const kept = (state.step === 'idle' && $('panelReady')) || state.step === 'publish' ? focusNow() : null; // the list, or the publish step (the Listing link box), redrawn under the person
   const inPanel = keyboardInPanel();
   $('panel').innerHTML = queueBar() + (views[state.step] || viewIdle)();
-  if (kept && $(kept.id)) refocus(kept);
-  else if (inPanel) keepKeyboard();
+  if (kept) refocus(kept);
+  if (inPanel) keepKeyboard(); // a no-op when refocus got the keyboard back
 }
 
 // Whether the keyboard is on something in the panel (a button the person

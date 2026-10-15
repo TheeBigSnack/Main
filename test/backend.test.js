@@ -119,12 +119,10 @@ function refused(env) {
 
 test('backend: the service refuses to start without a REWRITE_KEY, on loopback too, and says what to set', async () => {
   // an empty key is set on purpose: a backend/.env on this machine would otherwise supply one
-  for (const env of [{ REWRITE_KEY: '' }]) {
-    const r = await refused(env);
-    assert.equal(r.code, 1, JSON.stringify(env));
-    assert.match(r.out, /REWRITE_KEY is required/);
-    assert.doesNotMatch(r.out, /rewrite service on http:/);
-  }
+  const r = await refused({ REWRITE_KEY: '' });
+  assert.equal(r.code, 1);
+  assert.match(r.out, /REWRITE_KEY is required/);
+  assert.doesNotMatch(r.out, /rewrite service on http:/);
 });
 
 test('backend: browser CORS names only an extension page as the origin allowed to read an answer; a web page gets none', async () => {
@@ -144,6 +142,31 @@ test('backend: browser CORS names only an extension page as the origin allowed t
     assert.equal(fromExt.headers.get('access-control-allow-origin'), EXT);
   } finally {
     await s.stop();
+  }
+});
+
+test('backend: a usage record for this month counts as it is written: under the cap it answers, at the cap it stops, and a past month starts again', async () => {
+  const thisMonth = new Date().toISOString().slice(0, 7);
+  const under = await start({ usageText: JSON.stringify({ month: thisMonth, usd: 0, requests: 0 }) });
+  try {
+    assert.equal((await json(await under.call('/rewrite', { body: FACTS }))).status, 200);
+  } finally {
+    await under.stop();
+  }
+  const atCap = await start({ usageText: JSON.stringify({ month: thisMonth, usd: 25, requests: 3 }) });
+  try {
+    const r = await json(await atCap.call('/rewrite', { body: FACTS }));
+    assert.equal(r.status, 429);
+    assert.match(r.body.error, /monthly cost cap/);
+    assert.equal(atCap.calls().length, 0, 'no Claude call at the cap');
+  } finally {
+    await atCap.stop();
+  }
+  const lastMonth = await start({ usageText: JSON.stringify({ month: '2000-01', usd: 25, requests: 3 }) });
+  try {
+    assert.equal((await json(await lastMonth.call('/rewrite', { body: FACTS }))).status, 200, 'a past month does not carry its spend over');
+  } finally {
+    await lastMonth.stop();
   }
 });
 

@@ -78,14 +78,14 @@ function loadUsage() {
     text = readFileSync(config.usageFile, 'utf8');
   } catch (e) {
     if (e.code === 'ENOENT') return { month: month(), usd: 0, requests: 0 }; // first run: no file yet
-    console.error(`${config.usageFile} cannot be read (${e.code || e.message}), so the service is stopped until it is fixed or deleted`);
+    console.error(`${config.usageFile} cannot be read (${e.code || e.message}), so the service is stopped until it is fixed or deleted and the service is restarted`);
     return { month: month(), usd: 0, requests: 0, unreadable: true };
   }
   let u = null;
   try { u = JSON.parse(text); } catch (e) { u = null; }
   if (u && typeof u === 'object' && typeof u.month === 'string' && u.month !== month()) return { month: month(), usd: 0, requests: 0 };
   if (u && u.month === month() && Number.isFinite(u.usd) && Number.isFinite(u.requests)) return u;
-  console.error(`${config.usageFile} is not a usage record, so the service is stopped until it is fixed or deleted`);
+  console.error(`${config.usageFile} is not a usage record, so the service is stopped until it is fixed or deleted and the service is restarted`);
   return { month: month(), usd: 0, requests: 0, unreadable: true };
 }
 let usage = loadUsage();
@@ -262,7 +262,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method !== 'POST' || !['/rewrite', '/color'].includes(req.url)) return send(404, { ok: false, error: 'not found' });
   if (!keyed) return send(401, { ok: false, error: 'bad or missing service key' });
   if (!allow(req.socket.remoteAddress || 'unknown')) return send(429, { ok: false, error: 'too many requests; slow down' });
-  if (usage.unreadable && usage.month === month()) return send(429, { ok: false, error: `the usage file (${config.usageFile}) cannot be read, so the service is stopped until it is fixed or deleted` });
+  if (usage.unreadable && usage.month === month()) return send(429, { ok: false, error: `the usage file (${config.usageFile}) cannot be read, so the service is stopped until it is fixed or deleted and the service is restarted` });
   if (usage.month === month() && usage.usd >= config.monthlyCapUsd) return send(429, { ok: false, error: `monthly cost cap of $${config.monthlyCapUsd} reached` });
 
   let body;

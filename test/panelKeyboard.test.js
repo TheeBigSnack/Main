@@ -71,7 +71,7 @@ test('the keyboard moves without scrolling the panel: the page does not jump to 
   assert.deepEqual(bare.focusOptions, [{ preventScroll: true }]);
 });
 
-test('a redraw that leaves thekeyboard in the panel moves nothing', () => {
+test('a redraw that leaves the keyboard in the panel moves nothing', () => {
   const p = page();
   p.doc.activeElement = { inPanel: true, id: 'copyDescription' };
   p.keepKeyboard();
@@ -89,5 +89,6 @@ test('render keeps the keyboard only when it was in the panel before the redraw'
   const before = render.indexOf('const inPanel = keyboardInPanel();');
   const draw = render.indexOf("$('panel').innerHTML = queueBar()");
   assert.ok(before >= 0 && before < draw, 'the focus is read before the panel is drawn');
-  assert.match(render, /if \(kept && \$\(kept\.id\)\) refocus\(kept\);\n\s*else if \(inPanel\) keepKeyboard\(\);/, 'a kept control that the redraw did not draw falls back to the step');
+  // a kept control the redraw drew but that cannot take focus (a heading, a disabled button) still falls back
+  assert.match(render, /if \(kept\) refocus\(kept\);\n\s*if \(inPanel\) keepKeyboard\(\);/, 'the step takes the keyboard when the kept control did not get it');
 });
