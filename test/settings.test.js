@@ -275,7 +275,7 @@ test("cropping the dealer branding off the photos is this website's setting: on 
 import { readFileSync } from 'node:fs';
 import { NO_DEALER_NAME, dealerNameMissing } from '../extension/src/settings.js';
 import { checkClosingLine, cleanClosingLine } from '../extension/src/rewriteTemplate.js';
-import { DEFAULT_DAILY_CAP } from '../extension/src/cap.js';
+import { DEFAULT_DAILY_CAP, MAX_DAILY_CAP } from '../extension/src/cap.js';
 import { MIN_NEW_DAYS, MAX_NEW_DAYS, DEFAULT_NEW_DAYS } from '../extension/src/readyList.js';
 
 // popup.js onSettingsSubmit, as written, with the page around it stubbed: the form's fields, storage and the note by the Save button.
@@ -297,7 +297,7 @@ async function saveSettings({ fields, settings = null, siteName = '', origin = '
     state, FormData, document: { activeElement: null },
     accountAction: () => { throw new Error('no account button was pressed'); },
     render: () => {}, setStatus: (text, kind) => said.push([text, kind]),
-    checkClosingLine, cleanClosingLine, withDefaults, chooseBasis, DEFAULT_SALESPERSON_TITLE, DEFAULT_DAILY_CAP, MIN_NEW_DAYS, MAX_NEW_DAYS, DEFAULT_NEW_DAYS,
+    checkClosingLine, cleanClosingLine, withDefaults, chooseBasis, DEFAULT_SALESPERSON_TITLE, DEFAULT_DAILY_CAP, MAX_DAILY_CAP, MIN_NEW_DAYS, MAX_NEW_DAYS, DEFAULT_NEW_DAYS,
     legalHosted: () => false, acceptLegal: () => ({}), chrome: {}, rescanOrigins: () => [],
     save: async (name) => { saved.push([name, state.settings]); return true; },
     setSiteAuto: async () => {},

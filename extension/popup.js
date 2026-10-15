@@ -5,7 +5,7 @@ import { performScan, keepSeenBasis } from './src/scanRunner.js';
 import { todoCountFor, originsFor, syncRetryAlarm } from './src/rescanSchedule.js';
 import { askChrome } from './src/askChrome.js';
 import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, basisChangeNote, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE, NO_DEALER_NAME, dealerNameMissing, withScanChanges, withTodoOrder } from './src/settings.js';
-import { capStatus, capCount, capLeftText, logPost, askWhenListed, DEFAULT_DAILY_CAP } from './src/cap.js';
+import { capStatus, capCount, capLeftText, logPost, askWhenListed, DEFAULT_DAILY_CAP, MAX_DAILY_CAP } from './src/cap.js';
 import { noteTakenDown, stillListedNow } from './src/takenDown.js';
 import { TITLE_STATUSES, CONDITIONS } from './src/listingData.js';
 import { checkClosingLine, cleanClosingLine, CLOSING_LINE_MAX_WORDS, settingNumberWarning, settingNumberNotice, priceNoteWarning, priceNoteNotice } from './src/rewriteTemplate.js';
@@ -1139,7 +1139,7 @@ function viewSettings() {
       <p class="hint" id="cropBrandingHint">You see each photo before you post and can use the original. Lot Current only cuts a strip off the edges; it never paints over anything.</p>
     </fieldset>
     <fieldset><legend>Safety</legend>
-      ${field('Posts per day, per salesperson', 'dailyCap', s.dailyCap, 'type="number" min="1" max="100"')}
+      ${field('Posts per day, per salesperson', 'dailyCap', s.dailyCap, 'type="number" min="1" max="' + MAX_DAILY_CAP + '"')}
       <p class="hint">A safety setting, not a guarantee: Meta doesn't publish its limits.</p>
     </fieldset>
     <fieldset><legend>Posting rules</legend>
@@ -1838,7 +1838,7 @@ async function onSettingsSubmit(ev) {
       salesperson: { name: str('salespersonName'), title: str('salespersonTitle') || DEFAULT_SALESPERSON_TITLE, closingLine: cleanClosingLine(form.get('closingLine')) },
       dealer: { name: str('dealerName') || prev.dealer.name, city: str('dealerCity'), state: str('dealerState').toUpperCase(), zip: str('dealerZip') },
       priceNote: str('priceNote'),
-      dailyCap: Math.max(1, Math.min(100, Number(form.get('dailyCap')) || DEFAULT_DAILY_CAP)),
+      dailyCap: Math.max(1, Math.min(MAX_DAILY_CAP, Number(form.get('dailyCap')) || DEFAULT_DAILY_CAP)),
       newDays: Math.max(MIN_NEW_DAYS, Math.min(MAX_NEW_DAYS, Number(form.get('newDays')) || DEFAULT_NEW_DAYS)), // 1 to 30; blank or 0 is the default (readySort stays as the Ready tab's menu set it, through ...prev)
       rewrite: { enabled: form.get('rewriteEnabled') === 'on', endpoint: str('rewriteEndpoint'), key: form.has('rewriteKey') ? str('rewriteKey') : prev.rewrite.key }, // no key field while signed in: the typed one is kept, never the token
       defaults: { titleStatus: str('defaultTitleStatus'), condition: str('defaultCondition') },

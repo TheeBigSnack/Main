@@ -4,6 +4,8 @@
 import { takenDownList } from './takenDown.js';
 
 export const DEFAULT_DAILY_CAP = 10;
+// The most a dealership may set for a salesperson (CLAUDE.md, non-negotiable 7).
+export const MAX_DAILY_CAP = 100;
 
 const localDay = (d) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 
