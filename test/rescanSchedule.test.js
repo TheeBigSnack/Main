@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { todoCountFor, badgeText, notificationFor, notifiedAfter, toldCountAfterChange, isDue, latestOf, originsFor, httpOnlyWebsite, RESCAN_PERIOD_MINUTES, RESCAN_ALARM, SYNC_RETRY_MINUTES, syncRetryAlarm, originOfSyncRetryAlarm, withSiteFields } from '../extension/src/rescanSchedule.js';
+import { todoCountFor, badgeText, notificationFor, notifiedAfter, toldCountAfterChange, isDue, scanIsOld, latestOf, originsFor, httpOnlyWebsite, RESCAN_PERIOD_MINUTES, RESCAN_ALARM, SYNC_RETRY_MINUTES, syncRetryAlarm, originOfSyncRetryAlarm, withSiteFields } from '../extension/src/rescanSchedule.js';
 import { scanWithSearch, siteForSnapshot, performScan, probeTab, UNSUPPORTED_MESSAGE } from '../extension/src/scanRunner.js';
 import dealerInspire from '../extension/adapters/dealerInspire.js';
 import { fixtures, MY_STORE, fakeDealerPage, fakeChrome } from './helpers.js';
@@ -243,4 +243,18 @@ test('withSiteFields gives a registered website its new fields, and nothing for 
   assert.deepEqual(withSiteFields(sites, 'https://a.test', { lastError: 'x' }), { 'https://a.test': { name: 'A', auto: true, lastError: 'x' }, 'https://b.test': { name: 'B', auto: false } });
   assert.equal(withSiteFields(sites, 'https://gone.test', { lastError: 'x' }), undefined, 'a cleared website is not registered again');
   assert.equal(withSiteFields(undefined, 'https://a.test', { lastError: 'x' }), undefined);
+});
+
+// The Ready list says when the website was last read. Once that read is a
+// whole rescan period old, the line is marked, so a list that has gone stale
+// (Chrome closed, rescans off) is not taken for a current one.
+test('a scan is old once a whole rescan period has passed; no date or a bad date is not marked', () => {
+  const now = '2026-10-15T12:00:00.000Z';
+  const hoursAgo = (h) => new Date(Date.parse(now) - h * 3600 * 1000).toISOString();
+  assert.equal(scanIsOld(hoursAgo(1), now), false, 'an hour-old scan is current');
+  assert.equal(scanIsOld(hoursAgo(2.9), now), false, 'just under the period is current');
+  assert.equal(scanIsOld(hoursAgo(3), now), true, 'a full period is old');
+  assert.equal(scanIsOld(hoursAgo(30), now), true);
+  assert.equal(scanIsOld(null, now), false, 'no scan yet: the panel shows its empty state instead');
+  assert.equal(scanIsOld('not a date', now), false);
 });

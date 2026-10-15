@@ -46,6 +46,7 @@ import { siteKeys, GLOBAL_KEYS, REQUEST_KEYS } from './src/storageKeys.js';
 import { updateKey, withLock, storageErrorText } from './src/storage.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { currentSession, rewriteKeyFor, LAPSED_MESSAGE, LAPSED_SENTENCE } from './src/accountFlow.js';
+import { scanIsOld } from './src/rescanSchedule.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -2071,7 +2072,8 @@ function viewIdle() {
   const cap = dailyCap();
   const list = readyNow();
   const order = sortOrder(state.settings && state.settings.readySort);
-  const meta = `Last scan ${esc(when(state.snapshotTakenAt))} · ${list.total} ready to post · ${cap.remaining} more post${cap.remaining === 1 ? '' : 's'} allowed today`;
+  const stale = scanIsOld(state.snapshotTakenAt);
+  const meta = `<span${stale ? ' class="stale"' : ''}>Last scan ${esc(when(state.snapshotTakenAt))}${stale ? ': out of date, rescan before you post' : ''}</span> · ${list.total} ready to post · ${cap.remaining} more post${cap.remaining === 1 ? '' : 's'} allowed today`;
   const rescanLabel = state.rescanning ? 'Rescanning…' : 'Rescan the website';
   return `<section id="panelReady" aria-labelledby="panelReadyLabel">
     <h3 id="panelReadyLabel">Ready to post</h3>

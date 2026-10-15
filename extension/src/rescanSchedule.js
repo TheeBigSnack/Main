@@ -70,6 +70,14 @@ export function isDue(lastIso, nowIso = new Date().toISOString(), periodMinutes 
   return Date.parse(nowIso) - last >= periodMinutes * 60 * 1000 - DUE_SLACK_MS;
 }
 
+// A scan a whole period old (no slack: the list is stale once the period has
+// passed, not before). No date, or one that doesn't parse, is not marked.
+export function scanIsOld(takenIso, nowIso = new Date().toISOString(), periodMinutes = RESCAN_PERIOD_MINUTES) {
+  const taken = Date.parse(takenIso || '');
+  if (Number.isNaN(taken)) return false;
+  return Date.parse(nowIso) - taken >= periodMinutes * 60 * 1000;
+}
+
 // The most recent of several ISO timestamps (missing or unparsable ones are ignored).
 export function latestOf(...isos) {
   let best = null;
