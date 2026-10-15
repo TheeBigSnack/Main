@@ -409,7 +409,7 @@ export function upkeepHtml() {
     body = up.stuck
       ? `<div class="banner warn" id="priceStuck">The Price box shows "${esc(up.boxShows)}", not ${money(up.price)}. Lot Current has filled it ${MAX_FILLS} times and the form keeps showing that price, so it has stopped filling. Type ${money(up.price)} in the Price box yourself, then click <b>Update</b>.</div>`
       : up.status === 'filled'
-      ? `<div class="banner good" id="priceFilled">New price ${money(up.price)} is in the Price box (it shows "${esc(up.filledShown)}"). Now click <b>Update</b> on Facebook. Lot Current will notice when the listing shows the new price.</div>`
+      ? `<div class="banner good" id="priceFilled">New price ${money(up.price)} is in the Price box (it shows "${esc(up.filledShown)}"). Now click <b>Update</b> on Facebook. Lot Current will notice when the listing shows the new price. Facebook can let people who saved this car know about the new price; Lot Current doesn't.</div>`
       : `<div class="banner info" id="priceWaiting">On Facebook, click <b>Edit listing</b>. As soon as the Price box appears on this car's form, Lot Current fills in <b>${money(up.price)}</b>${up.listedPrice ? ` (was ${money(up.listedPrice)})` : ''}, the price the website shows now: Lot Current read the car on the website again just before opening the listing${up.scanPrice ? ` (the last scan had found ${money(up.scanPrice)})` : ''}. Then you click <b>Update</b>.</div>`;
   } else {
     body = up.why === 'not-pre-owned'
