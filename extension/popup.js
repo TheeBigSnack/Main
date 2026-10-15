@@ -5,7 +5,7 @@ import { performScan, keepSeenBasis } from './src/scanRunner.js';
 import { todoCountFor, originsFor, syncRetryAlarm } from './src/rescanSchedule.js';
 import { askChrome } from './src/askChrome.js';
 import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, basisChangeNote, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE, NO_DEALER_NAME, dealerNameMissing, withScanChanges, withTodoOrder } from './src/settings.js';
-import { capStatus, capCount, logPost, askWhenListed, DEFAULT_DAILY_CAP } from './src/cap.js';
+import { capStatus, capCount, capLeftText, logPost, askWhenListed, DEFAULT_DAILY_CAP } from './src/cap.js';
 import { noteTakenDown, stillListedNow } from './src/takenDown.js';
 import { TITLE_STATUSES, CONDITIONS } from './src/listingData.js';
 import { checkClosingLine, cleanClosingLine, CLOSING_LINE_MAX_WORDS, settingNumberWarning, settingNumberNotice, priceNoteWarning, priceNoteNotice } from './src/rewriteTemplate.js';
@@ -1199,6 +1199,9 @@ function problemReport() {
 
 function render() {
   $('site').textContent = state.origin ? state.siteName || state.origin : "Open your dealership's website, then scan.";
+  const left = state.origin ? capLeftText(dailyCap()) : '';
+  $('capLeft').textContent = left;
+  $('capLeft').hidden = !left;
   $('scan').textContent = state.snapshot ? 'Rescan website' : 'Scan website';
   $('scan').disabled = Boolean(state.scanning); // disabled in popup.html until the first render after start-up, and while a scan runs
   $('settingsBtn').setAttribute('aria-pressed', String(state.view === 'settings'));

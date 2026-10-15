@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { capStatus, postsToday, serverPostsToday, draftsToday, capCount, askWhenListed } from '../extension/src/cap.js';
+import { capStatus, postsToday, serverPostsToday, draftsToday, capCount, capLeftText, askWhenListed } from '../extension/src/cap.js';
 import { createQueue } from '../extension/src/queue.js';
 import { nextToPost } from '../extension/src/panelList.js';
 import { draftRecord } from '../extension/src/drafts.js';
@@ -404,4 +404,30 @@ test('Mark posted does not ask for a car on today\'s log or one whose form Lot C
   // the help says when nothing is asked
   const help = readFileSync(new URL('../docs/help.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
   assert.match(help, /Nothing is asked for a car Lot Current has a record of from today, and it counts as today's post: a form it filled today that you saved as a Facebook draft, or published without the side panel recording it \(the panel closed before \*\*It's posted\*\*, or the car marked here while its form is open\), or a car recorded as posted today and unmarked or taken down since\./);
+});
+
+test('The popup header says how many posts are left today, or that the cap is reached', () => {
+  // nothing posted yet: all of the cap is left
+  assert.equal(capLeftText(capStatus({}, 10, now)), 'Posts left today: 10 of 10');
+  // one post recorded today: nine left
+  const one = markPosted({}, { vin: VIN_A, name: 'A', price: 1 }, 'website', today(1));
+  assert.equal(capLeftText(capStatus(one, 10, now)), 'Posts left today: 9 of 10');
+  // a cap of one has no plural to get wrong
+  assert.equal(capLeftText(capStatus({}, 1, now)), 'Posts left today: 1 of 1');
+  // at the cap the line says so, rather than "0 of 2"
+  const two = { ...one, ...markPosted({}, { vin: VIN_B, name: 'B', price: 1 }, 'website', today(2)) };
+  assert.equal(capLeftText(capStatus(two, 2, now)), 'Daily post cap reached');
+  // no count to show, no line
+  for (const bad of [null, undefined, {}, { used: 1 }, { remaining: 'x', cap: 10 }]) assert.equal(capLeftText(bad), '');
+
+  // the header draws the line under the website name only when a website is open, and redraws it with the rest
+  const html = readFileSync(new URL('../extension/popup.html', import.meta.url), 'utf8');
+  assert.match(html, /<div class="cap-left" id="capLeft" hidden><\/div>/, 'the header has the line, hidden until it has text');
+  const popup = readFileSync(new URL('../extension/popup.js', import.meta.url), 'utf8');
+  const renderBody = popup.slice(popup.indexOf('function render() {'), popup.indexOf('const views = {'));
+  assert.match(renderBody, /const left = state\.origin \? capLeftText\(dailyCap\(\)\) : '';/, 'render reads the cap only with a website open');
+  assert.match(renderBody, /\$\('capLeft'\)\.textContent = left;/);
+  assert.match(renderBody, /\$\('capLeft'\)\.hidden = !left;/);
+  const css = readFileSync(new URL('../extension/popup.css', import.meta.url), 'utf8');
+  assert.match(css, /\.brand \.cap-left \{ color: var\(--muted\); font-size: 12px; \}/);
 });
