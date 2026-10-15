@@ -1,11 +1,11 @@
 import { assessVehicle, DECISION } from './src/classify.js';
-import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, listingLine, settleDiff, postedBasis, withPostedBasis, markLookDismissed, withWithheld, withheldOffer, acceptWithheld, scanCar, priceItemWaits } from './src/rescan.js';
+import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, listingLine, settleDiff, postedBasis, withPostedBasis, markLookDismissed, withWithheld, withheldOffer, withheldFirstText,acceptWithheld, scanCar, priceItemWaits } from './src/rescan.js';
 import { draftPrice, markDraftPosted, draftPriceUpdate, withPriceUpdate, draftPill, draftScanCar, isOpenDraft, retireDraft } from './src/drafts.js';
 import { performScan, keepSeenBasis } from './src/scanRunner.js';
 import { todoCountFor, originsFor, syncRetryAlarm } from './src/rescanSchedule.js';
 import { askChrome } from './src/askChrome.js';
 import { defaultSettings, withDefaults, feeGap, suggestedPriceNote, loadProfile, saveProfile, settingsFromProfile, showsLowerPrice, chooseBasis, basisChangeNote, PROFILE_KEY, DEFAULT_SALESPERSON_TITLE, NO_DEALER_NAME, dealerNameMissing, withScanChanges, withTodoOrder } from './src/settings.js';
-import { capStatus, capCount, logPost, askWhenListed, DEFAULT_DAILY_CAP } from './src/cap.js';
+import { capStatus, capCount, capLeftText, logPost, askWhenListed, DEFAULT_DAILY_CAP } from './src/cap.js';
 import { noteTakenDown, stillListedNow } from './src/takenDown.js';
 import { TITLE_STATUSES, CONDITIONS } from './src/listingData.js';
 import { checkClosingLine, cleanClosingLine, CLOSING_LINE_MAX_WORDS, settingNumberWarning, settingNumberNotice, priceNoteWarning, priceNoteNotice } from './src/rewriteTemplate.js';
@@ -16,7 +16,7 @@ import { recordFlags, resolveFlag, updatePilot, summarizePilot, pilotText, pilot
 import { LEGAL, acceptLegal, legalIsCurrent, legalHosted } from './src/legalLinks.js';
 import { POSTING_RULES } from './src/postingRules.js';
 import { siteKeys, GLOBAL_KEYS, SITES_KEY } from './src/storageKeys.js';
-import { updateKey, withLock, storageErrorText, clearWebsiteRecords } from './src/storage.js';
+import { updateKey, withLock, storageErrorText, clearWebsiteRecords, storageWarningText } from './src/storage.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { signInStart, signInFinish, currentSession, signOutAll, rewriteEndpointFor, describeSync, planText, NOT_CONFIGURED } from './src/accountFlow.js';
 import { clearNumbersKeepingUnsynced } from './src/sync.js';
@@ -84,6 +84,32 @@ async function checkRescanPermission() {
   } catch (e) {
     state.rescanPermission = false;
   }
+}
+
+// How many bytes Chrome's storage for the extension holds (I-40): read when
+// the popup opens, and the To do tab warns near the quota before a save fails.
+// Unknown when Chrome will not say, and then no warning.
+async function checkStorageUse() {
+  try {
+    state.storageBytes = await chrome.storage.local.getBytesInUse(null);
+  } catch (e) {
+    state.storageBytes = null;
+  }
+}
+
+// Again on each storage change while the popup is open, so a number cleared
+// or a scan saved meanwhile moves the warning. A banner already shown is
+// changed in place, so Settings and a running scan are not redrawn under the
+// person; the page is redrawn only to show a banner that is not there yet, on
+// the To do tab with no scan running.
+async function refreshStorageUse() {
+  await checkStorageUse();
+  await initDone; // a write during start-up waits for the first render, so no half-loaded page is drawn
+  const text = storageWarningText(state.storageBytes);
+  const shown = $('storageWarning');
+  if (!text && shown) shown.remove();
+  else if (text && shown) shown.textContent = text;
+  else if (text && state.view === 'todo' && !state.scanning) render();
 }
 
 async function loadSaved() {
@@ -479,10 +505,22 @@ function scheduleBanner() {
   return '';
 }
 
+// Near the storage quota, say so before a save fails: how full, and what to clear.
+function storageBanner() {
+  const text = storageWarningText(state.storageBytes);
+  return text ? `<div class="banner warn" id="storageWarning">${esc(text)}</div>` : '';
+}
+
 // A lot that keeps reading more than half smaller (src/rescan.js
 // withWithheld): the saved list stays until the salesperson, having looked at
 // the website, says the new one is right. Then, until the next scan, what
 // they chose.
+// The first held-back read: say it is held back and when the new list is offered.
+function withheldFirstBanner(d) {
+  const text = withheldFirstText(d);
+  return text ? `<div class="banner warn" id="withheldFirst">${esc(text)}</div>` : '';
+}
+
 function withheldBanner(d) {
   const w = withheldOffer(d);
   if (w) {
@@ -502,12 +540,13 @@ const notYours = (vin) => (colleagueEntry(vin) ? ` · posted by ${byWhom(colleag
 function viewTodo(l) {
   const d = state.diff;
   if (!state.snapshot && !d) {
-    return setupBanner() + empty("Or just click <b>Scan website</b> on your dealership's used inventory page.");
+    return storageBanner() + setupBanner() + empty("Or just click <b>Scan website</b> on your dealership's used inventory page.");
   }
-  let html = setupBanner() + scheduleBanner() + notSharedBanner();
+  let html = setupBanner() + scheduleBanner() + storageBanner() + notSharedBanner();
   html += `<div class="meta">Last scan ${esc(when(d?.takenAt || state.snapshot?.takenAt))} · ${l.all.length} used cars · ${l.ready.length} ready to post</div>`;
   for (const w of d?.warnings || []) html += `<div class="banner warn">${esc(w)}</div>`;
   html += withheldBanner(d);
+  html += withheldFirstBanner(d);
   if (d?.firstScan) {
     html += `<div class="banner info">First scan saved. Start with the <b>Ready to post</b> tab. From now on, each scan compares with the last one and lists what sold, what changed price and what's new. Mark cars as posted so your own listings come first.</div>`;
   }
@@ -1199,6 +1238,9 @@ function problemReport() {
 
 function render() {
   $('site').textContent = state.origin ? state.siteName || state.origin : "Open your dealership's website, then scan.";
+  const left = state.origin ? capLeftText(dailyCap()) : '';
+  $('capLeft').textContent = left;
+  $('capLeft').hidden = !left;
   $('scan').textContent = state.snapshot ? 'Rescan website' : 'Scan website';
   $('scan').disabled = Boolean(state.scanning); // disabled in popup.html until the first render after start-up, and while a scan runs
   $('settingsBtn').setAttribute('aria-pressed', String(state.view === 'settings'));
@@ -1889,6 +1931,7 @@ async function init() {
     // The popup's own writes come back through here too: a value that is
     // already what the popup holds is not a change, so nothing is redrawn
     // under the person's pointer.
+    if (area === 'local') refreshStorageUse(); // the bytes in use move with every write (I-40)
     if (area !== 'local' || !state.origin) return;
     const k = siteKeys(state.origin);
     const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
@@ -1933,6 +1976,7 @@ async function init() {
     // while a scan runs, its final render draws everything at once
     if (touched && state.view !== 'settings' && !state.scanning) render();
   });
+  await checkStorageUse(); // the bytes in use, whichever tab the popup opened on (I-40)
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     state.tab = tab || null;

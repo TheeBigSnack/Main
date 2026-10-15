@@ -1649,3 +1649,45 @@ test('a car carried over unread keeps the time its details were read, so a listi
   const day3 = await rescanOf(thinListSite(cars), day2.snapshot);
   assert.equal(rescan.scanCar(entry, day3.snapshot, bad.vin), day3.snapshot.vehicles[bad.vin], 'read again after the price: priced');
 });
+
+test('The first held-back read says it is held back, that the saved list stays, and when the new list is offered', () => {
+  const held = (over = {}) => ({ withheld: { since: '2026-09-26T12:00:00.000Z', scans: 1, cars: 4, saved: 12, snapshot: {}, ...over } });
+  assert.equal(
+    rescan.withheldFirstText(held()),
+    'This scan read 4 cars on the website, where the saved list has 12 cars. That looks like a website hiccup, so Lot Current holds the read back: the saved list stays as it was and nothing is marked gone. If the next scan reads the same cars too, To do offers to use the new list.',
+  );
+  assert.match(rescan.withheldFirstText(held({ cars: 1, saved: 1 })), /^This scan read 1 car on the website, where the saved list has 1 car\. /);
+  // a second agreeing read is offered by withheldOffer; the line is not drawn for it
+  assert.equal(rescan.withheldFirstText(held({ scans: 2 })), '');
+  for (const bad of [null, undefined, {}, { withheld: null }, { withheld: 'x' }, { withheld: { scans: NaN } }]) {
+    assert.equal(rescan.withheldFirstText(bad), '', `${JSON.stringify(bad)} holds no read`);
+  }
+  // a read that can never be offered (no cars, or not the website's whole list) never promises the offer
+  const never = rescan.withheldFirstText(held({ cars: 0 }));
+  assert.match(never, /^This scan read 0 cars on the website/);
+  assert.match(never, /A read with no cars is never offered\.$/);
+  assert.doesNotMatch(never, /offers to use the new list/);
+  const partial = rescan.withheldFirstText(held({ snapshot: { complete: false } }));
+  assert.doesNotMatch(partial, /offers to use the new list/);
+  assert.match(partial, /A read that did not get the website's whole list is never offered\.$/);
+  assert.doesNotMatch(partial, /until a scan reads/, 'a partial read never says the saved list waits for a whole read');
+  // and withWithheld really keeps such a read at one scan, so the promise would be false
+  const diff = { unreliable: true, takenAt: '2026-09-26T12:00:00.000Z', counts: { previous: 12 } };
+  const four = Object.fromEntries(['A', 'B', 'C', 'D'].map((vin) => [vin, {}]));
+  const short = { takenAt: '2026-09-26T12:00:00.000Z', vehicles: four, complete: false };
+  const once = rescan.withWithheld({ ...diff }, short, null);
+  const twice = rescan.withWithheld({ ...diff }, short, once);
+  assert.equal(twice.withheld.scans, 1, 'an incomplete read never agrees with itself');
+  assert.equal(rescan.withheldOffer(twice), null);
+  assert.doesNotMatch(rescan.withheldFirstText(twice), /offers to use the new list/);
+  // and a read with no cars at all never agrees with itself either
+  const none = { takenAt: '2026-09-26T12:00:00.000Z', vehicles: {}, complete: true };
+  const nothingOnce = rescan.withWithheld({ ...diff }, none, null);
+  const nothingTwice = rescan.withWithheld({ ...diff }, none, nothingOnce);
+  assert.equal(nothingTwice.withheld.scans, 1, 'a read with no cars never agrees with itself');
+  assert.equal(rescan.withheldOffer(nothingTwice), null);
+  // the popup draws it right after the offer's banner, so the two never sit in the wrong order
+  const popup = readFileSync(new URL('../extension/popup.js', import.meta.url), 'utf8');
+  assert.match(popup, /html \+= withheldBanner\(d\);\n  html \+= withheldFirstBanner\(d\);/);
+  assert.match(popup, /function withheldFirstBanner\(d\) \{\n  const text = withheldFirstText\(d\);\n  return text \? `<div class="banner warn" id="withheldFirst">\$\{esc\(text\)\}<\/div>` : '';\n\}/);
+});

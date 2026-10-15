@@ -203,3 +203,12 @@ export function capCount(cap) {
   const d = cap && cap.drafts;
   return `${cap.used} of ${cap.cap} today${d ? `, ${d === 1 ? 'one' : d} of them saved as ${d === 1 ? 'a draft' : 'drafts'}` : ''}`;
 }
+
+// The popup header's line under the website name: how many posts are left
+// today, or that the cap is reached. Blank when the count is not known.
+export function capLeftText(cap) {
+  if (!cap || typeof cap !== 'object') return '';
+  if (!Number.isFinite(cap.remaining) || !Number.isFinite(cap.cap)) return '';
+  if (cap.reached) return 'Daily post cap reached';
+  return `Posts left today: ${cap.remaining} of ${cap.cap}`;
+}

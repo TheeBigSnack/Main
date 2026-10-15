@@ -58,7 +58,32 @@ export async function updateKey(key, change, storage) {
 // which Lot Current does not ask for); a set beyond it rejects with a message
 // naming the quota. This is what the popup, the panel and the worker show
 // instead of an unhandled rejection.
-export const STORAGE_FULL = "Couldn't save: Chrome's storage for Lot Current is full. Clear the numbers on the Numbers tab, or open an old dealership website and click Clear everything for this website in Settings.";
+export const LOCAL_QUOTA_BYTES = 10485760;
+const CLEAR_HINT = 'Clear the numbers on the Numbers tab, or open an old dealership website and click Clear everything for this website in Settings.';
+export const STORAGE_FULL = `Couldn't save: Chrome's storage for Lot Current is full. ${CLEAR_HINT}`;
+
+// The popup warns from this share of the quota, before a save fails (I-40).
+// It is a warning only: a save near the line still goes through.
+export const STORAGE_WARN_SHARE = 0.8;
+
+// True once the bytes in use reach the warning share of the quota.
+export function storageNearlyFull(bytesInUse, quota = LOCAL_QUOTA_BYTES) {
+  if (!Number.isFinite(bytesInUse) || !Number.isFinite(quota) || quota <= 0) return false;
+  return bytesInUse >= quota * STORAGE_WARN_SHARE;
+}
+
+// The popup's warning: how full the storage is, and what to clear (the same
+// advice the full message gives). The percentage rounds down, so it never
+// claims more than is in use.
+export function storageNearlyFullText(bytesInUse, quota = LOCAL_QUOTA_BYTES) {
+  const percent = Math.floor((bytesInUse * 100) / quota);
+  return `Chrome's storage for Lot Current is ${percent}% full. When it is full, saves fail. ${CLEAR_HINT}`;
+}
+
+// The warning the popup draws, or '' below the warning share (or with no count).
+export function storageWarningText(bytesInUse, quota = LOCAL_QUOTA_BYTES) {
+  return storageNearlyFull(bytesInUse, quota) ? storageNearlyFullText(bytesInUse, quota) : '';
+}
 
 // True when a rejected write hit the quota (Chrome names it in the message).
 export const isStorageFull = (e) => /quota/i.test(String((e && e.message) || e || ''));

@@ -54,6 +54,7 @@ button:disabled { opacity: 0.55; cursor: default; }
 .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px 10px; border-bottom: 1px solid var(--line); }
 .brand .title { font-weight: 700; font-size: 15px; }
 .brand .site { color: var(--muted); font-size: 12px; }
+.brand .cap-left { color: var(--muted); font-size: 12px; }
 .top-actions { display: flex; gap: 8px; align-items: center; }
 .primary { background: var(--accent); color: var(--accent-text); border: 0; border-radius: var(--radius); padding: 8px 14px; font-weight: 600; }
 .ghost { background: none; border: 1px solid var(--line); color: var(--text); border-radius: var(--radius); padding: 7px 12px; }

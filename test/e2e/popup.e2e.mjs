@@ -361,6 +361,7 @@ try {
   await popup.waitForFunction(() => (document.querySelector('#saved')?.textContent || '').length > 0);
   await tab(popup, 'ready').click();
   assert.match(await popup.textContent('#pickHint'), /Ticks the next 2 in this order\. 2 more posts allowed today\./);
+  assert.equal(await popup.textContent('#capLeft'), 'Posts left today: 2 of 3', 'the header counts the same two posts as the Ready list');
   await sortTo('longest', TRADESMAN);
   await popup.check('#pickAll');
   assert.deepEqual(await checkedVins(), [VIN.tradesman, VIN.hellcat], 'Select the next 2 under "longest" ticks the first two in that order');

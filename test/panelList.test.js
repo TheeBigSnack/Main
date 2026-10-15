@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { readyRows, nextToPost, siteChoices, defaultOrigin, siteReadOrigins, missingOrigins, siteAskText } from '../extension/src/panelList.js';
+import { readyRows, nextToPost, moveIndex, siteChoices, defaultOrigin, siteReadOrigins, missingOrigins, siteAskText } from '../extension/src/panelList.js';
 import { sortEntries } from '../extension/src/readyList.js';
 import { snapshot, fixtures, MY_STORE } from './helpers.js';
 
@@ -167,4 +167,35 @@ test('a car whose draft was marked posted and then unmarked is listed with its P
   assert.equal(row.AAA.draft, false, 'the retired draft is not a draft any more');
   assert.equal(row.BBB.draft, true, 'an open draft is still listed as one');
   assert.deepEqual(nextToPost([row.AAA, row.BBB], 5), ['AAA'], '"Post the next N" takes the retired one, not the open draft');
+});
+
+test('Arrow keys move the focus one row at a time, stop at the ends, and Home and End jump', () => {
+  // from the first row, ArrowDown goes to the second; from the last, it stays put
+  assert.equal(moveIndex(0, 3, 'ArrowDown'), 1);
+  assert.equal(moveIndex(2, 3, 'ArrowDown'), 2, 'the last row stays the last');
+  assert.equal(moveIndex(1, 3, 'ArrowUp'), 0);
+  assert.equal(moveIndex(0, 3, 'ArrowUp'), 0, 'the first row stays the first');
+  // nothing focused in the list yet: the first arrow lands on the first row
+  assert.equal(moveIndex(-1, 3, 'ArrowDown'), 0);
+  assert.equal(moveIndex(-1, 3, 'ArrowUp'), 0);
+  assert.equal(moveIndex(1, 3, 'Home'), 0);
+  assert.equal(moveIndex(1, 3, 'End'), 2);
+  // any other key, and an empty list, keep the row or have none
+  assert.equal(moveIndex(1, 3, 'Enter'), 1, 'Enter is not a move: the control that has focus takes it');
+  assert.equal(moveIndex(1, 3, 'a'), 1);
+  assert.equal(moveIndex(0, 0, 'ArrowDown'), -1);
+  assert.equal(moveIndex(0, -2, 'End'), -1);
+});
+
+test('The side panel moves the focus between Ready rows with the arrow keys, and leaves Enter to the control that has focus', () => {
+  const panel = readFileSync(new URL('../extension/sidepanel.js', import.meta.url), 'utf8');
+  const start = panel.indexOf("$('panel').addEventListener('keydown', (ev) => {\n    if (!['ArrowDown'");
+  assert.ok(start > 0, 'the arrow-key handler is on the panel');
+  const handler = panel.slice(start, panel.indexOf('\n  });', start));
+  assert.match(handler, /if \(!\['ArrowDown', 'ArrowUp', 'Home', 'End'\]\.includes\(ev\.key\)\) return;/, 'the keys it moves for');
+  assert.match(handler, /moveIndex\(here, rows\.length, ev\.key\)/);
+  assert.match(handler, /rows\[next\]\.querySelector\('a\[href\]'\) \|\| rows\[next\]\.querySelector\('button'\)/, 'the link first (it opens the car), else the Post button');
+  assert.doesNotMatch(handler, /Enter/, 'Enter is not intercepted');
+  assert.doesNotMatch(handler, /\.click\(|data-post-vin|postCar|startPost/, 'an arrow key never posts or clicks');
+  assert.match(panel, /import \{[^}]*\bmoveIndex\b[^}]*\} from '\.\/src\/panelList\.js';/);
 });

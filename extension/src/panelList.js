@@ -60,6 +60,22 @@ export function nextToPost(rows, remaining) {
 }
 
 /**
+ * The row the focus moves to in the Ready list for a key (I-11): ArrowDown and
+ * ArrowUp move one row and stop at the ends, Home and End go to the first and
+ * last; any other key keeps the row. `current` is -1 when no row has focus, so
+ * the first arrow lands on the first row. An empty list gives -1.
+ */
+export function moveIndex(current, count, key) {
+  if (!(count > 0)) return -1;
+  const at = Number.isInteger(current) && current >= 0 && current < count ? current : -1;
+  if (key === 'ArrowDown') return Math.min(count - 1, at + 1);
+  if (key === 'ArrowUp') return Math.max(0, at - 1);
+  if (key === 'Home') return 0;
+  if (key === 'End') return count - 1;
+  return at;
+}
+
+/**
  * The websites the panel can post from: every website in the site registry
  * (one scanned from the popup or set up in the wizard), by name. The registry
  * keeps no snapshot, so a website with nothing saved shows an empty list.
