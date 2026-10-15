@@ -545,6 +545,16 @@ export function withheldOffer(diff) {
   return vehicles && typeof vehicles === 'object' && Object.keys(vehicles).length ? w : null;
 }
 
+// The first held-back read, before WITHHELD_AGREE_SCANS agree (I-07): To do
+// says it is held back, that the saved list stays, and when the new list is
+// offered. A read already offered is said by withheldOffer's banner instead.
+export function withheldFirstText(diff) {
+  const w = diff && typeof diff === 'object' ? diff.withheld : null;
+  if (!w || typeof w !== 'object' || Number(w.scans) !== 1 || !Number.isFinite(Number(w.cars))) return '';
+  const cars = (n) => `${n} ${n === 1 ? 'car' : 'cars'}`;
+  return `This scan read ${cars(w.cars)} on the website, where the saved list has ${cars(w.saved ?? 0)}. That looks like a website hiccup, so Lot Current holds the read back: the saved list stays as it was and nothing is marked gone. If the next scan reads the same cars too, To do offers to use the new list.`;
+}
+
 // The words of the hiccup warning that stay the same whatever the counts.
 const HICCUP_WORDS = "disappeared at once. That's usually a website hiccup";
 

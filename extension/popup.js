@@ -1,5 +1,5 @@
 import { assessVehicle, DECISION } from './src/classify.js';
-import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, listingLine, settleDiff, postedBasis, withPostedBasis, markLookDismissed, withWithheld, withheldOffer, acceptWithheld, scanCar, priceItemWaits } from './src/rescan.js';
+import { makeSnapshot, diffScans, markPosted, markPriceUpdated, markTakenDown, basisPrice, listingLine, settleDiff, postedBasis, withPostedBasis, markLookDismissed, withWithheld, withheldOffer, withheldFirstText,acceptWithheld, scanCar, priceItemWaits } from './src/rescan.js';
 import { draftPrice, markDraftPosted, draftPriceUpdate, withPriceUpdate, draftPill, draftScanCar, isOpenDraft, retireDraft } from './src/drafts.js';
 import { performScan, keepSeenBasis } from './src/scanRunner.js';
 import { todoCountFor, originsFor, syncRetryAlarm } from './src/rescanSchedule.js';
@@ -501,6 +501,12 @@ function storageBanner() {
 // withWithheld): the saved list stays until the salesperson, having looked at
 // the website, says the new one is right. Then, until the next scan, what
 // they chose.
+// The first held-back read: say it is held back and when the new list is offered.
+function withheldFirstBanner(d) {
+  const text = withheldFirstText(d);
+  return text ? `<div class="banner warn" id="withheldFirst">${esc(text)}</div>` : '';
+}
+
 function withheldBanner(d) {
   const w = withheldOffer(d);
   if (w) {
@@ -526,6 +532,7 @@ function viewTodo(l) {
   html += `<div class="meta">Last scan ${esc(when(d?.takenAt || state.snapshot?.takenAt))} · ${l.all.length} used cars · ${l.ready.length} ready to post</div>`;
   for (const w of d?.warnings || []) html += `<div class="banner warn">${esc(w)}</div>`;
   html += withheldBanner(d);
+  html += withheldFirstBanner(d);
   if (d?.firstScan) {
     html += `<div class="banner info">First scan saved. Start with the <b>Ready to post</b> tab. From now on, each scan compares with the last one and lists what sold, what changed price and what's new. Mark cars as posted so your own listings come first.</div>`;
   }

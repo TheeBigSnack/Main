@@ -1649,3 +1649,21 @@ test('a car carried over unread keeps the time its details were read, so a listi
   const day3 = await rescanOf(thinListSite(cars), day2.snapshot);
   assert.equal(rescan.scanCar(entry, day3.snapshot, bad.vin), day3.snapshot.vehicles[bad.vin], 'read again after the price: priced');
 });
+
+test('The first held-back read says it is held back, that the saved list stays, and when the new list is offered', () => {
+  const held = (over = {}) => ({ withheld: { since: '2026-09-26T12:00:00.000Z', scans: 1, cars: 4, saved: 12, snapshot: {}, ...over } });
+  assert.equal(
+    rescan.withheldFirstText(held()),
+    'This scan read 4 cars on the website, where the saved list has 12 cars. That looks like a website hiccup, so Lot Current holds the read back: the saved list stays as it was and nothing is marked gone. If the next scan reads the same cars too, To do offers to use the new list.',
+  );
+  assert.match(rescan.withheldFirstText(held({ cars: 1, saved: 1 })), /^This scan read 1 car on the website, where the saved list has 1 car\. /);
+  // a second agreeing read is offered by withheldOffer; the line is not drawn for it
+  assert.equal(rescan.withheldFirstText(held({ scans: 2 })), '');
+  for (const bad of [null, undefined, {}, { withheld: null }, { withheld: 'x' }, { withheld: { scans: NaN } }]) {
+    assert.equal(rescan.withheldFirstText(bad), '', `${JSON.stringify(bad)} holds no read`);
+  }
+  // the popup draws it right after the offer's banner, so the two never sit in the wrong order
+  const popup = readFileSync(new URL('../extension/popup.js', import.meta.url), 'utf8');
+  assert.match(popup, /html \+= withheldBanner\(d\);\n  html \+= withheldFirstBanner\(d\);/);
+  assert.match(popup, /function withheldFirstBanner\(d\) \{\n  const text = withheldFirstText\(d\);\n  return text \? `<div class="banner warn" id="withheldFirst">\$\{esc\(text\)\}<\/div>` : '';\n\}/);
+});
