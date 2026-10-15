@@ -77,13 +77,15 @@ function loadUsage() {
   try {
     text = readFileSync(config.usageFile, 'utf8');
   } catch (e) {
-    return { month: month(), usd: 0, requests: 0 };
+    if (e.code === 'ENOENT') return { month: month(), usd: 0, requests: 0 }; // first run: no file yet
+    console.error(`${config.usageFile} cannot be read (${e.code || e.message}), so the service is stopped until it is fixed or deleted`);
+    return { month: month(), usd: 0, requests: 0, unreadable: true };
   }
   let u = null;
   try { u = JSON.parse(text); } catch (e) { u = null; }
-  if (u && typeof u === 'object' && u.month !== month()) return { month: month(), usd: 0, requests: 0 };
+  if (u && typeof u === 'object' && typeof u.month === 'string' && u.month !== month()) return { month: month(), usd: 0, requests: 0 };
   if (u && u.month === month() && Number.isFinite(u.usd) && Number.isFinite(u.requests)) return u;
-  console.error(`${config.usageFile} cannot be read, so the service is stopped until it is fixed or deleted`);
+  console.error(`${config.usageFile} is not a usage record, so the service is stopped until it is fixed or deleted`);
   return { month: month(), usd: 0, requests: 0, unreadable: true };
 }
 let usage = loadUsage();
@@ -93,7 +95,7 @@ function addUsage(model, u) {
   if (usage.month !== month()) usage = { month: month(), usd: 0, requests: 0 };
   usage.usd += usd;
   usage.requests += 1;
-  try { writeFileSync(config.usageFile, JSON.stringify(usage)); } catch (e) { /* read-only disk: cap still works in memory */ }
+  try { writeFileSync(config.usageFile, JSON.stringify(usage)); } catch (e) { console.error(`${config.usageFile} cannot be written (${e.code || e.message}): the cap holds until a restart, then counts from what the file holds`); }
   return usd;
 }
 

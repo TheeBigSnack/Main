@@ -2605,7 +2605,7 @@ function render() {
   const kept = (state.step === 'idle' && $('panelReady')) || state.step === 'publish' ? focusNow() : null; // the list, or the publish step (the Listing link box), redrawn under the person
   const inPanel = keyboardInPanel();
   $('panel').innerHTML = queueBar() + (views[state.step] || viewIdle)();
-  if (kept) refocus(kept);
+  if (kept && $(kept.id)) refocus(kept);
   else if (inPanel) keepKeyboard();
 }
 
@@ -2619,12 +2619,14 @@ function keyboardInPanel() {
 // A step's redraw removes the control the keyboard was on, and the keyboard
 // would fall to the top of the page. It goes to the step's heading instead, or
 // to the panel itself when the step has none, so the next Tab is the step's
-// first control (the post steps: review, filling, publish, done).
+// first control (the post steps: review, filling, publish, done). Without
+// preventScroll the browser would scroll the panel to that heading, away from
+// the result the person just asked for.
 function keepKeyboard() {
   if (keyboardInPanel()) return;
   const target = $('panel').querySelector('h3') || $('panel');
   target.tabIndex = -1;
-  target.focus();
+  target.focus({ preventScroll: true });
 }
 
 // The set-up is drawn again on every press, which removes the focused button:

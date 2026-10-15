@@ -22,20 +22,21 @@ function topFunction(name) {
 // A panel with the given heading (or none), and a document whose focus can move.
 function page({ heading = true } = {}) {
   const log = [];
-  const h3 = heading ? { tagName: 'H3', tabIndex: undefined, focus() { log.push('heading'); } } : null;
+  const focusOptions = [];
+  const h3 = heading ? { tagName: 'H3', tabIndex: undefined, focus(o) { log.push('heading'); focusOptions.push(o); } } : null;
   const panel = {
     id: 'panel',
     tabIndex: undefined,
     contains: (el) => Boolean(el) && el.inPanel === true,
     querySelector: (sel) => (sel === 'h3' ? h3 : null),
-    focus() { log.push('panel'); },
+    focus(o) { log.push('panel'); focusOptions.push(o); },
   };
   const doc = { activeElement: null, body: { tagName: 'BODY' } };
   const fns = new Function(
     'document', '$',
     `${topFunction('keyboardInPanel')}\n${topFunction('keepKeyboard')}\nreturn { keyboardInPanel, keepKeyboard };`,
   )(doc, (id) => (id === 'panel' ? panel : null));
-  return { ...fns, doc, panel, log };
+  return { ...fns, doc, panel, log, focusOptions };
 }
 
 test('the keyboard in the panel is kept when the redraw removes its control: it goes to the step heading', () => {
@@ -59,7 +60,18 @@ test('a step with no heading takes the keyboard on the panel itself, so the next
   assert.equal(p.panel.tabIndex, -1);
 });
 
-test('a redraw that leaves the keyboard in the panel moves nothing', () => {
+test('the keyboard moves without scrolling the panel: the page does not jump to the step heading', () => {
+  const p = page();
+  p.doc.activeElement = p.doc.body;
+  p.keepKeyboard();
+  assert.deepEqual(p.focusOptions, [{ preventScroll: true }]);
+  const bare = page({ heading: false });
+  bare.doc.activeElement = bare.doc.body;
+  bare.keepKeyboard();
+  assert.deepEqual(bare.focusOptions, [{ preventScroll: true }]);
+});
+
+test('a redraw that leaves thekeyboard in the panel moves nothing', () => {
   const p = page();
   p.doc.activeElement = { inPanel: true, id: 'copyDescription' };
   p.keepKeyboard();
@@ -77,5 +89,5 @@ test('render keeps the keyboard only when it was in the panel before the redraw'
   const before = render.indexOf('const inPanel = keyboardInPanel();');
   const draw = render.indexOf("$('panel').innerHTML = queueBar()");
   assert.ok(before >= 0 && before < draw, 'the focus is read before the panel is drawn');
-  assert.match(render, /else if \(inPanel\) keepKeyboard\(\);/);
+  assert.match(render, /if \(kept && \$\(kept\.id\)\) refocus\(kept\);\n\s*else if \(inPanel\) keepKeyboard\(\);/, 'a kept control that the redraw did not draw falls back to the step');
 });

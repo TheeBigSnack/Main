@@ -15,8 +15,12 @@ const SRC = new URL('../extension/src/', import.meta.url);
 
 // Block comments, then line comments. A line comment starts where `//`
 // follows the start of a line or a space, `;`, a bracket or a comma, so the
-// `//` of an address ("https://") in a string is not taken for one. A string
-// that holds ` //` followed by a name is read as a comment: a known gap.
+// `//` of an address ("https://") in a string is not taken for one. Two known
+// gaps: a string that holds ` //` followed by a name is read as a comment, and
+// a `/*` inside a string starts a block comment that runs to the next `*\/`,
+// hiding code in between (askChrome.js and photoHosts.js write it as '/' + '*'
+// for this reason). Compound names such as parseDealerInspire are not matched:
+// a name is a whole word.
 function codeOnly(source) {
   return source
     .replace(/\/\*[\s\S]*?\*\//g, ' ')

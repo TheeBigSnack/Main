@@ -263,3 +263,6 @@ jobs:
         with:
           node-version-file: .nvmrc
       - run: npm audit --audit-level=high
+      - name: Audit the rewrite service's own dependencies
+        working-directory: backend
+        run: npm audit --audit-level=high

@@ -8,7 +8,7 @@ import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
-import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { rewriteFacts, rewriteWithBackend, REWRITE_TIMEOUT_MS } from '../extension/src/rewriter.js';
@@ -41,12 +41,13 @@ function freePort() {
 
 let runs = 0;
 // Starts the service with the stand-in's answers and any of its settings; resolves once it listens.
-async function start({ answers = [{ text: GOOD }], key = KEY, deadlineMs = null, usageText = undefined } = {}) {
+async function start({ answers = [{ text: GOOD }], key = KEY, deadlineMs = null, usageText = undefined, usageDir = false } = {}) {
   runs += 1;
   const port = await freePort();
   const log = join(dir, `calls-${runs}.jsonl`);
   const usageFile = join(dir, `usage-${runs}.json`);
   if (usageText !== undefined) writeFileSync(usageFile, usageText);
+  if (usageDir) mkdirSync(usageFile);
   const env = {
     PATH: process.env.PATH, HOST: '127.0.0.1', PORT: String(port), ANTHROPIC_API_KEY: 'anthropic-key-for-the-backend-tests', REWRITE_KEY: key,
     REWRITE_MODEL: 'test-model', MONTHLY_COST_CAP_USD: '25', RATE_LIMIT_PER_MINUTE: '20', USAGE_FILE: usageFile,
@@ -117,7 +118,8 @@ function refused(env) {
 }
 
 test('backend: the service refuses to start without a REWRITE_KEY, on loopback too, and says what to set', async () => {
-  for (const env of [{ REWRITE_KEY: '' }, {}]) {
+  // an empty key is set on purpose: a backend/.env on this machine would otherwise supply one
+  for (const env of [{ REWRITE_KEY: '' }]) {
     const r = await refused(env);
     assert.equal(r.code, 1, JSON.stringify(env));
     assert.match(r.out, /REWRITE_KEY is required/);
@@ -142,6 +144,20 @@ test('backend: browser CORS names only an extension page as the origin allowed t
     assert.equal(fromExt.headers.get('access-control-allow-origin'), EXT);
   } finally {
     await s.stop();
+  }
+});
+
+test('backend: a usage file that is not a month of spend, or cannot be read at all, stops the service too', async () => {
+  for (const shape of [{ usageText: '{}' }, { usageText: '[]' }, { usageText: '{"month":3,"usd":0,"requests":0}' }, { usageDir: true }]) {
+    const s = await start(shape);
+    try {
+      const r = await json(await s.call('/rewrite', { body: FACTS }));
+      assert.equal(r.status, 429, JSON.stringify(shape));
+      assert.match(r.body.error, /usage file/, JSON.stringify(shape));
+      assert.equal(s.calls().length, 0, `${JSON.stringify(shape)}: no Claude call`);
+    } finally {
+      await s.stop();
+    }
   }
 });
 

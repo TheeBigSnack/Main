@@ -466,11 +466,7 @@ function endRig() {
 // the listing after Update: this car's page with its price shown and no edit form
 const UPDATED_PAGE = { ...LISTED_PAGE, hasPriceBox: false, formOnPage: false, priceBoxValue: '', prices: [String(WANT_PRICE)] };
 
-// Once Lot Current has filled four times and the Price box still keeps another
-// price, the banner says so and stops filling. A price the person then types
-// into the box by hand must clear that banner and make the item filled, so that
-// Update closes it once the listing shows the new price.
-test("the filled price says Facebook can let people who saved the car know, and that Lot Current doesn't", async () => {
+test("when the price goes down, the filled price says Facebook can let people who saved the car know, and that Lot Current doesn't", async () => {
   const rig = await priceRig(LISTED_PAGE);
   try {
     for (let i = 0; i < 5; i++) await rig.tick();
@@ -485,6 +481,26 @@ test("the filled price says Facebook can let people who saved the car know, and 
     await rig.started;
   }
 });
+
+test('when the price goes up, the filled price says nothing about the people who saved the car', async () => {
+  const rig = await priceRig(LISTED_PAGE);
+  try {
+    for (let i = 0; i < 5; i++) await rig.tick();
+    rig.page.priceBoxValue = String(WANT_PRICE);
+    await rig.tick();
+    assert.equal(up.status, 'filled');
+    Object.assign(up, { listedPrice: 15000 }); // the listing showed less than the new price
+    assert.doesNotMatch(upkeepHtml(), /saved this car|Lot Current doesn't/);
+  } finally {
+    endRig();
+    await rig.started;
+  }
+});
+
+// Once Lot Current has filled four times and the Price box still keeps another
+// price, the banner says so and stops filling. A price the person then types
+// into the box by hand must clear that banner and make the item filled, so that
+// Update closes it once the listing shows the new price.
 
 test('a price typed by hand after Lot Current stops filling clears the stuck banner, and Update then closes the item', async () => {
   const rig = await priceRig(LISTED_PAGE);
