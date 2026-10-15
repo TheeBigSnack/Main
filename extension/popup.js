@@ -104,6 +104,7 @@ async function checkStorageUse() {
 // the To do tab with no scan running.
 async function refreshStorageUse() {
   await checkStorageUse();
+  await initDone; // a write during start-up waits for the first render, so no half-loaded page is drawn
   const text = storageWarningText(state.storageBytes);
   const shown = $('storageWarning');
   if (!text && shown) shown.remove();

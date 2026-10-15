@@ -1680,6 +1680,12 @@ test('The first held-back read says it is held back, that the saved list stays, 
   assert.equal(twice.withheld.scans, 1, 'an incomplete read never agrees with itself');
   assert.equal(rescan.withheldOffer(twice), null);
   assert.doesNotMatch(rescan.withheldFirstText(twice), /offers to use the new list/);
+  // and a read with no cars at all never agrees with itself either
+  const none = { takenAt: '2026-09-26T12:00:00.000Z', vehicles: {}, complete: true };
+  const nothingOnce = rescan.withWithheld({ ...diff }, none, null);
+  const nothingTwice = rescan.withWithheld({ ...diff }, none, nothingOnce);
+  assert.equal(nothingTwice.withheld.scans, 1, 'a read with no cars never agrees with itself');
+  assert.equal(rescan.withheldOffer(nothingTwice), null);
   // the popup draws it right after the offer's banner, so the two never sit in the wrong order
   const popup = readFileSync(new URL('../extension/popup.js', import.meta.url), 'utf8');
   assert.match(popup, /html \+= withheldBanner\(d\);\n  html \+= withheldFirstBanner\(d\);/);
