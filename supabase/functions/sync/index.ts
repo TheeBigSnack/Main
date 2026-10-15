@@ -68,7 +68,7 @@
 import { json, preflight, readJson, routeOf, isRecord, errorMessage, sameOrigin } from '../_shared/http.ts';
 import { requireUser, membershipsOf, subscriptionRowOf, type Membership } from '../_shared/auth.ts';
 import { planOf, lapsedAnswer, todayRange } from '../_shared/billing.mjs';
-import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
+import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.117.2';
 
 const BODY_LIMIT = 512 * 1024; // a registry of a whole lot is a few tens of KiB
 const PER_MINUTE = 12; // syncs per user per minute (the extension syncs after a scan, a post, a price update or a take-down)

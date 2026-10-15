@@ -257,6 +257,8 @@ _Pilot build round_
 
 _Round 10 (2026-10-15)_
 - **The daily post cap is held to 100 wherever it is read** (`MAX_DAILY_CAP` in `extension/src/cap.js`; `withDefaults` in `extension/src/settings.js`; the Settings form and its field in `extension/popup.js`; tested in `test/dailyCapLimit.test.js`). The Settings form already stopped at 100, but a value that came in from a synced profile or from storage, not from the form, was read as it was, so 500 posts a day was possible. It is now held to 100 when it is read, and a value under one, or not a number, gives the default of 10. The field offers the same limit as the form.
+_Round 11 (2026-10-15)_
+- **The Edge Functions pin supabase-js** (`supabase/functions/billing/index.ts`, `sync/index.ts`, `rewrite/index.ts`, `_shared/auth.ts`; `test/edgeImports.test.js`, `test/functions/loader.mjs`): the functions imported `npm:@supabase/supabase-js@2`, so each deploy took the newest 2.x. They now name 2.117.2, the version the manager page vendors, and a test holds every npm import in the functions to an exact version and to that one. The Edge Function tests' stand-in follows the pin. Changing the version is still the owner's call, since a deploy then imports it.
 
 Not proven until a real website is scanned
 - How real dealer photo galleries look to the dealer-branding check: it was tuned and measured on synthetic galleries only, so its first run on the pilot dealer's photos (with the owner's OK) is the first look at real overlays.

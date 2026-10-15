@@ -41,7 +41,7 @@ import { runGuardrails, type GuardrailContext, type GuardrailResult } from '../_
 import { json, preflight, readJson, routeOf, isRecord, errorMessage, sameOrigin } from '../_shared/http.ts';
 import { requireUser, membershipsOf, subscriptionRowOf, serviceClient, env, type Membership } from '../_shared/auth.ts';
 import { planOf, lapsedAnswer } from '../_shared/billing.mjs';
-import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
+import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.117.2';
 
 const config = {
   // Haiku 4.5 by default for cost and speed; REWRITE_MODEL=claude-sonnet-5 to switch.
