@@ -98,11 +98,17 @@ async function checkStorageUse() {
 }
 
 // Again on each storage change while the popup is open, so a number cleared
-// or a scan saved meanwhile moves the warning. Redrawn only when its text moves.
+// or a scan saved meanwhile moves the warning. A banner already shown is
+// changed in place, so Settings and a running scan are not redrawn under the
+// person; the page is redrawn only to show a banner that is not there yet, on
+// the To do tab with no scan running.
 async function refreshStorageUse() {
-  const before = storageBanner();
   await checkStorageUse();
-  if (storageBanner() !== before) render();
+  const text = storageWarningText(state.storageBytes);
+  const shown = $('storageWarning');
+  if (!text && shown) shown.remove();
+  else if (text && shown) shown.textContent = text;
+  else if (text && state.view === 'todo' && !state.scanning) render();
 }
 
 async function loadSaved() {

@@ -33,9 +33,9 @@ test('The text the To do tab draws is the warning at the line and nothing below 
 test('The popup reads the storage when it opens, again on each storage change, and draws the warning under the other banners', () => {
   const popup = readFileSync(new URL('../extension/popup.js', import.meta.url), 'utf8');
   assert.match(popup, /state\.storageBytes = await chrome\.storage\.local\.getBytesInUse\(null\);/, 'the bytes in use, all keys');
-  assert.match(popup, /  await checkStorageUse\(\); \/\/ the bytes in use, whichever tab the popup opened on/, 'read at start-up, on any tab');
-  assert.match(popup, /if \(area === 'local'\) refreshStorageUse\(\);/, 'and again on each storage change');
-  assert.match(popup, /async function refreshStorageUse\(\) \{\n  const before = storageBanner\(\);\n  await checkStorageUse\(\);\n  if \(storageBanner\(\) !== before\) render\(\);\n\}/, 'redrawn only when the warning moves');
+  assert.match(popup, /\n  await checkStorageUse\(\); \/\/ the bytes in use, whichever tab the popup opened on \(I-40\)\n  try \{/, 'read at start-up, on any tab, before the tab lookup');
+  assert.match(popup, /\n    if \(area === 'local'\) refreshStorageUse\(\); \/\/ the bytes in use move with every write \(I-40\)\n    if \(area !== 'local' \|\| !state\.origin\) return;/, 'and again on each storage change, before the site-only handling');
+  assert.match(popup, /async function refreshStorageUse\(\) \{\n  await checkStorageUse\(\);\n  const text = storageWarningText\(state\.storageBytes\);\n  const shown = \$\('storageWarning'\);\n  if \(!text && shown\) shown\.remove\(\);\n  else if \(text && shown\) shown\.textContent = text;\n  else if \(text && state\.view === 'todo' && !state\.scanning\) render\(\);\n\}/, 'a shown banner changes in place; a new one is drawn only on the To do tab with no scan running');
   assert.match(popup, /function storageBanner\(\) \{\n  const text = storageWarningText\(state\.storageBytes\);\n  return text \? `<div class="banner warn" id="storageWarning">\$\{esc\(text\)\}<\/div>` : '';\n\}/);
   assert.match(popup, /if \(!state\.snapshot && !d\) \{\n    return storageBanner\(\) \+ setupBanner\(\) \+ empty\(/, 'drawn for a website with no scan yet too');
   assert.match(popup, /let html = setupBanner\(\) \+ scheduleBanner\(\) \+ storageBanner\(\) \+ notSharedBanner\(\);/);

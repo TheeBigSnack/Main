@@ -555,7 +555,7 @@ export function withheldFirstText(diff) {
   const head = `This scan read ${cars(w.cars)} on the website, where the saved list has ${cars(w.saved ?? 0)}. That looks like a website hiccup, so Lot Current holds the read back: the saved list stays as it was and nothing is marked gone.`;
   // sameRead never agrees a read with no cars, or one that did not get the website's whole list
   const offerable = Number(w.cars) > 0 && !(w.snapshot && w.snapshot.complete === false);
-  if (!offerable) return `${head} A read like this is never offered: the saved list stays until a scan reads the website's whole list.`;
+  if (!offerable) return `${head} ${Number(w.cars) > 0 ? "A read that did not get the website's whole list is never offered." : 'A read with no cars is never offered.'}`;
   return `${head} If the next scan reads the same cars too, To do offers to use the new list.`;
 }
 

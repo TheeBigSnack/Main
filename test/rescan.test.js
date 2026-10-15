@@ -1665,11 +1665,12 @@ test('The first held-back read says it is held back, that the saved list stays, 
   // a read that can never be offered (no cars, or not the website's whole list) never promises the offer
   const never = rescan.withheldFirstText(held({ cars: 0 }));
   assert.match(never, /^This scan read 0 cars on the website/);
-  assert.match(never, /A read like this is never offered/);
+  assert.match(never, /A read with no cars is never offered\.$/);
   assert.doesNotMatch(never, /offers to use the new list/);
   const partial = rescan.withheldFirstText(held({ snapshot: { complete: false } }));
   assert.doesNotMatch(partial, /offers to use the new list/);
-  assert.match(partial, /never offered/);
+  assert.match(partial, /A read that did not get the website's whole list is never offered\.$/);
+  assert.doesNotMatch(partial, /until a scan reads/, 'a partial read never says the saved list waits for a whole read');
   // and withWithheld really keeps such a read at one scan, so the promise would be false
   const diff = { unreliable: true, takenAt: '2026-09-26T12:00:00.000Z', counts: { previous: 12 } };
   const four = Object.fromEntries(['A', 'B', 'C', 'D'].map((vin) => [vin, {}]));

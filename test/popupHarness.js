@@ -43,7 +43,7 @@ export async function loadPopup({ origin = POPUP_ORIGIN, local = {}, sync = {}, 
     if (!els.has(id)) {
       els.set(id, {
         id, innerHTML: '', textContent: '', disabled: false, className: '', dataset: {}, listeners: {},
-        setAttribute() {}, addEventListener(type, fn) { this.listeners[type] = fn; }, contains: () => false, focus() {},
+        setAttribute() {}, addEventListener(type, fn) { this.listeners[type] = fn; }, contains: () => false, focus() {}, remove() {},
       });
     }
     return els.get(id);
