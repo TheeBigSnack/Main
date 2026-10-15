@@ -16,7 +16,7 @@ import { recordFlags, resolveFlag, updatePilot, summarizePilot, pilotText, pilot
 import { LEGAL, acceptLegal, legalIsCurrent, legalHosted } from './src/legalLinks.js';
 import { POSTING_RULES } from './src/postingRules.js';
 import { siteKeys, GLOBAL_KEYS, SITES_KEY } from './src/storageKeys.js';
-import { updateKey, withLock, storageErrorText, clearWebsiteRecords } from './src/storage.js';
+import { updateKey, withLock, storageErrorText, clearWebsiteRecords, storageNearlyFull, storageNearlyFullText } from './src/storage.js';
 import { ACCOUNT, accountsConfigured } from './src/accountConfig.js';
 import { signInStart, signInFinish, currentSession, signOutAll, rewriteEndpointFor, describeSync, planText, NOT_CONFIGURED } from './src/accountFlow.js';
 import { clearNumbersKeepingUnsynced } from './src/sync.js';
@@ -86,6 +86,17 @@ async function checkRescanPermission() {
   }
 }
 
+// How many bytes Chrome's storage for the extension holds, read once each
+// time the popup loads (I-40): the To do tab warns near the quota before a
+// save fails. Unknown when Chrome will not say, and then no warning.
+async function checkStorageUse() {
+  try {
+    state.storageBytes = await chrome.storage.local.getBytesInUse(null);
+  } catch (e) {
+    state.storageBytes = null;
+  }
+}
+
 async function loadSaved() {
   const k = siteKeys(state.origin);
   const data = await chrome.storage.local.get([...Object.values(k), SITES_KEY, GLOBAL_KEYS.devOverrides]);
@@ -113,6 +124,7 @@ async function loadSaved() {
   state.syncState = data[k.sync] || null;
   state.listingMap = applyOverrides(FORM_MAP, data[GLOBAL_KEYS.devOverrides]); // test hook: addresses only, see formMap.js
   await checkRescanPermission();
+  await checkStorageUse();
 }
 
 // The popup's own storage writes come back through storage.onChanged like
@@ -479,6 +491,12 @@ function scheduleBanner() {
   return '';
 }
 
+// Near the storage quota, say so before a save fails: how full, and what to clear.
+function storageBanner() {
+  if (!storageNearlyFull(state.storageBytes)) return '';
+  return `<div class="banner warn" id="storageWarning">${esc(storageNearlyFullText(state.storageBytes))}</div>`;
+}
+
 // A lot that keeps reading more than half smaller (src/rescan.js
 // withWithheld): the saved list stays until the salesperson, having looked at
 // the website, says the new one is right. Then, until the next scan, what
@@ -504,7 +522,7 @@ function viewTodo(l) {
   if (!state.snapshot && !d) {
     return setupBanner() + empty("Or just click <b>Scan website</b> on your dealership's used inventory page.");
   }
-  let html = setupBanner() + scheduleBanner() + notSharedBanner();
+  let html = setupBanner() + scheduleBanner() + storageBanner() + notSharedBanner();
   html += `<div class="meta">Last scan ${esc(when(d?.takenAt || state.snapshot?.takenAt))} · ${l.all.length} used cars · ${l.ready.length} ready to post</div>`;
   for (const w of d?.warnings || []) html += `<div class="banner warn">${esc(w)}</div>`;
   html += withheldBanner(d);
