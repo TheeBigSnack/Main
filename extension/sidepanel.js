@@ -16,7 +16,7 @@ import { DECISION } from './src/classify.js';
 import { draftRecord, draftPill, draftScanCar } from './src/drafts.js';
 import { shortLocation, storeNames } from './src/normalize.js';
 import { readCarForPost, recheck } from './src/vehicleDetails.js';
-import { readyRows, nextToPost, siteChoices, defaultOrigin, siteReadOrigins, missingOrigins, siteAskText } from './src/panelList.js';
+import { readyRows, nextToPost, moveIndex, siteChoices, defaultOrigin, siteReadOrigins, missingOrigins, siteAskText } from './src/panelList.js';
 import { SORT_ORDERS, sortOrder } from './src/readyList.js';
 import { generateDescription, guessColorsWithBackend } from './src/rewriter.js';
 import { runGuardrails, ruleProblems, featureChoices, settleHighlights, toggleHighlight, usableClosingLine, MAX_HIGHLIGHTS } from './src/rewriteTemplate.js';
@@ -3415,6 +3415,22 @@ async function init() {
     ev.target.value = '';
     state.listFilter = '';
     renderList();
+  });
+  // The arrow keys move the focus between the Ready list's rows: to the row's
+  // name link (it opens the car on the website), else its Post button. Enter
+  // is left to whichever control has the focus, so an arrow key never posts.
+  $('panel').addEventListener('keydown', (ev) => {
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(ev.key)) return;
+    const list = ev.target.closest && ev.target.closest('.rows');
+    if (!list) return;
+    const rows = [...list.querySelectorAll(':scope > .row')];
+    const here = rows.findIndex((row) => row.contains(ev.target));
+    const next = moveIndex(here, rows.length, ev.key);
+    if (next < 0 || next === here) return;
+    const control = rows[next].querySelector('a[href]') || rows[next].querySelector('button');
+    if (!control) return;
+    ev.preventDefault();
+    control.focus();
   });
   await refreshGranted();
   // a permission granted or removed elsewhere (the popup, chrome://extensions) counts from the next click

@@ -135,6 +135,16 @@ try {
   assert.deepEqual((await rowNames()).sort(), ['2019 Ram 1500 Classic Express', '2022 Jeep Wagoneer Series III'].sort());
   assert.match(await panel.textContent('#panelQueue'), /^Post the next 2$/);
   assert.equal(await panel.getAttribute(`button[data-post-vin="${RAM}"]`, 'aria-label'), 'Post 2019 Ram 1500 Classic Express');
+  // the arrow keys move the focus from row to row (I-11), and moving it posts nothing
+  const focusedRow = () => panel.evaluate(() => document.activeElement.closest('.row')?.textContent || '');
+  await panel.focus(`button[data-post-vin="${RAM}"]`);
+  await panel.keyboard.press('Home');
+  const firstRow = await focusedRow();
+  await panel.keyboard.press('ArrowDown');
+  assert.notEqual(await focusedRow(), firstRow, 'ArrowDown moves to the next row');
+  await panel.keyboard.press('ArrowUp');
+  assert.equal(await focusedRow(), firstRow, 'ArrowUp goes back to the first row');
+  assert.match(await panel.textContent('#panelQueue'), /^Post the next 2$/, 'moving the focus posts nothing');
   await panel.screenshot({ path: join(shots, 'panel-1-list.png'), fullPage: true });
 
   // the search box filters as you type, keeps the caret, and Escape clears it
