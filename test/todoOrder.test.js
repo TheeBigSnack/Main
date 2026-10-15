@@ -21,6 +21,7 @@ test('the To do order is the scan\'s own order unless the salesperson picks olde
   assert.equal(withTodoOrder({ readySort: 'price', newDays: 9 }, 'oldest', {}).readySort, 'price', 'saving the order keeps the other settings');
   assert.equal(withTodoOrder({ readySort: 'price', newDays: 9 }, 'oldest', {}).newDays, 9);
   assert.equal(withTodoOrder({}, 'nonsense', {}).todoOrder, 'listed');
+  assert.equal(withTodoOrder({}, 'oldest', {}).todoOrder, 'oldest', 'a chosen order is what gets saved, not the default');
 });
 
 test('oldest first sorts by when each item was first flagged; items with no time go last, in the scan\'s order', () => {

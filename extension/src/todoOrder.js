@@ -1,9 +1,10 @@
 // The order of the To do tab's take-down and price items (popup.js viewTodo):
 // the scan's own order, or oldest first. An item is as old as the open pilot
 // flag the numbers keep for it (src/pilot.js noteFlags), so an item with no
-// open flag goes last, in the scan's order. That is every take-down for a car
-// now called new, demo or loaner, which the pilot numbers never time: with
-// "Oldest first" such an item sits after the timed ones, whatever its age.
+// open flag goes last, in the scan's order. The pilot numbers time only the
+// salesperson's own items, so a colleague's, an unmarked car's, and a take-down
+// for a car now called new, demo or loaner have none: with "Oldest first" such
+// an item sits after the timed ones, whatever its age.
 // This website's setting (settings.js todoOrder), chosen from the tab; the
 // default is the scan's own order.
 
