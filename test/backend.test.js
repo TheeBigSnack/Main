@@ -8,7 +8,7 @@ import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
-import { mkdtempSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { rewriteFacts, rewriteWithBackend, REWRITE_TIMEOUT_MS } from '../extension/src/rewriter.js';
@@ -41,13 +41,16 @@ function freePort() {
 
 let runs = 0;
 // Starts the service with the stand-in's answers and any of its settings; resolves once it listens.
-async function start({ answers = [{ text: GOOD }], key = KEY, deadlineMs = null } = {}) {
+async function start({ answers = [{ text: GOOD }], key = KEY, deadlineMs = null, usageText = undefined, usageDir = false } = {}) {
   runs += 1;
   const port = await freePort();
   const log = join(dir, `calls-${runs}.jsonl`);
+  const usageFile = join(dir, `usage-${runs}.json`);
+  if (usageText !== undefined) writeFileSync(usageFile, usageText);
+  if (usageDir) mkdirSync(usageFile);
   const env = {
     PATH: process.env.PATH, HOST: '127.0.0.1', PORT: String(port), ANTHROPIC_API_KEY: 'anthropic-key-for-the-backend-tests', REWRITE_KEY: key,
-    REWRITE_MODEL: 'test-model', MONTHLY_COST_CAP_USD: '25', RATE_LIMIT_PER_MINUTE: '20', USAGE_FILE: join(dir, `usage-${runs}.json`),
+    REWRITE_MODEL: 'test-model', MONTHLY_COST_CAP_USD: '25', RATE_LIMIT_PER_MINUTE: '20', USAGE_FILE: usageFile,
     FAKE_ANTHROPIC: JSON.stringify(answers), FAKE_ANTHROPIC_LOG: log, ...(deadlineMs ? { REWRITE_DEADLINE_MS: String(deadlineMs) } : {}),
   };
   const child = spawn(process.execPath, ['--import', REGISTER, SERVER], { env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -69,8 +72,8 @@ async function start({ answers = [{ text: GOOD }], key = KEY, deadlineMs = null 
   return {
     base,
     calls: () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []),
-    call: (path, { method = 'POST', body, auth = KEY, signal } = {}) =>
-      fetch(base + path, { method, headers: { 'Content-Type': 'application/json', ...(auth ? { Authorization: `Bearer ${auth}` } : {}) }, body: body === undefined ? undefined : JSON.stringify(body), signal }),
+    call: (path, { method = 'POST', body, auth = KEY, signal, origin = null } = {}) =>
+      fetch(base + path, { method, headers: { 'Content-Type': 'application/json', ...(auth ? { Authorization: `Bearer ${auth}` } : {}), ...(origin ? { Origin: origin } : {}) }, body: body === undefined ? undefined : JSON.stringify(body), signal }),
     stop: () => new Promise((resolve) => {
       child.once('exit', resolve);
       child.kill();
@@ -96,13 +99,100 @@ test('backend: /health says only that the service is up without the key; its mon
   } finally {
     await s.stop();
   }
-  // with no key set (one machine, loopback only), the figures are open as the routes are
-  const open = await start({ key: '' });
+});
+
+// Starts the service with `env` and waits for it to exit: a service that
+// refuses to start exits at once, and what it says is the answer.
+function refused(env) {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, ['--import', REGISTER, SERVER], {
+      env: { PATH: process.env.PATH, HOST: '127.0.0.1', PORT: String(3), ANTHROPIC_API_KEY: 'anthropic-key-for-the-backend-tests', USAGE_FILE: join(dir, 'refused.json'), FAKE_ANTHROPIC: '[]', FAKE_ANTHROPIC_LOG: join(dir, 'refused.jsonl'), ...env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let out = '';
+    const timer = setTimeout(() => child.kill(), 10_000);
+    child.stdout.on('data', (c) => { out += c; });
+    child.stderr.on('data', (c) => { out += c; });
+    child.once('exit', (code) => { clearTimeout(timer); resolve({ code, out }); });
+  });
+}
+
+test('backend: the service refuses to start without a REWRITE_KEY, on loopback too, and says what to set', async () => {
+  // an empty key is set on purpose: a backend/.env on this machine would otherwise supply one
+  const r = await refused({ REWRITE_KEY: '' });
+  assert.equal(r.code, 1);
+  assert.match(r.out, /REWRITE_KEY is required/);
+  assert.doesNotMatch(r.out, /rewrite service on http:/);
+});
+
+test('backend: browser CORS names only an extension page as the origin allowed to read an answer; a web page gets none', async () => {
+  const s = await start();
   try {
-    const h = await json(await open.call('/health', { method: 'GET', auth: '' }));
-    assert.deepEqual([h.body.ok, h.body.requests], [true, 0]);
+    const EXT = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';
+    const web = await s.call('/rewrite', { body: FACTS, origin: 'https://evil.example' });
+    assert.equal(web.status, 200, 'the service still answers; the browser is what refuses to show the answer');
+    assert.equal(web.headers.get('access-control-allow-origin'), null);
+    const preflight = await s.call('/rewrite', { method: 'OPTIONS', auth: '', origin: 'https://evil.example' });
+    assert.equal(preflight.headers.get('access-control-allow-origin'), null);
+    const ext = await s.call('/rewrite', { method: 'OPTIONS', auth: '', origin: EXT });
+    assert.equal(ext.status, 204);
+    assert.equal(ext.headers.get('access-control-allow-origin'), EXT);
+    assert.match(ext.headers.get('access-control-allow-headers') || '', /Authorization/);
+    const fromExt = await s.call('/rewrite', { body: FACTS, origin: EXT });
+    assert.equal(fromExt.headers.get('access-control-allow-origin'), EXT);
   } finally {
-    await open.stop();
+    await s.stop();
+  }
+});
+
+test('backend: a usage record for this month counts as it is written: under the cap it answers, at the cap it stops, and a past month starts again', async () => {
+  const thisMonth = new Date().toISOString().slice(0, 7);
+  const under = await start({ usageText: JSON.stringify({ month: thisMonth, usd: 0, requests: 0 }) });
+  try {
+    assert.equal((await json(await under.call('/rewrite', { body: FACTS }))).status, 200);
+  } finally {
+    await under.stop();
+  }
+  const atCap = await start({ usageText: JSON.stringify({ month: thisMonth, usd: 25, requests: 3 }) });
+  try {
+    const r = await json(await atCap.call('/rewrite', { body: FACTS }));
+    assert.equal(r.status, 429);
+    assert.match(r.body.error, /monthly cost cap/);
+    assert.equal(atCap.calls().length, 0, 'no Claude call at the cap');
+  } finally {
+    await atCap.stop();
+  }
+  const lastMonth = await start({ usageText: JSON.stringify({ month: '2000-01', usd: 25, requests: 3 }) });
+  try {
+    assert.equal((await json(await lastMonth.call('/rewrite', { body: FACTS }))).status, 200, 'a past month does not carry its spend over');
+  } finally {
+    await lastMonth.stop();
+  }
+});
+
+test('backend: a usage file that is not a month of spend, or cannot be read at all, stops the service too', async () => {
+  for (const shape of [{ usageText: '{}' }, { usageText: '[]' }, { usageText: '{"month":3,"usd":0,"requests":0}' }, { usageDir: true }]) {
+    const s = await start(shape);
+    try {
+      const r = await json(await s.call('/rewrite', { body: FACTS }));
+      assert.equal(r.status, 429, JSON.stringify(shape));
+      assert.match(r.body.error, /usage file/, JSON.stringify(shape));
+      assert.equal(s.calls().length, 0, `${JSON.stringify(shape)}: no Claude call`);
+    } finally {
+      await s.stop();
+    }
+  }
+});
+
+test('backend: a usage file it cannot read stops the service: a damaged file is not a month with nothing spent', async () => {
+  const s = await start({ usageText: '{"month": "2026-10", "usd": ' });
+  try {
+    const r = await json(await s.call('/rewrite', { body: FACTS }));
+    assert.equal(r.status, 429);
+    assert.match(r.body.error, /usage file/);
+    assert.equal(s.calls().length, 0, 'no Claude call while the spend cannot be read');
+  } finally {
+    await s.stop();
   }
 });
 

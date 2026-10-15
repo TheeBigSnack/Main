@@ -72,7 +72,7 @@ What is blocked: the `database` step (0009 to 0016), the `functions` step and th
 - **Supabase drift** (section C). It blocks the `database` and `functions` steps.
 - **R-6** (#10): a car beside one other car's price tile on some standard-data layouts gets no price instead of its own. Still open, named in HANDOFF 22.5.
 - **R-17** (#9): obeying robots.txt `Disallow` on dealer websites waits on Brandon's answer (recommended: yes).
-- **Supabase functions** import `npm:@supabase/supabase-js@2` without a pin. A new release broke a CI stack run once (2026-10-07). Pinning is recommended and waits on Brandon.
+- **Supabase functions** are pinned to `npm:@supabase/supabase-js@2.117.2`, the version `manager/config.js` vendors (round 11, `a2cc20f`; `test/edgeImports.test.js` holds it). Moving to a newer version is Brandon's call, since the next deploy then imports it.
 - **`LEGAL.version`** is still the draft stamp.
 - **No real dealer website has been read.** The cloud network is Trusted, so dealer sites are blocked. The branding crop was tested only on synthetic photos (`node scripts/branding-eval/run.mjs --seeds=5`). Run it on the pilot dealer's photos only with Brandon's OK.
 - **Stripe** test account is Brandon's.
@@ -985,7 +985,9 @@ A cloud session in the Lot Current project (the "Build the plan's Claude steps" 
 - The price note's word rule: a steer said only in listed words ("Do not go to the dealer.", "Cash price paid to the secretary.") still passes, since the fee places' words are on the list; "incl", "see", "agent" and "signing" are not on it, so a note using them is refused; fees written as amounts joined only by marks ("$1,299 + $499", "$499.00/$25.00") reach seven digits and are refused in a note that says "not the dealer". The help says each.
 - The list after "new": a listed part followed by state wording other than the known state words ("New tires, engine runs great.") is still read as claimed.
 - When a description's stops mix a number in Settings with a refused price note, the side panel's status line still says to fix the description (or Reset to template), although both fixes are in Settings; the checks line lists each reason with its own fix. Open the Marketplace form is off meanwhile, so the status line rarely shows.
-- The Supabase functions import `npm:@supabase/supabase-js@2` without an exact version, so each deploy and each CI stack run takes the newest 2.x. On 2026-10-07 CI's stack job failed once because npm published 2.117.3 while the job started (the re-run passed). Pinning a version or committing a Deno lockfile is the owner's call, since it changes what production imports.
+- The Supabase functions were unpinned (`@2`) until round 11, when they were pinned to 2.117.2 (`a2cc20f`). A Deno lockfile, or a newer pin, is still the owner's call, since it changes what production imports on the next deploy.
+- Round 11 held back, for a decision: (a) the click-time refusal of action-named controls (`security-2`): the form map's neverFill cannot name action words, because `test/posting.test.js` forbids them anywhere in the map, so the refusal needs Brandon to say whether neverFill may name actions; (b) the worker's photo-server grant check (`security-6`): it refuses the e2e fixture's http photo server on 127.0.0.1, so the post flow fails, and it needs a decision on loopback or http photo servers (a loopback exception reopens a local-service fetch path; a fixture change needs an https or granted mock).
+- Round 11 not built: the set-up check of a background read against the tab's read (`owner-3`), which needs a live dealer site to tell whether the two differ, and the next to-do item from upkeep without reopening the popup (`salesperson-4`).
 - Version 0.6.0 waits for the live-check walkthrough's results.
 
 ## 24. The dealer-branding round (2026-10-08, pull request #13)

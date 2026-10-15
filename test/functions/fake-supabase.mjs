@@ -1,6 +1,6 @@
 // A stand-in for the part of supabase-js the Edge Functions use, for the
 // handler tests (test/fn-*.test.js). test/functions/loader.mjs points the
-// functions' npm:@supabase/supabase-js@2 import here.
+// functions' npm:@supabase/supabase-js@2.117.2 import here.
 //
 // It models exactly the chains supabase/functions/** call and nothing else,
 // so a function that starts using another one fails its tests until the

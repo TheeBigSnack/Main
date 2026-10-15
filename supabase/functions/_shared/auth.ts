@@ -15,7 +15,7 @@
 // is created only inside the function process; the key is a function secret
 // and never reaches a browser.
 
-import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
+import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2.117.2';
 import { isRecord } from './http.ts';
 import { authVerdict } from './authVerdict.mjs';
 

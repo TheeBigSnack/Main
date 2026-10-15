@@ -250,3 +250,20 @@ jobs:
       - name: Stop the stack
         if: always()
         run: supabase stop --no-backup
+
+  # Advisory: a known vulnerability in a dependency shows here, but does not
+  # fail the run (continue-on-error), so a new advisory is seen without
+  # blocking a fix that is already green. Make it blocking only on purpose.
+  audit:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - run: npm audit --audit-level=high
+      - name: Audit the rewrite service's own dependencies
+        if: ${{ !cancelled() }}
+        working-directory: backend
+        run: npm audit --audit-level=high

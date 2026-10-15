@@ -394,6 +394,8 @@ export function upkeepHtml() {
   const title = up.kind === 'price' ? `Update the price: ${esc(up.name)}` : `Take down: ${esc(up.name)}`;
   const error = up.error ? `<div class="banner bad">${esc(up.error)}</div>` : '';
   const note = up.note && up.status !== 'stopped' ? `<p class="hint" id="upkeepNote">${esc(up.note)}</p>` : '';
+  // Facebook's saved-car alerts are for a price that goes down, so the line is said only then
+  const saversLine = up.listedPrice && up.price < up.listedPrice ? ' Facebook can let people who saved this car know about the new price; Lot Current doesn\'t.' : '';
   let body = '';
   if (up.status === 'checking') body = `<p id="priceChecking">Checking this car's price on the website first…</p>`;
   else if (up.status === 'stopped') body = `<div class="banner warn" id="upkeepStopped">${esc(up.note)}</div>`;
@@ -409,7 +411,7 @@ export function upkeepHtml() {
     body = up.stuck
       ? `<div class="banner warn" id="priceStuck">The Price box shows "${esc(up.boxShows)}", not ${money(up.price)}. Lot Current has filled it ${MAX_FILLS} times and the form keeps showing that price, so it has stopped filling. Type ${money(up.price)} in the Price box yourself, then click <b>Update</b>.</div>`
       : up.status === 'filled'
-      ? `<div class="banner good" id="priceFilled">New price ${money(up.price)} is in the Price box (it shows "${esc(up.filledShown)}"). Now click <b>Update</b> on Facebook. Lot Current will notice when the listing shows the new price.</div>`
+      ? `<div class="banner good" id="priceFilled">New price ${money(up.price)} is in the Price box (it shows "${esc(up.filledShown)}"). Now click <b>Update</b> on Facebook. Lot Current will notice when the listing shows the new price.${saversLine}</div>`
       : `<div class="banner info" id="priceWaiting">On Facebook, click <b>Edit listing</b>. As soon as the Price box appears on this car's form, Lot Current fills in <b>${money(up.price)}</b>${up.listedPrice ? ` (was ${money(up.listedPrice)})` : ''}, the price the website shows now: Lot Current read the car on the website again just before opening the listing${up.scanPrice ? ` (the last scan had found ${money(up.scanPrice)})` : ''}. Then you click <b>Update</b>.</div>`;
   } else {
     body = up.why === 'not-pre-owned'
