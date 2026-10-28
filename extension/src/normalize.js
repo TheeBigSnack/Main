@@ -142,11 +142,23 @@ export function storeNames(vehicles) {
 // still names, in the list's order. Settings and the set-up's store step draw
 // one box per listed store, so a saved store no box shows is not ticked, and a
 // Save with the boxes drawn drops it (scanRunner.js keeps the saved stores the
-// website lists in the same way). The warnings that count the ticked stores
-// read this list.
+// website lists in the same way). Names are compared trimmed, as storeNames
+// trims them. The warnings that count the ticked stores read this list through
+// warningStores.
 export function tickedStores(saved, listed) {
-  const chosen = Array.isArray(saved) ? saved : [];
-  return (Array.isArray(listed) ? listed : []).filter((store) => chosen.includes(store));
+  const trimmed = (list) => (Array.isArray(list) ? list : []).map((store) => String(store || '').trim());
+  const chosen = trimmed(saved);
+  return trimmed(listed).filter((store) => store && chosen.includes(store));
+}
+
+// The stores a role or name warning counts: the ticked ones, unless a car on the
+// lot names no store. The description check reads a car's own store, so a car
+// with no store name has no store's number among its facts, and such a lot keeps
+// the warning whatever the boxes say.
+export function warningStores(vehicles, ticked) {
+  const cars = Array.isArray(vehicles) ? vehicles : [];
+  const unnamed = cars.some((car) => !(car && String(car.location || '').trim()));
+  return unnamed ? [] : ticked;
 }
 
 // Brand words are only a fallback: with one store name to go on (a

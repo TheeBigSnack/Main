@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
-import { shortLocation, storeNames, tickedStores, matchStore, conditionFromSchemaOrg, conditionWordFromPath, toNumber, calendarDate } from '../extension/src/normalize.js';
+import { shortLocation, storeNames, tickedStores, warningStores, matchStore, conditionFromSchemaOrg, conditionWordFromPath, toNumber, calendarDate } from '../extension/src/normalize.js';
 import { conditionWordFromUrl, websitePrice, normalizeVehicle } from '../extension/adapters/dealerInspireNormalize.js';
 import { fixtures } from './helpers.js';
 
@@ -87,6 +87,22 @@ test('tickedStores: the saved stores the list still names, in the list\'s order;
   assert.deepEqual(tickedStores(['Route 2 Motors'], []), [], 'no list, no ticked store');
   assert.deepEqual(tickedStores(undefined, ['Route 2 Motors']), [], 'nothing saved');
   assert.deepEqual(tickedStores(null, undefined), []);
+});
+
+test('tickedStores: a name with a space at either end is the same store on both sides, and the ticked name is the trimmed one', () => {
+  assert.deepEqual(tickedStores(['Route 2 Motors '], ['Route 2 Motors']), ['Route 2 Motors'], 'a store saved with a space at its end (an earlier Settings Save) is still ticked');
+  assert.deepEqual(tickedStores(['Route 2 Motors'], [' Route 2 Motors ']), ['Route 2 Motors'], 'the list is compared trimmed too');
+});
+
+test('warningStores: a lot with a car that names no store counts no ticked store, so the role or name warning stays; a lot where every car names its store counts them', () => {
+  const ticked = ['Route 2 Motors'];
+  assert.deepEqual(warningStores([{ location: 'Route 2 Motors' }, { location: 'Route 3 Motors' }], ticked), ticked, 'every car names its store');
+  assert.deepEqual(warningStores([{ location: 'Route 2 Motors' }, { location: '' }], ticked), [], 'a car with no store name');
+  assert.deepEqual(warningStores([{ location: 'Route 2 Motors' }, { location: '   ' }], ticked), [], 'a blank store name is no name');
+  assert.deepEqual(warningStores([{ location: 'Route 2 Motors' }, {}], ticked), [], 'a car with no location field');
+  assert.deepEqual(warningStores(undefined, ticked), ticked, 'no list of cars: the ticked stores count as they are');
+  assert.deepEqual(warningStores([], ticked), ticked);
+  assert.deepEqual(warningStores([{ location: '' }], []), [], 'nothing ticked: nothing to count');
 });
 
 // ---------- matchStore: the wizard's default tick ----------

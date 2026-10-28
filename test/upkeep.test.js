@@ -640,6 +640,8 @@ test('a second Open next To do item click while the next item is being found sta
     assert.equal(up.status, 'finding', 'the status turns to finding before anything is awaited');
     assert.match(upkeepHtml(), /Finding the next To do item/);
     assert.doesNotMatch(upkeepHtml(), /upkeepNext/, 'the button is not drawn while the next item is found');
+    assert.match(upkeepHtml(), /id="upkeepClose"/, 'Close is the one button drawn while the next item is found');
+    assert.doesNotMatch(upkeepHtml(), /upkeepDoneBtn|upkeepCancel/, 'no I took it down or Not now while the next item is found');
     assert.doesNotMatch(upkeepHtml(), /upkeepNote|Marked done\./, 'the done note is not repeated under the finding line');
     assert.equal(await handleUpkeepClick('upkeepNext', ctx), true);
     assert.equal(asked, 1, 'the second click asks for nothing');
@@ -649,6 +651,68 @@ test('a second Open next To do item click while the next item is being found sta
     assert.equal(up.hasNext, false);
   } finally {
     endUpkeep();
+  }
+});
+
+test('Close while the next item is being found: the late answer opens no listing, and Close is the button that works then', async () => {
+  const opened = [];
+  let answer = null;
+  globalThis.chrome = { tabs: { create: async ({ url }) => { opened.push(url); return { id: 31 }; } } };
+  const ctx = { render: noop, map: () => FORM_MAP, nextItem: () => new Promise((resolve) => { answer = resolve; }), onClose: noop };
+  try {
+    Object.assign(up, { ...DONE_CAR, hasNext: true });
+    const first = handleUpkeepClick('upkeepNext', ctx);
+    assert.equal(up.status, 'finding');
+    assert.equal(await handleUpkeepClick('upkeepClose', ctx), true, 'Close closes the tab\'s item while the next one is found');
+    answer(NEXT);
+    assert.equal(await first, true);
+    assert.deepEqual(opened, [], 'the late answer after Close opens no listing');
+    assert.equal(up.active, false);
+  } finally {
+    endUpkeep();
+    delete globalThis.chrome;
+  }
+});
+
+test('an item the popup opens while the next one is found is not replaced by the late answer', async () => {
+  const opened = [];
+  let answer = null;
+  globalThis.chrome = { tabs: { create: async ({ url }) => { opened.push(url); return { id: 32 }; } }, runtime: { sendMessage: async () => ({}) } };
+  const ctx = { render: noop, map: () => FORM_MAP, nextItem: () => new Promise((resolve) => { answer = resolve; }), onClose: noop };
+  const OPENED = { ...NEXT, vin: 'CCC', name: 'Car C', listingUrl: 'https://www.facebook.com/marketplace/item/333/' };
+  try {
+    Object.assign(up, { ...DONE_CAR, hasNext: true });
+    const first = handleUpkeepClick('upkeepNext', ctx);
+    await startUpkeep(OPENED, ctx);
+    answer(NEXT);
+    assert.equal(await first, true);
+    assert.equal(up.vin, 'CCC', 'the item the popup opened stays');
+    assert.deepEqual(opened, [OPENED.listingUrl], 'only that listing opened');
+  } finally {
+    endUpkeep();
+    delete globalThis.chrome;
+  }
+});
+
+test('Close while Lot Current looks for the next item after an item is done: the late answer shows no Next button', async () => {
+  const origin = 'https://www.example-motors.test';
+  const k = siteKeys(origin);
+  const store = { [k.posted]: { AAA: { price: 20000, postedAt: 1, mine: true, name: 'Car A' } } };
+  let answer = null;
+  globalThis.chrome = { ...fakeChrome({}, store), tabs: { create: async () => ({ id: 33 }) }, runtime: { sendMessage: async () => ({}) } };
+  const ctx = { render: noop, map: () => FORM_MAP, nextItem: () => new Promise((resolve) => { answer = resolve; }), onClose: noop };
+  try {
+    Object.assign(up, { ...DONE_CAR, status: 'waiting', hasNext: false });
+    const done = handleUpkeepClick('upkeepDoneBtn', ctx);
+    for (let i = 0; i < 50 && !answer; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(up.status, 'done', 'the done banner is drawn while the next item is looked up');
+    assert.equal(await handleUpkeepClick('upkeepClose', ctx), true);
+    answer(NEXT);
+    assert.equal(await done, true);
+    assert.equal(up.hasNext, false, 'the late answer after Close sets no Next button');
+  } finally {
+    endUpkeep();
+    delete globalThis.chrome;
   }
 });
 

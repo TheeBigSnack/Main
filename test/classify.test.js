@@ -88,6 +88,15 @@ test('certified used Wagoneer at Cranberry: pre-owned, but at another store', ()
   assert.equal(assess('certified', {}, {}).decision, DECISION.READY);
 });
 
+test('a store name with spaces at either end is the store it names, on either side of the store filter', () => {
+  const WAY = 'Ron Lewis Chrysler Dodge Jeep Ram Waynesburg';
+  const CRANBERRY = 'Ron Lewis Chrysler Dodge Jeep Ram Cranberry';
+  const atStore = (store) => ({ extra_fields: { meta_location: store, location_rt: store } }); // the record's own store fields, as normalize reads them
+  assert.equal(assess('usedNormal', atStore(`${WAY} `), { myStores: [WAY] }).decision, DECISION.READY, 'a car whose store name has a space at its end is at the ticked store');
+  assert.equal(assess('usedNormal', atStore(WAY), { myStores: [`${WAY} `] }).decision, DECISION.READY, 'a saved store name with a space at its end still matches the car');
+  assert.deepEqual(assess('usedNormal', atStore(`${CRANBERRY} `), { myStores: [WAY] }).blockers.map((b) => b.code), ['other-store'], 'a padded name at another store is still another store');
+});
+
 test('used Hellcat with NO Carfax still passes the pre-owned check', () => {
   const a = assess('usedNoCarfax', {}, {});
   // blocked only because it has no photos yet, not because of Carfax

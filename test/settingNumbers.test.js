@@ -502,6 +502,92 @@ test('Settings: a saved store the website no longer lists has no box and counts 
   assert.equal(region(p.panel(), 'salespersonTitleWarn'), '', 'the ticked store holds the 2; the saved Oak Lot is not ticked');
 });
 
+test('Settings: a car on the lot that names no store keeps the warning under the role, though every ticked store\'s name holds the 2', async () => {
+  const k = siteKeys(POPUP_ORIGIN);
+  const scanned = await loadPopup({});
+  await scanned.scan();
+  const snapshot = structuredClone(scanned.local[k.snapshot]);
+  const cars = Object.values(snapshot.vehicles);
+  cars.forEach((car) => { car.location = 'Route 2 Motors'; });
+  cars[0].location = ''; // one car the website lists with no store name: its description has no store's number to read
+  const dealer = { name: 'Example Motors', city: 'Springfield', state: 'OH', zip: '43215' };
+  const p = await loadPopup({ local: { [k.settings]: { myStores: ['Route 2 Motors'], salesperson: { name: 'Sam', title: 'Team 2' }, dealer }, [k.snapshot]: snapshot } });
+  await p.tab('settings');
+  assert.match(p.panel(), /name="store" value="Route 2 Motors" checked/);
+  assert.notEqual(region(p.panel(), 'salespersonTitleWarn'), '', 'the car with no store name still fails the number check, so the warning stays');
+});
+
+test('Settings: the name under Your name counts the ticked stores too, and with no store ticked it warns', async () => {
+  const k = siteKeys(POPUP_ORIGIN);
+  const scanned = await loadPopup({});
+  await scanned.scan();
+  const snapshot = structuredClone(scanned.local[k.snapshot]);
+  Object.values(snapshot.vehicles).forEach((car) => { car.location = 'Route 2 Motors'; });
+  const dealer = { name: 'Example Motors', city: 'Springfield', state: 'OH', zip: '43215' };
+  const salesperson = { name: 'Team 2', title: 'Sales' };
+  const ticked = await loadPopup({ local: { [k.settings]: { myStores: ['Route 2 Motors'], salesperson, dealer }, [k.snapshot]: snapshot } });
+  await ticked.tab('settings');
+  assert.equal(region(ticked.panel(), 'salespersonNameWarn'), '', 'the ticked store holds the 2 in the name');
+  const unticked = await loadPopup({ local: { [k.settings]: { myStores: [], salesperson, dealer }, [k.snapshot]: snapshot } });
+  await unticked.tab('settings');
+  assert.notEqual(region(unticked.panel(), 'salespersonNameWarn'), '', 'with no store ticked, the name warns');
+});
+
+test('Settings trims the store names as set-up does: the boxes draw the trimmed name, and a padded saved name is ticked', async () => {
+  const k = siteKeys(POPUP_ORIGIN);
+  const scanned = await loadPopup({});
+  await scanned.scan();
+  const snapshot = structuredClone(scanned.local[k.snapshot]);
+  Object.values(snapshot.vehicles).forEach((car) => { car.location = ' Route 2 Motors '; });
+  const dealer = { name: 'Example Motors', city: 'Springfield', state: 'OH', zip: '43215' };
+  const p = await loadPopup({ local: { [k.settings]: { myStores: ['Route 2 Motors '], salesperson: { name: 'Sam', title: 'Team 2' }, dealer }, [k.snapshot]: snapshot } });
+  await p.tab('settings');
+  assert.match(p.panel(), /name="store" value="Route 2 Motors" checked/, 'the box holds the trimmed name, ticked');
+  assert.doesNotMatch(p.panel(), /name="store" value=" Route 2 Motors/, 'no box holds the padded name');
+  assert.equal(region(p.panel(), 'salespersonTitleWarn'), '', 'the ticked store holds the 2');
+});
+
+test('set-up\'s address step counts only the ticked stores the list names: a saved store the list no longer names does not clear the warning', () => {
+  const role = { name: 'Sam', title: 'Team 2' };
+  const chance = { name: '2nd Chance Auto', city: 'Springfield', state: 'OH', zip: '43215' };
+  const boxes = { wizDealer: { value: 'Example Motors' }, wizCity: { value: 'Springfield' }, wizState: { value: 'OH' }, wizZip: { value: '43215' } };
+  const elements = new Map();
+  globalThis.document = { getElementById: (id) => boxes[id] || (elements.has(id) ? elements.get(id) : elements.set(id, countingElement(id)).get(id)) };
+  const typed = () => { handleWizardInput({ id: 'wizDealer', value: 'Example Motors' }); return text(elements.get('wizYouWarn')); };
+  wiz.active = true;
+  wiz.step = 'address';
+  wiz.scan = { stores: ['Route 3 Motors'] };
+  wiz.settings = withDefaults({ salesperson: role, dealer: chance, myStores: ['Route 2 Motors'] });
+  assert.match(typed(), /no longer have the number in your role/, 'Route 2 Motors holds the 2, but the list does not name it: no count');
+  wiz.active = false;
+  wiz.scan = null;
+});
+
+test('set-up\'s address step keeps the role\'s warning when a car on the read names no store, though every ticked store\'s name holds the 2', () => {
+  const role = { name: 'Sam', title: 'Team 2' };
+  const chance = { name: '2nd Chance Auto', city: 'Springfield', state: 'OH', zip: '43215' };
+  const boxes = { wizDealer: { value: 'Example Motors' }, wizCity: { value: 'Springfield' }, wizState: { value: 'OH' }, wizZip: { value: '43215' } };
+  const elements = new Map();
+  globalThis.document = { getElementById: (id) => boxes[id] || (elements.has(id) ? elements.get(id) : elements.set(id, countingElement(id)).get(id)) };
+  const typed = () => { handleWizardInput({ id: 'wizDealer', value: 'Example Motors' }); return text(elements.get('wizYouWarn')); };
+  wiz.active = true;
+  wiz.step = 'address';
+  wiz.settings = withDefaults({ salesperson: role, dealer: chance, myStores: ['Route 2 Motors'] });
+  wiz.scan = { stores: ['Route 2 Motors'], vehicles: [{ location: 'Route 2 Motors' }, { location: '' }] };
+  assert.match(typed(), /no longer have the number in your role/, 'the car with no store name still fails the number check');
+  wiz.scan = { stores: ['Route 2 Motors'], vehicles: [{ location: 'Route 2 Motors' }] };
+  assert.equal(typed(), '', 'with every car named, the ticked store holds the 2');
+  wiz.active = false;
+  wiz.scan = null;
+});
+
+test('a role or a name that reads as a price or a mileage keeps its warning though every ticked store\'s name holds the number', () => {
+  const stores = ['Route 100 Motors'];
+  assert.equal(settingNumberWarning('role', 'Team 100', DEALER, stores), '', 'a plain 100 that the ticked store holds is not flagged');
+  assert.notEqual(settingNumberWarning('role', '100 Mile club', DEALER, stores), '', 'a mileage in the role warns, whichever store holds the 100');
+  assert.notEqual(settingNumberWarning('name', '$100 Sales', DEALER, stores), '', 'a price in the name warns');
+});
+
 test('Settings: the store boxes ticked in the form decide the warning under the role, as they change and as the role is typed', async () => {
   const k = siteKeys(POPUP_ORIGIN);
   // the fixture's cars, moved to two invented stores: one of them holds the role's number, the other does not

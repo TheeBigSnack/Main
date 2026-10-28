@@ -810,6 +810,22 @@ test('the next item is the first take-down or price row with a button, from the 
   assert.deepEqual(firstAfter('oldest', 'T4'), ['takeDown', 'T3']);
 });
 
+test('the To do order reads a row\'s own kind of flag only, and a row with no flag or an equal flag time keeps the scan\'s order', () => {
+  const walk = (takeDown, flags) => {
+    const out = [];
+    for (let rows = takeDown; ;) {
+      const n = rescan.nextUpkeepItem({ diff: { takeDown: rows, priceUpdates: [] }, posted: {}, flags, order: 'oldest' });
+      if (!n) return out;
+      out.push(n.item.vin);
+      rows = rows.filter((r) => r.vin !== n.item.vin);
+    }
+  };
+  const car = (vin) => ({ vin, yours: true, name: vin });
+  assert.deepEqual(walk([car('T1'), car('T2')], [{ vin: 'T1', kind: 'price', flaggedAt: at3(1) }, { vin: 'T2', kind: 'takeDown', flaggedAt: at3(2) }]), ['T2', 'T1'], 'T1 has a price flag, not a take-down flag, so it comes after T2');
+  assert.deepEqual(walk([car('A'), car('B'), car('C')], [{ vin: 'C', kind: 'takeDown', flaggedAt: at3(1) }]), ['C', 'A', 'B'], 'the flagged row first, then the rows with no flag in the scan\'s order');
+  assert.deepEqual(walk([car('A'), car('B')], [{ vin: 'A', kind: 'takeDown', flaggedAt: at3(1) }, { vin: 'B', kind: 'takeDown', flaggedAt: at3(1) }]), ['A', 'B'], 'an equal flag time keeps the scan\'s order');
+});
+
 test('price updates come in the tab\'s order too: the scan\'s own, or oldest first by each one\'s open price flag, and one that waits has no button', () => {
   const diff = {
     takenAt: at3(2),
