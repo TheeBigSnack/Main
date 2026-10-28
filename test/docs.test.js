@@ -124,9 +124,10 @@ test('help.md says where Back goes on the address step: Your account when that s
 });
 
 // Round 13's wording of the next To do item and of the ticked stores in the
-// Settings warnings: each sentence is what the code does (upkeep.js, the
-// store-count rule in src/normalize.js tickedStores and the warnings' tests).
-test('README and help.md state the next To do item and the ticked-store rule with the exceptions the code has', () => {
+// Settings warnings, pinned as text: the behaviour is pinned in the tests that
+// cover upkeep.js and the store-count rule (src/normalize.js tickedStores and
+// the warnings), in test/upkeep.test.js and test/settingNumbers.test.js.
+test('README and help.md state the next To do item and the ticked-store rule in this round\'s words', () => {
   const readme = read('../README.md');
   const help = doc('help.md');
   assert.ok(readme.includes("the panel offers **Open next To do item** when another item follows; it opens that item's listing, and you take the same steps there."), 'README.md: the next To do item');
