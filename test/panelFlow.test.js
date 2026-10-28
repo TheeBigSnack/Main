@@ -15,7 +15,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { currentVin, advance, describe as describeQueue, skipPublishNote } from '../extension/src/queue.js';
-import { markPosted, diffScans } from '../extension/src/rescan.js';
+import { markPosted, diffScans, nextUpkeepItem } from '../extension/src/rescan.js';
+import { siteKeys } from '../extension/src/storageKeys.js';
 import { logPost, capStatus, capCount } from '../extension/src/cap.js';
 import { updateKey, withLock } from '../extension/src/storage.js';
 import { runGuardrails, ruleProblems, buildTemplateDescription } from '../extension/src/rewriteTemplate.js';
@@ -3891,4 +3892,38 @@ test('the checking view has a Back button for a single post, and none for a queu
   assert.match(view(false), /<button type="button" class="plain" id="back">Back<\/button>/);
   assert.doesNotMatch(view(true), /id="back"/);
   assert.match(src, /function queueBar\(\)/, 'the queue bar is the queued car\'s way out');
+});
+
+// Open next To do item (sidepanel.js nextUpkeepRequest): the request for the next item is built from the
+// lists as they are stored. It carries what that item needs to open its listing and fill a price: the kind;
+// a take-down's reason, and an empty one for a price item; a price item's new price; the price its listing
+// was posted at; the listing's link; and its name, the posted entry's first. nextUpkeepItem (rescan.js,
+// pinned in rescan.test.js) picks the item. Compiled as written, with the real nextUpkeepItem and storage keys,
+// and a stub for the one storage read.
+test('the Open next To do item request carries the fields of the item it opens, and none when storage cannot be read', async () => {
+  const ORIGIN = 'https://www.example-motors.test';
+  const k = siteKeys(ORIGIN);
+  const stored = {
+    [k.diff]: {
+      takenAt: '2026-10-28T09:00:00.000Z',
+      takeDown: [{ vin: 'TKD', name: 'Car T from the scan', yours: true, why: 'not-pre-owned' }],
+      priceUpdates: [{ vin: 'PRC', name: 'Car P from the scan', yours: true, from: 21000, to: 19500, change: -1500 }],
+    },
+    [k.posted]: {
+      TKD: { price: 18000, postedAt: '2026-10-20T10:00:00.000Z', name: 'Car T', listingUrl: 'https://www.facebook.com/marketplace/item/111/' },
+      PRC: { price: 21000, postedAt: '2026-10-20T10:00:00.000Z', name: 'Car P', listingUrl: 'https://www.facebook.com/marketplace/item/222/' },
+    },
+  };
+  const up = { origin: ORIGIN, vin: 'PRC' }; // the car just finished is the price row's: the take-down comes first, so it is next
+  const ask = (get) => compile('nextUpkeepRequest', { up, siteKeys, nextUpkeepItem, state: { settings: {}, dealerTabId: 4 }, panelWindowId: 2, chrome: { storage: { local: { get } } } })();
+  const readStored = async (keys) => Object.fromEntries(keys.map((key) => [key, stored[key]]));
+  const fields = (r) => ({ kind: r.kind, vin: r.vin, why: r.why, price: r.price, listedPrice: r.listedPrice, listingUrl: r.listingUrl, name: r.name });
+
+  const takeDown = await ask(readStored);
+  assert.deepEqual(fields(takeDown), { kind: 'takeDown', vin: 'TKD', why: 'not-pre-owned', price: null, listedPrice: 18000, listingUrl: 'https://www.facebook.com/marketplace/item/111/', name: 'Car T' });
+  up.vin = 'TKD'; // now the take-down's car is the one just finished, so the price row is next
+  const price = await ask(readStored);
+  assert.deepEqual(fields(price), { kind: 'price', vin: 'PRC', why: '', price: 19500, listedPrice: 21000, listingUrl: 'https://www.facebook.com/marketplace/item/222/', name: 'Car P' });
+  assert.deepEqual([price.origin, price.dealerTabId, price.windowId], [ORIGIN, 4, 2]);
+  assert.equal(await ask(async () => { throw new Error('storage is unavailable'); }), null, 'a failed read gives no request');
 });
