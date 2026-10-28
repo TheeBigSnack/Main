@@ -79,9 +79,9 @@ const WRAP = `(?:\\n${SEP}(?:(?://|/?\\*|#|--|>|;|<!--)${SEP})?)?`;
 // another listed stem ("zea" of zealot, "came" of Camelot). Written that way
 // it cannot be told apart from "slot", "plot", "blot", "clot", "allot" or
 // "pilot" ("timeslotsync" is a time slot). That includes a common ending such
-// as "mate" (automate, estimate, of matelot), and a regular expression's \b
-// or \s right before the name, whose b or s reads as a stem letter, so a
-// pattern such as /\blotsync/ in a test is not reported. Other English words
+// as "mate" (automate, estimate, of matelot). A stem with a backslash right in front
+// of it is a regular expression's escape, not a word, so /\blotsync/, \slotsync and
+// \Blotsync are reported; the word-stem cases above stay as documented. Other English words
 // that end in "lot" are reported ("backlotsync"). As the next word of a
 // camelCase name, or after a separator, it is still caught ("carsLotSync",
 // "web lotsync", "APP-LOTSYNC").
@@ -90,7 +90,9 @@ const WRAP = `(?:\\n${SEP}(?:(?://|/?\\*|#|--|>|;|<!--)${SEP})?)?`;
 const LOT_WORDS = ['pilot', 'ballot', 'allot', 'slot', 'plot', 'blot', 'clot', 'zealot', 'harlot', 'shallot', 'ocelot', 'camelot', 'matelot', 'cachalot', 'polyglot'];
 const anyCase = (s) => s.replace(/[a-z]/g, (c) => `[${c.toUpperCase()}${c}]`);
 const STEMS = LOT_WORDS.map((w) => anyCase(w.slice(0, -3))).join('|');
-const LOT = `(?:(?<![A-Za-z])[Ll][Oo][Tt]|(?<=[a-z])(?:L|(?<!${STEMS})l)[Oo][Tt]|(?<=[A-Z])(?:Lot|(?<!${STEMS})[Ll][Oo][Tt]))`;
+// A stem blocks only when no backslash sits in front of it, so a regular expression's escape before the name (\b, \s, \B) is not read as a stem.
+const NO_STEM_BEFORE = String.raw`(?<!(?<!\\)(?:${STEMS}))`;
+const LOT = `(?:(?<![A-Za-z])[Ll][Oo][Tt]|(?<=[a-z])(?:L|${NO_STEM_BEFORE}l)[Oo][Tt]|(?<=[A-Z])(?:Lot|${NO_STEM_BEFORE}[Ll][Oo][Tt]))`;
 const SYNC = '[Ss][Yy][Nn][Cc]';
 const OLD_NAME = new RegExp(`${LOT}${SEP}${WRAP}${SYNC}`, 'g');
 const OLD_NAME_ONE = new RegExp(`${LOT}${SEP}${SYNC}`);
@@ -495,6 +497,10 @@ test('the scan catches the old name in every spelling, in any file that is not e
     '<label class="lot-sync">Website</label>',
     String.raw`title: 'Lot\u00a0Sync'`,
     String.raw`title: 'Lot\x20Sync'`,
+    // a regular expression's escape right in front of the name: the stem letter after the backslash does not stop it
+    String.raw`\blotsync`,
+    String.raw`\slotsync`,
+    String.raw`\Blotsync`,
     // where a word starts, after a mark or as the next word of a camelCase name
     'initLotSync();',
     'see (LotSync) and x.lotsync',
