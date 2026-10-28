@@ -359,7 +359,7 @@ const NO_DEALER_TEXT = "Add your dealership's name first. Click the Lot Current 
 // status line (fillBlocker, carStillCurrent) and the checks line say it.
 // Only a template description is written again by a Settings save
 // (reviewAfterSettings); an edited or rewritten one is only checked again.
-const settingsFix = (stops, source = 'template') => (stops.length && stops.every((p) => p.code === 'setting-number') ? (source === 'template' ? 'After you save Settings, the template writes the description again; if you edited it, click Reset to template.' : 'After you save Settings, click Reset to template to write the description again.') : '');
+const settingsFix = (stops, source = 'template') => (stops.length && stops.every((p) => p.code === 'setting-number' || /the note in Settings\.?$/.test(p.text)) ? (source === 'template' ? 'After you save Settings, the template writes the description again; if you edited it, click Reset to template.' : 'After you save Settings, click Reset to template to write the description again.') : '');
 
 // Why a description can't be typed into the form, or '' when it can. Every
 // way of opening or filling the form goes through this (Open the

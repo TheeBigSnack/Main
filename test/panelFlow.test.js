@@ -2647,7 +2647,7 @@ test('the status line ends the reasons with one full stop, also when a reason en
     () => ({}),
   )('A fine truck. Sales consultant at Example Motors.');
   const note = 'Your price note says "not the dealer", so it may only say where the fees go and what the price includes; take out "Text", or take out "not the dealer". Change the note in Settings.';
-  assert.equal(blocker([note]), `The description fails a check that must pass before the form is filled: ${note} Fix the description (or use Reset to template) first.`);
+  assert.equal(blocker([note]), `The description fails a check that must pass before the form is filled: ${note} After you save Settings, the template writes the description again; if you edited it, click Reset to template.`);
   assert.equal(blocker(['Says "new brakes", but the website says nothing about new or replaced parts for this car']), 'The description fails a check that must pass before the form is filled: Says "new brakes", but the website says nothing about new or replaced parts for this car. Fix the description (or use Reset to template) first.');
   assert.doesNotMatch(blocker(['One.', note]), /\.\./);
   // the website-changed line (carStillCurrent) ends its reasons the same way
@@ -2767,6 +2767,23 @@ test('a role with a number keeps the form shut, and the status line names the ro
   const fixed = { ...settings, salesperson: { name: 'Sam', title: 'Second shift sales' } };
   const again = template.buildTemplateDescription({ vehicle: CAR, dealer: fixed.dealer, salesperson: fixed.salesperson, priceNote: '' });
   assert.equal(realBlocker({ ...state, settings: fixed })(again), '');
+});
+
+// A number in the role and a price note the checks refuse are both fixed in
+// Settings (a Settings save writes the template again), so the status line
+// gives the Settings fix, not the description's.
+test('a number in the role and a price note refused in Settings: the status line gives the Settings fix, not the description\'s', () => {
+  const salesperson = { name: 'Sam', title: '2nd shift sales' };
+  const priceNote = 'Priced to sell, plus tax, title and registration.';
+  const settings = { ...SETTINGS, salesperson, priceNote };
+  const state = { settings, vehicle: CAR, price: 20986, noteApplies: true };
+  const text = template.buildTemplateDescription({ vehicle: CAR, dealer: settings.dealer, salesperson, priceNote });
+  const why = realBlocker(state)(text);
+  assert.match(why, /^The description fails 2 checks that must pass before the form is filled: /, why);
+  assert.match(why, /Your role "2nd shift sales" has a number in it/, why);
+  assert.match(why, /Your dealership's price note says "priced to sell"; change the note in Settings/, why);
+  assert.match(why, /After you save Settings, the template writes the description again; if you edited it, click Reset to template\.$/, why);
+  assert.doesNotMatch(why, /Fix the description/, why);
 });
 
 test('the checks line says which problems stop the form and which only warn', () => {
