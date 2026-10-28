@@ -92,6 +92,8 @@ const state = {
   sites: {}, // the site registry (src/scanRunner.js rememberSite): every website this computer has read, for the list's website choice
   siteInfo: null, // this website's registry entry: its adapter and service, so a car can be read without the dealer tab
   snapshotTakenAt: null, // when the saved snapshot behind the list was taken
+  snapshotStartedAt: null, // when the scan behind that snapshot began (its cars are as of then: scanCar)
+  snapshotCarriedReadAt: null, // the read times of its cars carried over unread (scanCar)
   listFilter: '', // the list's search box, kept while the panel is open
   blockedOrigins: null, // the website permission a post stopped on (src/vehicleDetails.js needsPermission)
   rescanning: false,
@@ -170,6 +172,8 @@ async function loadSaved() {
     siteInfo,
     siteName,
     snapshotTakenAt: data[k.snapshot]?.takenAt || null,
+    snapshotStartedAt: data[k.snapshot]?.startedAt || null,
+    snapshotCarriedReadAt: data[k.snapshot]?.carriedReadAt || null,
     settings,
     posted: data[k.posted] || {},
     postLog: data[k.postLog] || [],
@@ -2043,7 +2047,7 @@ function listRowHtml(r, { canPost = true } = {}) {
   let action = '';
   if (r.draft) {
     // the draft's price is compared with the last scan only when it was taken once the draft was filled (src/drafts.js draftScanCar)
-    const seen = draftScanCar(state.drafts[r.vin], { takenAt: state.snapshotTakenAt, vehicles: state.snapshotVehicles }, r.vin);
+    const seen = draftScanCar(state.drafts[r.vin], { takenAt: state.snapshotTakenAt, startedAt: state.snapshotStartedAt, carriedReadAt: state.snapshotCarriedReadAt, vehicles: state.snapshotVehicles }, r.vin);
     const draft = draftPill(state.drafts[r.vin], seen, { basis: (state.settings && state.settings.basis) || 'website', markWhere: ' in the popup' });
     action = `<span class="pill ${draft.tone}" title="${esc(draft.title)}">${esc(draft.text)}</span>`;
   } else if (canPost) action = `<button type="button" class="small go" data-post-vin="${esc(r.vin)}" aria-label="Post ${esc(r.name)}">Post</button>`;
@@ -2592,10 +2596,12 @@ function refocus(kept) {
 function render() {
   $('site').textContent = state.siteName || '';
   const views = { idle: viewIdle, rules: viewRules, checking: viewChecking, blocked: viewBlocked, review: viewReview, filling: viewFilling, probe: viewProbe, publish: viewPublish, done: viewDone, notSaved: viewNotSaved, queueDone: viewQueueDone, wizard: wizardHtml };
+  const inPanel = keyboardInPanel(); // read before anything is drawn
   if (state.step === 'wizard') {
     const kept = focusNow();
     $('panel').innerHTML = wizardHtml();
     refocusWizard(kept);
+    if (inPanel) keepKeyboard(); // the control kept was drawn disabled or not drawn: the heading, or the panel itself
     return;
   }
   if (state.step === 'upkeep') {
@@ -2603,7 +2609,6 @@ function render() {
     return;
   }
   const kept = (state.step === 'idle' && $('panelReady')) || state.step === 'publish' ? focusNow() : null; // the list, or the publish step (the Listing link box), redrawn under the person
-  const inPanel = keyboardInPanel();
   $('panel').innerHTML = queueBar() + (views[state.step] || viewIdle)();
   if (kept) refocus(kept);
   if (inPanel) keepKeyboard(); // a no-op when refocus got the keyboard back
@@ -2630,17 +2635,13 @@ function keepKeyboard() {
 }
 
 // The set-up is drawn again on every press, which removes the focused button:
-// the control the step keeps (wizardFocusId) takes the focus, else the heading.
+// the control the step keeps (wizardFocusId) takes the focus. When it cannot
+// (none drawn, or drawn disabled), render gives the focus to the heading.
 function refocusWizard(kept) {
   const drawn = [...$('panel').querySelectorAll('[id]')].map((el) => el.id);
   const id = wizardFocusId(kept, drawn);
   const el = id ? $(id) : null;
-  if (el) return el.focus();
-  const heading = $('panel').querySelector('h3');
-  if (heading) {
-    heading.tabIndex = -1;
-    heading.focus();
-  }
+  if (el) el.focus();
 }
 
 // The list part only, after a keystroke in the search box: the box keeps its focus and caret.
@@ -2686,7 +2687,7 @@ async function upkeepPriceNow(req) {
   if (held) return { ok: false, message: `${held}, so its price was not updated. Rescan the website: To do then lists it to take down.` };
   const check = recheck(fresh.vehicle, state.settings);
   if (!check.ok && check.assessment.decision !== DECISION.NOT_READY) return { ok: false, message: `${check.message} Its price was not updated: rescan the website to see what to do with this listing.` };
-  const basis = postedBasis(state.posted[vin], state.settings.basis, [scanCar(state.posted[vin], { takenAt: state.snapshotTakenAt, vehicles: state.snapshotVehicles }, vin), fresh.vehicle]);
+  const basis = postedBasis(state.posted[vin], state.settings.basis, [scanCar(state.posted[vin], { takenAt: state.snapshotTakenAt, startedAt: state.snapshotStartedAt, carriedReadAt: state.snapshotCarriedReadAt, vehicles: state.snapshotVehicles }, vin), fresh.vehicle]);
   return { ok: true, price: basisPrice(fresh.vehicle, basis), basis };
 }
 
@@ -3341,6 +3342,8 @@ function adoptChanges(changes) {
     if (!same(vehicles, state.snapshotVehicles) || (snap && snap.takenAt) !== state.snapshotTakenAt) {
       state.snapshotVehicles = vehicles;
       state.snapshotTakenAt = (snap && snap.takenAt) || null;
+      state.snapshotStartedAt = (snap && snap.startedAt) || null;
+      state.snapshotCarriedReadAt = (snap && snap.carriedReadAt) || null;
       if (snap && snap.site && snap.site.name) state.siteName = snap.site.name;
       touched = true;
     }

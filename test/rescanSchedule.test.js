@@ -113,6 +113,8 @@ test('scanWithSearch: records in, snapshot + diff + boilerplate + photo hosts ou
   assert.equal(first.ok, true);
   assert.equal(Object.keys(first.snapshot.vehicles).length, 6);
   assert.equal(first.diff.firstScan, true);
+  assert.equal(first.diff.startedAt, first.res.startedAt, 'the diff carries when the scan began');
+  assert.ok(Date.parse(first.diff.startedAt) <= Date.parse(first.diff.takenAt), 'and that is no later than when it finished');
   assert.deepEqual(first.boilerplate, ['Ron Lewis Real Price includes all costs.']);
   assert.deepEqual(first.photoOrigins, ['https://vehicle-images.carscommerce.inc'], 'where the photos live, from the records');
   assert.deepEqual(siteForSnapshot(site), { origin: 'https://x', host: 'x', name: 'Test', title: 't', address: { zip: '15370' }, adapter: 'dealerInspire' });
@@ -166,6 +168,8 @@ test('performScan on a Dealer Inspire look-alike: neutral probe, the adapter\'s 
     assert.equal(r.site.adapter, 'dealerInspire');
     assert.equal(r.vehicles.length, 6, 'the used and certified cars');
     assert.equal(r.res.complete, true);
+    assert.equal(r.diff.startedAt, r.res.startedAt, 'the saved diff carries when the scan began');
+    assert.ok(Date.parse(r.diff.startedAt) <= Date.parse(r.diff.takenAt), 'and that is no later than when it finished');
     assert.deepEqual(r.photoOrigins, ['https://vehicle-images.carscommerce.inc']);
     assert.ok(r.settings && Array.isArray(r.settings.myStores));
     const entry = chrome.store.sites[origin];

@@ -65,7 +65,9 @@ export async function scanWithSearch({ adapter, search, site, settings, prevSnap
   // only what may have changed. An adapter that needs none of it ignores it.
   const confirmUrls = { ...((prevSnapshot && prevSnapshot.missingPages) || {}) };
   for (const [vin, entry] of Object.entries(last)) if (entry && typeof entry.url === 'string' && entry.url) confirmUrls[vin] = entry.url;
+  const startedAt = new Date().toISOString();
   const res = await adapter.scan(search, { ...(options || {}), confirmVins, confirmUrls, lastSeen: last, postedVins: Object.keys(posted || {}) });
+  res.startedAt = startedAt;
   if (!res.ok) return { ok: false, message: res.message, res };
   const vehicles = res.records.map(adapter.normalize).filter(Boolean);
   // The adapter's normalise sees one record, so its store label is a guess
@@ -80,6 +82,9 @@ export async function scanWithSearch({ adapter, search, site, settings, prevSnap
   const diff = diffScans(prevSnapshot, snapshot, { posted, confirm: res.confirm, basis: settings.basis });
   if (!res.complete) diff.warnings.unshift(incompleteWarning(res));
   diff.takenAt = res.fetchedAt;
+  diff.startedAt = res.startedAt;
+  // a car carried over unread is dated by when its details were read, so its To do price item is too (priceItemWaits)
+  if (snapshot.carriedReadAt) diff.carriedReadAt = snapshot.carriedReadAt;
   diff.requests = res.requests;
   // Text that repeats across the lot (disclaimers, legal lines) is kept so the
   // description writer can strip it. A scan that read every car's
@@ -137,7 +142,7 @@ export function confirmOrder(vins, unchecked) {
 // arrivals for days, not only until the next rescan replaces the diff; the
 // last saved snapshot is the one carried from, so a scan whose snapshot is
 // not saved (diff.unreliable) changes no dates. When a car's own page was
-// last read (pageReadAt: this scan's time for the cars in res.pagesRead,
+// last read (pageReadAt: this scan's start for the cars in res.pagesRead,
 // else the last entry's), so an adapter that can read only so many pages
 // per scan reads the oldest first and gets round the whole lot. A car the
 // website still lists but whose details the adapter could not read this
@@ -151,11 +156,14 @@ export function confirmOrder(vins, unchecked) {
 // check left unchecked, with why (unchecked), so the next scan checks them
 // last (confirmOrder).
 function snapshotOf({ site, res, vehicles, assessments, carry }) {
-  const snapshot = makeSnapshot({ site, takenAt: res.fetchedAt, complete: res.complete, vehicles, assessments, previous: carry.previous || null });
+  const snapshot = makeSnapshot({ site, takenAt: res.fetchedAt, startedAt: res.startedAt, complete: res.complete, vehicles, assessments, previous: carry.previous || null });
   const readNow = new Set(Array.isArray(res.pagesRead) ? res.pagesRead : []);
   for (const [vin, entry] of Object.entries(snapshot.vehicles)) {
     const before = carry.last[vin] && carry.last[vin].pageReadAt;
-    if (readNow.has(vin)) entry.pageReadAt = res.fetchedAt;
+    // A car read by this scan is read as of when the scan began: a scan that
+    // began before a listing got its price must not look read after it. This
+    // time is carried over as carriedReadAt when the car is unread next time.
+    if (readNow.has(vin)) entry.pageReadAt = res.startedAt ?? res.fetchedAt;
     else if (typeof before === 'string') entry.pageReadAt = before;
   }
   // A car carried over unread keeps the time its details were last read, on
@@ -271,6 +279,8 @@ export async function performScan({ tabId, origin, settings = null, settingsFrom
     const snap = snapshotOf({ site: out.snapshot.site, res: out.res, vehicles: out.vehicles, assessments, carry: out.carry });
     const diff = diffScans(snapshot, snap, { posted, confirm: out.res.confirm, basis: s.basis });
     diff.takenAt = out.res.fetchedAt;
+    diff.startedAt = out.res.startedAt;
+    if (snap.carriedReadAt) diff.carriedReadAt = snap.carriedReadAt;
     diff.requests = out.res.requests;
     if (!out.res.complete) diff.warnings.unshift(out.diff.warnings[0]);
     result = { ...out, snapshot: snap, diff };

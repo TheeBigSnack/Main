@@ -96,12 +96,32 @@ function pricedAt(entry) {
   return msOf(entry.updatedAt) ?? msOf(entry.draftSavedAt) ?? msOf(entry.postedAt);
 }
 
-// Whether a scan was taken before a listing got its price: false when
-// either time is unknown.
+// Whether a scan was taken before a listing got its price: a scan counts from
+// when it began (startedAt), or from when it finished (takenAt) when it has
+// no start time, as scanCar reads a car. False when either time is unknown.
 function scanBefore(entry, snap) {
   const priced = pricedAt(entry);
-  const taken = snap && typeof snap === 'object' ? msOf(snap.takenAt) : null;
+  const taken = snap && typeof snap === 'object' ? (msOf(snap.startedAt) ?? msOf(snap.takenAt)) : null;
   return priced !== null && taken !== null && taken < priced;
+}
+
+// The time a scan says its car's details were last read, for a car it carried
+// over unread (carriedReadAt, scanRunner.js); undefined for a car it read.
+function carriedReadOf(snap, vin) {
+  return snap && typeof snap === 'object' && snap.carriedReadAt && typeof snap.carriedReadAt === 'object' && Object.prototype.hasOwnProperty.call(snap.carriedReadAt, vin) ? snap.carriedReadAt[vin] : undefined;
+}
+
+// Whether a scan's reading of a car, as scanCar dates it, was taken before a
+// listing got the price it carries (`entry`): a car the scan carried over
+// unread is as of when its details were last read (null when unknown, which
+// is before the price); any other car is as of when the scan began (scanBefore).
+// False when the listing carries no time.
+function readBefore(entry, snap, vin) {
+  const carried = carriedReadOf(snap, vin);
+  if (carried === undefined) return scanBefore(entry, snap);
+  const priced = pricedAt(entry);
+  const read = msOf(carried);
+  return priced !== null && (read === null || read < priced);
 }
 
 // A car as a scan shows it, for reading a listing's basis (seenBasis): only
@@ -124,9 +144,11 @@ export function scanCar(entry, snap, vin) {
   if (priced === null) return car;
   // A car carried over from an earlier scan (its page not read this time) is
   // as of the time its details were read (carriedReadAt, scanRunner.js); a car
-  // the scan read is as of the scan. A carried car with no read time is not priced.
-  const carried = snap.carriedReadAt && typeof snap.carriedReadAt === 'object' && Object.prototype.hasOwnProperty.call(snap.carriedReadAt, vin) ? snap.carriedReadAt[vin] : undefined;
-  const taken = carried !== undefined ? msOf(carried) : msOf(snap.takenAt);
+  // the scan read is as of when the scan began (startedAt, so a scan that began
+  // before the listing got its price is not trusted for it, though it finished
+  // after), else as of its finish. A carried car with no read time is not priced.
+  const carried = carriedReadOf(snap, vin);
+  const taken = carried !== undefined ? msOf(carried) : (msOf(snap.startedAt) ?? msOf(snap.takenAt));
   return taken !== null && taken >= priced ? car : null;
 }
 
@@ -168,16 +190,18 @@ export function listingWebsitePrice(entry, now, basis = 'website', seen = [now])
 // basis was recorded per entry, as the setting changes: the basis its price
 // is on in the last scan (`snapshot`; postedBasis), else the basis in force
 // until now (`basis`, the setting being changed). An entry that got its
-// price after that scan was taken (posted or updated on another computer and
-// brought by sync since) is left as it is: the scan shows the website as it
-// was before (scanCar), and the next scan reads the entry's basis
-// (withSeenBasis). undefined when nothing is stamped, so nothing is written.
+// price after the scan's reading of its car was taken (posted or updated on
+// another computer and brought by sync since; for a car the scan carried over
+// unread, the time its details were last read) is left as it is: the scan
+// shows the website as it was before (scanCar), and the next scan reads the
+// entry's basis (withSeenBasis). undefined when nothing is stamped, so nothing
+// is written.
 export function withPostedBasis(posted, basis, snapshot = null) {
   if (!posted || typeof posted !== 'object') return undefined;
   let changed = false;
   const next = {};
   for (const [vin, e] of Object.entries(posted)) {
-    if (e && typeof e === 'object' && !PRICE_BASES.includes(e.basis) && !scanBefore(e, snapshot)) {
+    if (e && typeof e === 'object' && !PRICE_BASES.includes(e.basis) && !readBefore(e, snapshot, vin)) {
       next[vin] = { ...e, basis: postedBasis(e, basis, [scanCar(e, snapshot, vin)]) };
       changed = true;
     } else next[vin] = e;
@@ -241,12 +265,14 @@ export function firstSeenAt(previous, vin, takenAt) {
  *   previous  the last saved snapshot (null on a first scan): each car's
  *             firstSeenAt comes over from it (firstSeenAt above)
  */
-export function makeSnapshot({ site, takenAt, complete, vehicles, assessments, previous = null }) {
+export function makeSnapshot({ site, takenAt, startedAt, complete, vehicles, assessments, previous = null }) {
   const entries = {};
   vehicles.forEach((v, i) => {
     entries[v.vin] = { ...snapshotEntry(v, assessments[i]), firstSeenAt: firstSeenAt(previous, v.vin, takenAt) };
   });
-  return { version: 1, site, takenAt, complete: complete !== false, vehicles: entries };
+  const snapshot = { version: 1, site, takenAt, complete: complete !== false, vehicles: entries };
+  if (msOf(startedAt) !== null) snapshot.startedAt = startedAt;
+  return snapshot;
 }
 
 function isPending(e) {
@@ -315,16 +341,19 @@ export function listingLine(entry, snap, vin, basis = 'website') {
 
 // Whether a price item on To do for one of your listings (`item`: a
 // diffScans item, or the one Mark posted adds for a draft, drafts.js
-// withPriceUpdate) was worked out on a scan (the diff's, `diff.takenAt`)
-// taken before the listing, as it is stored now (`entry`), got the price it
-// carries: updated or posted since, on another computer and brought by sync,
-// which settles no to-do list (settleDiff runs when a scan is saved). The
+// withPriceUpdate) was worked out on a reading taken before the listing, as it
+// is stored now (`entry`), got the price it carries: updated or posted since,
+// on another computer and brought by sync, which settles no to-do list
+// (settleDiff runs when a scan is saved). A car the scan read counts from when
+// the scan began (the diff's `startedAt`, else `takenAt`). A car it carried over
+// unread counts from when its details were last read (the diff's
+// `carriedReadAt`), as scanCar dates it, and one with no read time waits. The
 // item's prices are then the listing's and the website's as they were before
-// that, so its price waits for the next scan, as My listings says
-// (listingLine), and nothing is offered to record or fill. The same rule as
-// scanCar (scanBefore): false when either time is unknown.
+// that, so its price waits for the next scan, as My listings says (listingLine),
+// and nothing is offered to record or fill. False when the listing carries no
+// time, or when a car the scan read has no time for it.
 export function priceItemWaits(item, entry, diff) {
-  return Boolean(item && item.yours && entry && typeof entry === 'object' && scanBefore(entry, diff));
+  return Boolean(item && item.yours && entry && typeof entry === 'object' && readBefore(entry, diff, item.vin));
 }
 
 function whatGotReady(before, now) {
