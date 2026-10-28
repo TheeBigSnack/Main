@@ -8,7 +8,7 @@ import { assessVehicle } from './classify.js';
 import { makeSnapshot, diffScans, withSeenBasis } from './rescan.js';
 import { findBoilerplate, MIN_BOILERPLATE_COUNT } from './description.js';
 import { withDefaults, settingsChanges } from './settings.js';
-import { storeNames, shortLocation, matchStore } from './normalize.js';
+import { storeNames, shortLocation, matchStore, tickedStores } from './normalize.js';
 import { probeSiteInPage } from './scan.js';
 import { SITES_KEY, siteKeys } from './storageKeys.js';
 import { updateKey } from './storage.js';
@@ -263,7 +263,7 @@ export async function performScan({ tabId, origin, settings = null, settingsFrom
       // From the synced profile (whether its dealership part applies here was
       // decided by settingsFromProfile from the website it was saved on), or
       // saved before this first scan: only store names this website has.
-      const kept = s.myStores.filter((st) => stores.includes(st));
+      const kept = tickedStores(s.myStores, stores);
       const everyStore = s.storesChosen && !s.myStores.length;
       // An earlier build stored the website's address as the dealership's
       // name when Settings was saved before the first scan; the name the

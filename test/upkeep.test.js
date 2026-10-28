@@ -812,3 +812,84 @@ test('finishing an item offers Open next To do item only when another item follo
     }
   }
 });
+
+// The poll that reads the listing, on the side panel's 1.5 s interval. A read
+// can be held: the poll then waits in flight, as it does on a slow page, until
+// the test answers it. stopPolling stops the interval, not a poll already in
+// flight, so such a poll still writes the status when its read answers.
+async function raceRig(item) {
+  const r = { tabGone: false, holdRead: false, heldRead: null, lookups: [] };
+  r.flush = async () => { for (let i = 0; i < 40; i++) await new Promise((resolve) => setImmediate(resolve)); };
+  r.tick = async () => { mock.timers.tick(1500); await r.flush(); };
+  r.untilLookups = async (n) => { for (let i = 0; i < 200 && r.lookups.length < n; i++) await new Promise((resolve) => setImmediate(resolve)); };
+  globalThis.chrome = {
+    ...fakeChrome({}, {}),
+    tabs: { create: async () => ({ id: 9 }), get: async (id) => { if (r.tabGone) throw new Error('No tab with id: 9'); return { id, url: LISTED_PAGE.url }; } },
+    runtime: { sendMessage: async () => ({}) },
+    scripting: {
+      executeScript: async ({ func }) => {
+        if (func !== readListingInPage) throw new Error('an unexpected in-page script');
+        if (!r.holdRead) return [{ result: { ...LISTED_PAGE } }];
+        r.holdRead = false;
+        return new Promise((resolve, reject) => { r.heldRead = { fail: reject }; });
+      },
+    },
+  };
+  mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+  r.ctx = { render: () => {}, map: () => FORM_MAP, priceNow: async () => ({ ok: true, price: WANT_PRICE, basis: 'website' }), nextItem: () => new Promise((resolve) => { r.lookups.push(resolve); }) };
+  r.started = startUpkeep(item, r.ctx);
+  await r.flush();
+  await r.tick(); // the wait before the first poll ends
+  return r;
+}
+function endRaceRig(r) {
+  mock.timers.reset();
+  endUpkeep();
+  delete globalThis.chrome;
+  return r.started;
+}
+const RACE_NEXT = { origin: 'https://www.example-motors.test', vin: 'BBB', kind: 'takeDown', why: 'gone', price: null, listingUrl: at('222'), name: 'Car B', listedPrice: 21000 };
+
+test('a read still in flight when I updated it answers after the tab has closed, during the next-item lookup: the item reads as gone and offers no Open next To do item', async () => {
+  const r = await raceRig({ origin: 'https://www.example-motors.test', vin: 'aaa', kind: 'price', price: WANT_PRICE, listingUrl: LISTED_PAGE.url, name: 'Car A', listedPrice: 20000 });
+  try {
+    r.holdRead = true;
+    await r.tick(); // a poll starts and waits on the listing read
+    assert.ok(r.heldRead, 'the read is in flight');
+    const done = handleUpkeepClick('upkeepDoneBtn', r.ctx);
+    await r.untilLookups(1); // finish asks whether another item follows
+    r.tabGone = true;
+    r.heldRead.fail(new Error('No tab with id: 9'));
+    await r.flush();
+    r.lookups[0](RACE_NEXT);
+    await done;
+    assert.equal(up.status, 'gone', 'the late poll moved the item on while the lookup ran');
+    assert.equal(up.hasNext, false, 'so no Open next To do item is recorded for a view that is no longer done');
+  } finally {
+    await endRaceRig(r);
+  }
+});
+
+test('a read still in flight when Open next To do item is clicked answers after the tab has closed, during the lookup: no next item starts over it', async () => {
+  const r = await raceRig({ origin: 'https://www.example-motors.test', vin: 'aaa', kind: 'takeDown', why: 'gone', name: 'Car A', listingUrl: LISTED_PAGE.url, listedPrice: 20000 });
+  try {
+    r.holdRead = true;
+    await r.tick(); // a poll starts and waits on the listing read
+    const done = handleUpkeepClick('upkeepDoneBtn', r.ctx);
+    await r.untilLookups(1);
+    r.lookups[0](RACE_NEXT); // another item follows
+    await done;
+    assert.equal(up.hasNext, true);
+    handleUpkeepClick('upkeepNext', r.ctx);
+    await r.untilLookups(2);
+    r.tabGone = true;
+    r.heldRead.fail(new Error('No tab with id: 9'));
+    await r.flush();
+    r.lookups[1](RACE_NEXT); // the answer comes back after the late poll has written the status
+    await r.flush();
+    assert.equal(up.status, 'gone', 'the late poll moved the item on while the next item was looked up');
+    assert.equal(up.vin, 'AAA', 'and the next item did not start');
+  } finally {
+    await endRaceRig(r);
+  }
+});

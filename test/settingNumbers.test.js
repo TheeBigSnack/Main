@@ -470,6 +470,9 @@ test('set-up\'s You step reads the ticked stores too: the warning goes with a ti
   wiz.scan = null;
 });
 
+// the whole sentence the address step says when the dealership typed there no longer has the number in the role or the name
+const TYPED_WARNING = (setting, value) => `The dealership's name, city and ZIP typed here no longer have the number in your ${setting}. ${settingNumberWarning(setting, value, { name: 'Example Motors', city: 'Springfield', state: 'OH', zip: '43215' })} Your ${setting} is on the You step.`;
+
 test('set-up\'s address step does not bring the role\'s warning up when a ticked store holds the number the typed dealership drops', () => {
   const role = { name: 'Sam', title: 'Team 2' };
   const chance = { name: '2nd Chance Auto', city: 'Springfield', state: 'OH', zip: '43215' };
@@ -481,7 +484,7 @@ test('set-up\'s address step does not bring the role\'s warning up when a ticked
   wiz.step = 'address';
   wiz.scan = { stores: ['Route 2 Motors', 'Route 3 Motors'] };
   wiz.settings = withDefaults({ salesperson: role, dealer: chance, myStores: [] });
-  assert.match(typed(), /no longer have the number in your role/, 'with no ticked store the warning comes up, as before');
+  assert.equal(typed(), TYPED_WARNING('role', 'Team 2'), 'with no ticked store the warning comes up, as before');
   wiz.settings = withDefaults({ salesperson: role, dealer: chance, myStores: ['Route 2 Motors'] });
   assert.equal(typed(), '', 'the ticked store holds the 2');
   wiz.settings = withDefaults({ salesperson: role, dealer: chance, myStores: ['Route 2 Motors', 'Gone Lot'] });
@@ -516,7 +519,7 @@ test('Settings: a car on the lot that names no store keeps the warning under the
   const p = await loadPopup({ local: { [k.settings]: { myStores: ['Route 2 Motors'], salesperson: { name: 'Sam', title: 'Team 2' }, dealer }, [k.snapshot]: snapshot } });
   await p.tab('settings');
   assert.match(p.panel(), /name="store" value="Route 2 Motors" checked/);
-  assert.notEqual(region(p.panel(), 'salespersonTitleWarn'), '', 'the car with no store name still fails the number check, so the warning stays');
+  assert.equal(unesc(region(p.panel(), 'salespersonTitleWarn').replace(/<[^>]+>/g, '')).trim(), settingNumberWarning('role', 'Team 2', dealer), 'the car with no store name still fails the number check, so the warning stays, word for word');
 });
 
 test('Settings: the name under Your name counts the ticked stores too, and with no store ticked it warns', async () => {
@@ -532,7 +535,7 @@ test('Settings: the name under Your name counts the ticked stores too, and with 
   assert.equal(region(ticked.panel(), 'salespersonNameWarn'), '', 'the ticked store holds the 2 in the name');
   const unticked = await loadPopup({ local: { [k.settings]: { myStores: [], salesperson, dealer }, [k.snapshot]: snapshot } });
   await unticked.tab('settings');
-  assert.notEqual(region(unticked.panel(), 'salespersonNameWarn'), '', 'with no store ticked, the name warns');
+  assert.equal(unesc(region(unticked.panel(), 'salespersonNameWarn').replace(/<[^>]+>/g, '')).trim(), settingNumberWarning('name', 'Team 2', dealer), 'with no store ticked, the name warns, word for word');
 });
 
 test('Settings trims the store names as set-up does: the boxes draw the trimmed name, and a padded saved name is ticked', async () => {
@@ -560,7 +563,7 @@ test('set-up\'s address step counts only the ticked stores the list names: a sav
   wiz.step = 'address';
   wiz.scan = { stores: ['Route 3 Motors'] };
   wiz.settings = withDefaults({ salesperson: role, dealer: chance, myStores: ['Route 2 Motors'] });
-  assert.match(typed(), /no longer have the number in your role/, 'Route 2 Motors holds the 2, but the list does not name it: no count');
+  assert.equal(typed(), TYPED_WARNING('role', 'Team 2'), 'Route 2 Motors holds the 2, but the list does not name it: no count');
   wiz.active = false;
   wiz.scan = null;
 });
@@ -576,7 +579,7 @@ test('set-up\'s address step keeps the role\'s warning when a car on the read na
   wiz.step = 'address';
   wiz.settings = withDefaults({ salesperson: role, dealer: chance, myStores: ['Route 2 Motors'] });
   wiz.scan = { stores: ['Route 2 Motors'], vehicles: [{ location: 'Route 2 Motors' }, { location: '' }] };
-  assert.match(typed(), /no longer have the number in your role/, 'the car with no store name still fails the number check');
+  assert.equal(typed(), TYPED_WARNING('role', 'Team 2'), 'the car with no store name still fails the number check');
   wiz.scan = { stores: ['Route 2 Motors'], vehicles: [{ location: 'Route 2 Motors' }] };
   assert.equal(typed(), '', 'with every car named, the ticked store holds the 2');
   wiz.active = false;
@@ -586,8 +589,8 @@ test('set-up\'s address step keeps the role\'s warning when a car on the read na
 test('a role or a name that reads as a price or a mileage keeps its warning though every ticked store\'s name holds the number', () => {
   const stores = ['Route 100 Motors'];
   assert.equal(settingNumberWarning('role', 'Team 100', DEALER, stores), '', 'a plain 100 that the ticked store holds is not flagged');
-  assert.notEqual(settingNumberWarning('role', '100 Mile club', DEALER, stores), '', 'a mileage in the role warns, whichever store holds the 100');
-  assert.notEqual(settingNumberWarning('name', '$100 Sales', DEALER, stores), '', 'a price in the name warns');
+  assert.equal(settingNumberWarning('role', '100 Mile club', DEALER, stores), 'A number in your role ("100") keeps the Marketplace form shut for nearly every car: every number in a description must match the website\'s data for the car. Write the number as a word or leave it out.', 'a mileage in the role warns, whichever store holds the 100');
+  assert.equal(settingNumberWarning('name', '$100 Sales', DEALER, stores), 'A number in your name ("100") keeps the Marketplace form shut for nearly every car: every number in a description must match the website\'s data for the car. Leave it out.', 'a price in the name warns');
 });
 
 test('Settings: the store boxes ticked in the form decide the warning under the role, as they change and as the role is typed', async () => {
@@ -654,6 +657,26 @@ test('Settings: ticking a store redraws the warning under the name too, from the
   tick('Route 2 Motors', false);
   assert.equal(warned(), plain, 'unticked again: the name warns again, word for word');
   assert.equal(p.el('salespersonNameSay').textContent, settingNumberNotice('name', 'Sam 2', dealer), 'and its live region says it whole');
+});
+
+test('Settings: a car on the lot that names no store keeps the role warning when a store is ticked in the form, though the ticked store holds the number', async () => {
+  const k = siteKeys(POPUP_ORIGIN);
+  const scanned = await loadPopup({});
+  await scanned.scan();
+  const snapshot = structuredClone(scanned.local[k.snapshot]);
+  const cars = Object.values(snapshot.vehicles);
+  cars.forEach((car) => { car.location = 'Route 2 Motors'; });
+  cars[0].location = ''; // one car the website lists with no store name
+  const dealer = { name: 'Example Motors', city: 'Springfield', state: 'OH', zip: '43215' };
+  const p = await loadPopup({ local: { [k.settings]: { myStores: [], salesperson: { name: 'Sam', title: 'Team 2' }, dealer }, [k.snapshot]: snapshot } });
+  await p.tab('settings');
+  const boxes = [{ value: 'Route 2 Motors', checked: false }];
+  globalThis.document.querySelectorAll = (sel) => (sel === 'input[name="store"]:checked' ? boxes.filter((b) => b.checked) : []);
+  const warned = () => unesc(p.el('salespersonTitleWarn').innerHTML.replace(/<[^>]+>/g, '')).trim();
+  boxes[0].checked = true;
+  p.el('panel').listeners.change({ target: { name: 'store', value: 'Route 2 Motors', id: '', classList: { contains: () => false } } });
+  assert.equal(warned(), settingNumberWarning('role', 'Team 2', dealer), 'Route 2 Motors is ticked and holds the 2, but a car on the lot names no store: the warning stays');
+  assert.equal(p.el('salespersonTitleSay').textContent, settingNumberNotice('role', 'Team 2', dealer), 'and its live region says it whole');
 });
 
 // Set-up's You step comes before the address step, so it reads the

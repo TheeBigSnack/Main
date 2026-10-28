@@ -12,9 +12,10 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fixtures, fakeDealerPage, fakeChrome, vehicle, MY_STORE } from './helpers.js';
+import { fixtures, fakeDealerPage, fakeChrome, vehicle, snapshot, MY_STORE, WAYNESBURG } from './helpers.js';
 import { wiz, wizardHtml, startWizard, handleWizardClick, handleWizardChange, TAB_GONE } from '../extension/wizard.js';
 import { STORAGE_FULL } from '../extension/src/storage.js';
+import { settingNumberWarning } from '../extension/src/rewriteTemplate.js';
 import { withDefaults, PROFILE_KEY } from '../extension/src/settings.js';
 import { siteKeys, SITES_KEY } from '../extension/src/storageKeys.js';
 
@@ -56,8 +57,8 @@ const profile = (origin) => ({
 
 // chrome for the wizard: local and sync storage, no tab addresses, and the
 // rescan permission held for the origins in `granted` (never asked for here).
-function browser({ local = {}, sync = {}, granted = [] } = {}) {
-  const page = fakeDealerPage({ records: RECORDS, origin: ORIGIN, name: 'Example Motors' });
+function browser({ local = {}, sync = {}, granted = [], records = RECORDS } = {}) {
+  const page = fakeDealerPage({ records, origin: ORIGIN, name: 'Example Motors' });
   const chrome = fakeChrome(page, local);
   chrome.storage.local.remove = async (keys) => { for (const key of [].concat(keys)) delete local[key]; };
   chrome.storage.sync = {
@@ -338,4 +339,46 @@ test('a storage error shown on the Permission step goes once Allow automatic res
   assert.equal(wiz.error, '', 'the grant and the save after it both went through');
   assert.doesNotMatch(html, /Clear the numbers on the Numbers tab/);
   assert.match(html, /Permission granted\. Automatic rescans are on\./);
+});
+
+// The text the You step's warning under a field shows, with its tags and entities gone.
+const warningText = (id) => unesc(((new RegExp(`id="${id}"[^>]*>([\\s\\S]*?)</div>`).exec(html)) || [])[1] || '').replace(/<[^>]+>/g, '').trim();
+const storeBox = (name) => inputs().find((i) => i.className === 'wizStore' && i.value === name);
+
+test('set-up\'s store step ticks the box of a saved store name with a space at either end, as its hint says, and Next keeps the name as the website lists it', async () => {
+  browser({ local: { [k.settings]: { ...structuredClone(STORED), myStores: [`${WAYNESBURG} `] }, [k.snapshot]: snapshot([['usedNormal', {}]]) } });
+  await start();
+  await nextUntil('store');
+  assert.match(html, /your earlier choice is ticked/, 'the hint says the saved choice is ticked');
+  assert.equal(storeBox(WAYNESBURG).checked, true, 'and the box for that store is ticked');
+  await nextUntil('you');
+  assert.deepEqual(wiz.settings.myStores, [WAYNESBURG], 'Next keeps the store by the name the website lists');
+});
+
+test('set-up\'s first read keeps a saved store name with a space at either end as the website lists it, so the store stays ticked', async () => {
+  browser({ local: { [k.settings]: { ...structuredClone(STORED), myStores: [`${WAYNESBURG} `] } } });
+  await start();
+  await nextUntil('store');
+  assert.deepEqual(wiz.settings.myStores, [WAYNESBURG], 'the first read keeps the ticked store, by its listed name');
+  assert.match(html, /your earlier choice is ticked/);
+  assert.equal(storeBox(WAYNESBURG).checked, true);
+});
+
+test('set-up\'s You step keeps the role\'s warning while a car on the read names no store, though the ticked store holds the number, and drops it once every car is named', async () => {
+  const dealer = { name: 'Example Motors', city: 'Springfield', state: 'OH', zip: '43210' };
+  const settings = { ...structuredClone(STORED), myStores: ['Route 2 Motors'], salesperson: { name: 'Sam', title: 'Team 2' }, dealer };
+  const records = (blankFirst) => RECORDS.map((r, i) => {
+    const store = blankFirst && i === 0 ? '' : 'Route 2 Motors';
+    return { ...structuredClone(r), extra_fields: { ...r.extra_fields, meta_location: store, location_rt: store } };
+  });
+  const plain = settingNumberWarning('role', 'Team 2', dealer);
+  assert.notEqual(plain, '', 'the role\'s number is one the dealership does not hold');
+  browser({ local: { [k.settings]: settings }, records: records(true) });
+  await start();
+  await nextUntil('you');
+  assert.equal(warningText('wizTitleWarn'), plain, 'the car with no store name still fails the number check');
+  browser({ local: { [k.settings]: settings }, records: records(false) });
+  await start();
+  await nextUntil('you');
+  assert.equal(warningText('wizTitleWarn'), '', 'every car is named, so the ticked store holds the number');
 });

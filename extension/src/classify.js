@@ -237,10 +237,10 @@ function readyBlockers(v, settings = {}) {
     blockers.push({ code: 'sale-pending', text: soldNotPending ? 'Marked sold on the website' : 'Sale pending' });
   }
   if (v.inTransit || (v.availability && !/in.?stock/i.test(v.availability))) blockers.push({ code: 'not-on-lot', text: `Not on the lot yet (${v.availability || 'in transit'})` });
-  // store names are compared trimmed, as normalize.js storeNames trims the ones Settings draws
-  const myStores = Array.isArray(settings.myStores) ? settings.myStores.map((s) => String(s || '').trim()).filter(Boolean) : [];
+  // store names are compared trimmed, as normalize.js storeNames trims the ones Settings draws; a car whose name is blank matches no saved store
+  const myStores = Array.isArray(settings.myStores) ? settings.myStores.filter(Boolean).map((s) => String(s).trim()) : [];
   const where = String(v.location || '').trim();
-  if (myStores.length && where && !myStores.includes(where)) blockers.push({ code: 'other-store', text: `At ${v.locationShort || v.location}` });
+  if (myStores.length && v.location && !(where && myStores.includes(where))) blockers.push({ code: 'other-store', text: `At ${v.locationShort || v.location}` });
   return blockers;
 }
 

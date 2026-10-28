@@ -97,6 +97,15 @@ test('a store name with spaces at either end is the store it names, on either si
   assert.deepEqual(assess('usedNormal', atStore(`${CRANBERRY} `), { myStores: [WAY] }).blockers.map((b) => b.code), ['other-store'], 'a padded name at another store is still another store');
 });
 
+test('a car whose store name is only spaces is at no ticked store, and a saved store name that is only spaces still filters every named car out, as before', () => {
+  const WAY = 'Ron Lewis Chrysler Dodge Jeep Ram Waynesburg';
+  const atStore = (store) => ({ extra_fields: { meta_location: store, location_rt: store } });
+  assert.deepEqual(assess('usedNormal', atStore('   '), { myStores: [WAY] }).blockers.map((b) => b.code), ['other-store'], 'a car with a blank store name is not at the ticked store');
+  assert.deepEqual(assess('usedNormal', atStore(WAY), { myStores: ['   '] }).blockers.map((b) => b.code), ['other-store'], 'a saved name that is only spaces names no store, so the named car is another store');
+  assert.deepEqual(assess('usedNormal', atStore('   '), { myStores: ['   '] }).blockers.map((b) => b.code), ['other-store'], 'a blank car name matches no saved store, not even one that is only spaces');
+  assert.equal(assess('usedNormal', atStore(''), { myStores: [WAY] }).decision, DECISION.READY, 'a car with no store name at all keeps the rule it had');
+});
+
 test('used Hellcat with NO Carfax still passes the pre-owned check', () => {
   const a = assess('usedNoCarfax', {}, {});
   // blocked only because it has no photos yet, not because of Carfax

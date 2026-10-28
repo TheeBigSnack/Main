@@ -501,6 +501,8 @@ test('the scan catches the old name in every spelling, in any file that is not e
     String.raw`\blotsync`,
     String.raw`\slotsync`,
     String.raw`\Blotsync`,
+    // and the same escape in front of each other listed stem; ballot and shallot hold allot inside them, a stem of its own that still blocks
+    ...LOT_WORDS.filter((w) => w !== 'ballot' && w !== 'shallot').map((w) => '\\' + w + 'sync'),
     // where a word starts, after a mark or as the next word of a camelCase name
     'initLotSync();',
     'see (LotSync) and x.lotsync',

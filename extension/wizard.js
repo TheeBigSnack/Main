@@ -251,7 +251,7 @@ async function runScan(ctx) {
   const diff = withWithheld(r.diff, r.snapshot, data[k.diff]);
   const stores = storeNames(r.vehicles);
   // the Price step judges the same entries Settings does, so the two agree on whether a lower second price is offered
-  const scan = { cars: r.vehicles.length, stores, vehicles: r.vehicles, siteName: r.site.name, ready: Object.values(kept.vehicles).filter((v) => v.decision === 'ready').length, warnings: r.diff.warnings || [], price: priceStepModel(Object.values(kept.vehicles)) };
+  const scan = { cars: r.vehicles.length, stores, vehicles: r.vehicles.map((v) => ({ location: v && v.location })), siteName: r.site.name, ready: Object.values(kept.vehicles).filter((v) => v.decision === 'ready').length, warnings: r.diff.warnings || [], price: priceStepModel(Object.values(kept.vehicles)) };
   try {
     // under the diff's lock, the key the background rescan writes under, so a rescan in between is not overwritten
     await withLock(k.diff, () => chrome.storage.local.set({ [k.snapshot]: kept, [k.diff]: diff, [k.boilerplate]: r.boilerplate, [k.settings]: r.settings }));
@@ -310,7 +310,7 @@ export function wizardHtml() {
         : matched ? `The website lists these stores; ${esc(matched)} ${storeTickReason(matchedBy.rule)}, so it was ticked for you.` : "The website lists these stores. None of them matches the website's own name, so none is ticked: tick yours.";
       return `${progress}<h3>Your store</h3>
         <p class="hint">Only cars at the stores you tick count as ready to post; with none ticked, every store's cars count.${hint ? ' ' + hint : ''}</p>
-        ${stores.length ? stores.map((st) => `<label class="block"><input type="checkbox" class="wizStore" value="${esc(st)}" ${s.myStores.includes(st) ? 'checked' : ''} /> ${esc(st)} <span class="why">${esc(shortLocation(st, stores))}</span></label>`).join('') : '<p class="hint">The website does not name stores; every car will count.</p>'}
+        ${stores.length ? stores.map((st) => `<label class="block"><input type="checkbox" class="wizStore" value="${esc(st)}" ${ticked.includes(st) ? 'checked' : ''} /> ${esc(st)} <span class="why">${esc(shortLocation(st, stores))}</span></label>`).join('') : '<p class="hint">The website does not name stores; every car will count.</p>'}
         ${nav()}`;
     }
     case 'you':
