@@ -2786,6 +2786,22 @@ test('a number in the role and a price note refused in Settings: the status line
   assert.doesNotMatch(why, /Fix the description/, why);
 });
 
+// A price note quoting a fee that is not the gap between this car's two prices
+// is fixed in Settings too (price-note-amount, rewriteTemplate.js): the status
+// line and the checks line give the Settings fix, as for the other price-note stops.
+test('a price note quoting a fee that is not this car\'s price gap: the status line and the checks line give the Settings fix', () => {
+  const car = { ...CAR, priceBeforeFees: 20500 }; // the website's two prices differ by $486
+  const priceNote = 'Price includes the $500 doc fee; tax and tags extra.';
+  const settings = { ...SETTINGS, priceNote };
+  const state = { settings, vehicle: car, price: 20986, noteApplies: true };
+  const c = { vehicle: car, dealer: settings.dealer, salesperson: settings.salesperson, priceNote, price: 20986 };
+  const text = template.buildTemplateDescription(c);
+  const why = realBlocker(state)(text);
+  assert.match(why, /^The description fails a check that must pass before the form is filled: The price note says \$500, but the website's two prices for this car differ by \$486; check the note in Settings\. After you save Settings, the template writes the description again; if you edited it, click Reset to template\.$/, why);
+  const checksHtml = new Function('esc', 'ruleProblems', 'noteFor', `${constText('settingsFix')}\n${fnText('checksHtml')}\nreturn checksHtml;`)((s) => String(s), template.ruleProblems, () => '');
+  assert.match(checksHtml(template.runGuardrails(text, c)), /^<div class="checks bad" id="checks">Fix before the form can be filled:<ul><li>The price note says \$500, but the website's two prices for this car differ by \$486; check the note in Settings<\/li><\/ul><p>After you save Settings, the template writes the description again; if you edited it, click Reset to template\.<\/p><\/div>$/);
+});
+
 test('the checks line says which problems stop the form and which only warn', () => {
   const checksHtml = new Function('esc', 'ruleProblems', 'noteFor', `${constText('settingsFix')}\n${fnText('checksHtml')}\nreturn checksHtml;`)((s) => String(s), template.ruleProblems, () => '');
   const stop = { code: 'unknown-number', text: '"12000" isn\'t in the website\'s data for this car' };

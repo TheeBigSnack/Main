@@ -714,10 +714,15 @@ test('a banned phrase in the dealership\'s own price note is named as the note\'
   assert.deepEqual(runGuardrails(text, c).problems, [{ code: 'banned-phrase', text: 'Your dealership\'s price note says "priced to sell"; change the note in Settings' }]);
   // the same words in the description itself are the description's
   assert.deepEqual(runGuardrails(`${text}\nText me, not the dealer.`, c).problems.map((p) => p.text), ['Your dealership\'s price note says "priced to sell"; change the note in Settings', 'Says "not the dealer"']);
-  // every price-note reason ends with "the note in Settings" (an optional full stop may follow): settingsFix (sidepanel.js) reads those words as the fix being in Settings
+  // the price-note reasons fixed in Settings (noteBanned here, noteSteer in priceNoteWords.test.js, price-note-amount below) end with "the note in Settings" (an optional full stop may follow): settingsFix (sidepanel.js) reads those words as the fix being in Settings
   const noteReasons = runGuardrails(`${text}\nText me, not the dealer.`, c).problems.map((p) => p.text).filter((t) => t.includes('price note'));
   assert.equal(noteReasons.length, 1);
   for (const t of noteReasons) assert.match(t, /the note in Settings\.?$/, t);
+  // a note quoting a fee that is not the gap between this car's two prices (usedNormal: $490)
+  const gapNote = { ...c, priceNote: 'Price includes the $500 doc fee; tax and tags extra.' };
+  const amountReasons = runGuardrails(buildTemplateDescription(gapNote), gapNote).problems.filter((p) => p.code === 'price-note-amount').map((p) => p.text);
+  assert.equal(amountReasons.length, 1);
+  assert.match(amountReasons[0], /the note in Settings\.?$/, amountReasons[0]);
   // a note without them: nothing to say
   const fine = { ...c, priceNote: 'Plus tax, title and registration, which go to the state.' };
   assert.deepEqual(runGuardrails(buildTemplateDescription(fine), fine).problems, []);
