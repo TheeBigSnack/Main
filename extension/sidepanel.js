@@ -352,9 +352,10 @@ const dealerNamed = () => Boolean(String((state.settings && state.settings.deale
 const NO_DEALER_TEXT = "Add your dealership's name first. Click the Lot Current icon in Chrome's toolbar, then Settings, and type it in Dealership name: every description names the dealership.";
 
 // What fixes the description's stops when every one of them is a number in
-// Settings (rewriteTemplate.js settingNumberProblems): the description must
-// keep naming the role, the name and the dealership, so the fix is in
-// Settings, and a Settings save writes the template again
+// Settings (rewriteTemplate.js settingNumberProblems) or a price-note stop
+// that ends "the note in Settings" (noteBanned, noteSteer, price-note-amount):
+// the description must keep naming the role, the name and the dealership, so
+// the fix is in Settings, and a Settings save writes the template again
 // (reviewAfterSettings). '' when the description itself needs fixing. The
 // status line (fillBlocker, carStillCurrent) and the checks line say it.
 // Only a template description is written again by a Settings save
@@ -371,8 +372,9 @@ const settingsFix = (stops, source = 'template') => (stops.length && stops.every
 // number, price, mileage or claim the website doesn't make, a banned phrase,
 // a missing role, VIN or price note. Length, capitals and emoji only warn.
 // When the only problems are numbers in Settings (a role such as "2nd shift
-// sales": rewriteTemplate.js settingNumberProblems), the fix is there, not in
-// the description: a Settings save writes the template again (reviewAfterSettings).
+// sales": rewriteTemplate.js settingNumberProblems) or price-note stops fixed
+// there (settingsFix), the fix is there, not in the description: a Settings
+// save writes the template again (reviewAfterSettings).
 function fillBlocker(description) {
   if (!dealerNamed()) return NO_DEALER_TEXT;
   const name = String(state.settings.dealer.name).trim();
@@ -1949,9 +1951,10 @@ async function downloadPhotos() {
 // ---------- rendering ----------
 
 // The problems that keep the form from being filled (fillBlocker), then the
-// ones that only warn (length and tone). When only numbers in Settings stop
-// it, the line says the fix is there (settingsFix): Open the Marketplace form
-// and Check fields are off meanwhile, so the status line's reason rarely shows.
+// ones that only warn (length and tone). When only numbers in Settings, or
+// price-note stops fixed there, stop it, the line says the fix is there
+// (settingsFix): Open the Marketplace form and Check fields are off meanwhile,
+// so the status line's reason rarely shows.
 function checksHtml(g, source = 'template') {
   if (!g) return '';
   if (g.ok) return `<div class="checks ok" id="checks">All checks passed: ${g.words} words; every number the checks found is in the website's data, price and mileage included; no banned phrases or flagged claims; dealership and your role named${noteFor() ? '; price note included' : ''}. The checks look for set words and numbers, so read it through before you publish.</div>`;
