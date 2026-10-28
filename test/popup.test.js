@@ -9,6 +9,7 @@ import { PROFILE_KEY } from '../extension/src/settings.js';
 import { siteKeys, GLOBAL_KEYS } from '../extension/src/storageKeys.js';
 import { POSTING_RULES } from '../extension/src/postingRules.js';
 import { noteFlags, resolveFlag, beginPost, endPost, noteFill, notePostStep } from '../extension/src/pilot.js';
+import * as rescan from '../extension/src/rescan.js';
 import { STORAGE_FULL } from '../extension/src/storage.js';
 
 const k = siteKeys(POPUP_ORIGIN);
@@ -657,6 +658,61 @@ test('a price item listed before Price to post changed is the website\'s change 
   await p.scan();
   assert.doesNotMatch(p.panel(), /Update price|Price to post changed/, 'nothing left to do');
   assert.equal(flagged(), 1, 'and the numbers count only the one real price change');
+});
+
+// The next To do item after one is done (upkeep.js, Open next To do item) is
+// worked out in rescan.js (nextUpkeepItem) from the lists the To do tab reads.
+// Here the tab is the oracle: the upkeep buttons it draws, in its order, are
+// the only rows the next item may be. The rows cover a take-down that is not
+// yours, a price item that waits for the next scan, a colleague's price item
+// and a price increase, so each rule of the tab's buttons is reached. Checked
+// twice: with each car just finished (still in the lists, so passed over), and
+// with the cars done one at a time in the tab's order, the lists shrinking, so
+// that a price row is reached only after the rows before it.
+test('the next To do item is the first upkeep button the To do tab draws, in its order, after each car just finished and as the cars are done in turn', async () => {
+  const at = (day) => `2026-10-0${day}T09:00:00.000Z`;
+  const takeRow = (vin, extra = {}) => ({ vin, name: `Car ${vin}`, stock: vin, yours: true, why: 'gone', text: 'Gone from the website (sold or removed)', lastPrice: 20000, ...extra });
+  const priceRow = (vin, extra = {}) => ({ vin, name: `Car ${vin}`, yours: true, from: 20000, to: 19000, change: -1000, ...extra });
+  const diff = {
+    takenAt: at(2),
+    takeDown: [takeRow('T1', { yours: false }), takeRow('T2'), takeRow('T3'), takeRow('T4')],
+    priceUpdates: [priceRow('P1'), priceRow('P2'), priceRow('P3', { yours: false }), priceRow('P4'), priceRow('UP', { from: 19000, to: 19500, change: 500 })],
+  };
+  const posted = {
+    T2: { name: 'Car T2', price: 20000, postedAt: at(1) },
+    T3: { name: 'Car T3', price: 20000, postedAt: at(1) },
+    T4: { name: 'Car T4', price: 20000, postedAt: at(1) },
+    P1: { name: 'Car P1', price: 19500, updatedAt: at(3) }, // waits: priced after the scan began
+    P2: { name: 'Car P2', price: 19000, updatedAt: at(1) },
+    P4: { name: 'Car P4', price: 19000, postedAt: at(1) },
+    UP: { name: 'Car UP', price: 19000, postedAt: at(1) },
+  };
+  const flags = [{ vin: 'T3', kind: 'takeDown', flaggedAt: at(1) }, { vin: 'T2', kind: 'takeDown', flaggedAt: at(2) }, { vin: 'P4', kind: 'price', flaggedAt: at(1) }, { vin: 'P2', kind: 'price', flaggedAt: at(2) }];
+  const without = (done) => ({ ...diff, takeDown: diff.takeDown.filter((t) => !done.includes(t.vin)), priceUpdates: diff.priceUpdates.filter((u) => !done.includes(u.vin)) });
+  for (const order of ['listed', 'oldest']) {
+    const tabButtons = async (d) => {
+      const p = await loadPopup({ local: { [k.settings]: { ...MY_STORE, todoOrder: order }, [k.diff]: structuredClone(d), [k.posted]: structuredClone(posted), [k.pilot]: { flags: structuredClone(flags) } } });
+      await p.tab('todo');
+      return [...p.panel().matchAll(/data-action="upkeep" data-kind="(takeDown|price)" data-vin="([^"]+)"/g)].map((m) => [m[1], m[2]]);
+    };
+    const nextAfter = (d, finished) => {
+      const next = rescan.nextUpkeepItem({ diff: d, posted, flags, order }, finished);
+      return next ? [next.kind, next.item.vin] : null;
+    };
+    const drawn = await tabButtons(diff);
+    for (const finished of ['', ...drawn.map(([, vin]) => vin)]) {
+      assert.deepEqual(nextAfter(diff, finished), drawn.find(([, vin]) => vin !== finished) ?? null, `${order}, after ${finished || 'nothing'}`);
+    }
+    const done = [];
+    let shown;
+    do {
+      const left = without(done);
+      shown = await tabButtons(left);
+      assert.deepEqual(nextAfter(left, done[done.length - 1] ?? ''), shown[0] ?? null, `${order}, with ${done.length} done`);
+      if (shown.length) done.push(shown[0][1]);
+    } while (shown.length);
+    assert.deepEqual(done, drawn.map(([, vin]) => vin), `${order}: the tab's buttons, one car at a time`);
+  }
 });
 
 // This computer's last scan of the website, as a scan saved it, moved back in

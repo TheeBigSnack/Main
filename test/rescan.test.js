@@ -2,7 +2,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { diffScans, markPosted, markPriceUpdated, markTakenDown, markLookDismissed, lookDismissed, basisPrice, snapshotEntry, makeSnapshot, firstSeenAt, listingStatus, pendingText, settleDiff, postedBasis, withPostedBasis, withSeenBasis, listingWebsitePrice } from '../extension/src/rescan.js';
 import { noteFlags } from '../extension/src/pilot.js';
-import { orderedTodo } from '../extension/src/todoOrder.js';
 import { scanFromStored } from '../extension/src/accountFlow.js';
 import { snapshot, fixtures, vehicle, STANDARD_ORIGIN, standardCars, standardSite, standardCarPage, standardListPage, fakeSiteSearch, httpError, MY_STORE, WAYNESBURG } from './helpers.js';
 import { assessVehicle } from '../extension/src/classify.js';
@@ -724,10 +723,10 @@ test('a To do price item for a car carried over unread is dated from when its de
 });
 
 // The next To do item after one is done (upkeep.js, Open next To do item) is
-// the first take-down or price row the To do tab draws a button for, in the
-// tab's order, after the car just finished (popup.js viewTodo): take-downs
-// first, a button only on your own items, and a price update only when
-// priceItemWaits says it does not wait.
+// the first take-down or price row the To do tab draws a button for, from the
+// top in the tab's order, passing over the car just finished (popup.js
+// viewTodo): take-downs first, a button only on your own items, and a price
+// update only when priceItemWaits says it does not wait.
 const at3 = (day) => `2026-10-0${day}T09:00:00.000Z`;
 const takeRow = (vin, extra = {}) => ({ vin, name: `Car ${vin}`, stock: vin, yours: true, why: 'gone', text: 'Gone from the website (sold or removed)', lastPrice: 20000, ...extra });
 const priceRow = (vin, extra = {}) => ({ vin, name: `Car ${vin}`, yours: true, from: 20000, to: 19000, change: -1000, ...extra });
@@ -784,15 +783,7 @@ test('the order is the To do tab\'s: the scan\'s own, or oldest first by each ki
   assert.deepEqual(pickNext(next({ diff, posted: {}, flags }, '')), ['takeDown', 'NOFLAG'], 'no order given is the scan\'s own');
 });
 
-// popup.js viewTodo's rows in its order, with its button rules, from the same
-// inputs and todoOrder.js's orderedTodo (the tab's own sort).
-function tabButtonRows({ diff, posted, flags, order }) {
-  const takeDown = orderedTodo(diff.takeDown || [], 'takeDown', flags, order).map((t) => ({ kind: 'takeDown', vin: t.vin, button: Boolean(t.yours) }));
-  const updates = orderedTodo(diff.priceUpdates || [], 'price', flags, order).map((p) => ({ kind: 'price', vin: p.vin, button: Boolean(p.yours) && !rescan.priceItemWaits(p, posted[p.vin], diff) }));
-  return [...takeDown, ...updates].filter((r) => r.button).map((r) => [r.kind, r.vin]);
-}
-
-test('the next item is the first To do row with a button, as the tab draws it, for each order and each car just finished', () => {
+test('the next item is the first take-down or price row with a button, from the top in the tab\'s order, for each order and each car just finished', () => {
   const diff = {
     takenAt: at3(2),
     takeDown: [takeRow('T1', { yours: false }), takeRow('T2'), takeRow('T3'), takeRow('T4')],
@@ -807,15 +798,42 @@ test('the next item is the first To do row with a button, as the tab draws it, f
     P4: { name: 'Car P4', price: 19000, postedAt: at3(1) },
   };
   const flags = [{ vin: 'T3', kind: 'takeDown', flaggedAt: at3(1) }, { vin: 'T2', kind: 'takeDown', flaggedAt: at3(2) }, { vin: 'P4', kind: 'price', flaggedAt: at3(1) }, { vin: 'P2', kind: 'price', flaggedAt: at3(2) }];
-  assert.deepEqual(pickNext(rescan.nextUpkeepItem({ diff, posted, flags, order: 'listed' }, '')), ['takeDown', 'T2']);
-  assert.deepEqual(pickNext(rescan.nextUpkeepItem({ diff, posted, flags, order: 'oldest' }, '')), ['takeDown', 'T3']);
-  assert.deepEqual(pickNext(rescan.nextUpkeepItem({ diff, posted, flags, order: 'oldest' }, 'T3')), ['takeDown', 'T2']);
-  for (const order of ['listed', 'oldest']) {
-    for (const finished of ['', 'T2', 'T3', 'T4', 'P2', 'P4']) {
-      const rows = tabButtonRows({ diff, posted, flags, order }).filter(([, vin]) => vin !== finished);
-      assert.deepEqual(pickNext(rescan.nextUpkeepItem({ diff, posted, flags, order }, finished)), rows[0] ?? null, `${order}, after ${finished || 'nothing'}`);
-    }
-  }
+  const firstAfter = (order, finished) => pickNext(rescan.nextUpkeepItem({ diff, posted, flags, order }, finished));
+  // The buttons in the tab's order: listed T2 T3 T4 P2 P4; oldest T3 T2 T4 P4 P2.
+  // T1 and P3 are not yours and P1 waits, so none of them has a button.
+  assert.deepEqual(firstAfter('listed', ''), ['takeDown', 'T2']);
+  assert.deepEqual(firstAfter('listed', 'T2'), ['takeDown', 'T3'], 'the car just finished is passed over');
+  assert.deepEqual(firstAfter('listed', 'P2'), ['takeDown', 'T2'], 'take-downs come before price updates, whichever was finished');
+  assert.deepEqual(firstAfter('oldest', ''), ['takeDown', 'T3']);
+  assert.deepEqual(firstAfter('oldest', 'T3'), ['takeDown', 'T2']);
+  assert.deepEqual(firstAfter('oldest', 'T2'), ['takeDown', 'T3']);
+  assert.deepEqual(firstAfter('oldest', 'T4'), ['takeDown', 'T3']);
+});
+
+test('price updates come in the tab\'s order too: the scan\'s own, or oldest first by each one\'s open price flag, and one that waits has no button', () => {
+  const diff = {
+    takenAt: at3(2),
+    takeDown: [],
+    priceUpdates: [priceRow('P1'), priceRow('P2'), priceRow('P3', { yours: false }), priceRow('P4')],
+  };
+  const posted = {
+    P1: { name: 'Car P1', price: 19500, updatedAt: at3(3) }, // waits: priced after the scan began
+    P2: { name: 'Car P2', price: 19000, updatedAt: at3(1) },
+    P4: { name: 'Car P4', price: 19000, postedAt: at3(1) },
+  };
+  const flags = [{ vin: 'P2', kind: 'price', flaggedAt: at3(2) }, { vin: 'P4', kind: 'price', flaggedAt: at3(1) }];
+  assert.equal(rescan.priceItemWaits(diff.priceUpdates[0], posted.P1, diff), true, 'P1 waits');
+  assert.equal(rescan.priceItemWaits(diff.priceUpdates[1], posted.P2, diff), false, 'P2 stands');
+  const firstAfter = (order, finished) => pickNext(rescan.nextUpkeepItem({ diff, posted, flags, order }, finished));
+  assert.deepEqual(firstAfter('listed', ''), ['price', 'P2'], 'the scan\'s own order: P1 waits and P3 is not yours');
+  assert.deepEqual(firstAfter('listed', 'P2'), ['price', 'P4']);
+  assert.deepEqual(firstAfter('oldest', ''), ['price', 'P4'], 'oldest first by open flag');
+  assert.deepEqual(firstAfter('oldest', 'P4'), ['price', 'P2']);
+  assert.deepEqual(firstAfter('oldest', 'P2'), ['price', 'P4']);
+  const onlyWaitingAndTheirs = { takenAt: at3(2), takeDown: [], priceUpdates: [priceRow('P1'), priceRow('P3', { yours: false })] };
+  assert.equal(pickNext(rescan.nextUpkeepItem({ diff: onlyWaitingAndTheirs, posted, flags, order: 'listed' }, '')), null, 'a waiting item and a colleague\'s have no button, so none is left');
+  const lastOne = { takenAt: at3(2), takeDown: [], priceUpdates: [priceRow('P2')] };
+  assert.equal(pickNext(rescan.nextUpkeepItem({ diff: lastOne, posted, flags, order: 'listed' }, 'P2')), null, 'the car just finished was the last one');
 });
 
 // Updated on a listing that carries no basis records the basis its new price

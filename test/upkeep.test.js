@@ -682,6 +682,46 @@ test('when the next To do item cannot be found, the done banner stays and no Nex
   }
 });
 
+// The next item is started the way any item is (startUpkeep): a price update
+// reads the car on the website before its listing opens, so the price filled
+// is the website's now, and a read that says no opens nothing and stops with
+// the reason.
+test('Open next To do item on a price update reads the car on the website before its listing opens, and opens no listing when that read says no', async () => {
+  const opened = [];
+  globalThis.chrome = { tabs: { create: async ({ url }) => { opened.push(url); return { id: 12 }; } } };
+  const NEXT_PRICE = { origin: 'https://www.example-motors.test', vin: 'CCC', kind: 'price', why: '', price: 18000, listingUrl: 'https://www.facebook.com/marketplace/item/333/', name: 'Car C', listedPrice: 20000, dealerTabId: null, windowId: null, at: 1 };
+  try {
+    const asked = [];
+    const readBeforeTab = [];
+    const ctx = {
+      render: noop,
+      map: () => FORM_MAP,
+      nextItem: async () => NEXT_PRICE,
+      priceNow: async (req) => { asked.push(req.vin); readBeforeTab.push(opened.length); return { ok: true, price: 17500, basis: 'website' }; },
+      onClose: noop,
+    };
+    Object.assign(up, { ...DONE_CAR, hasNext: true });
+    assert.equal(await handleUpkeepClick('upkeepNext', ctx), true);
+    assert.deepEqual(asked, ['CCC'], 'the car is read on the website once');
+    assert.deepEqual(readBeforeTab, [0], 'the read comes before the listing tab is created');
+    assert.deepEqual(opened, [NEXT_PRICE.listingUrl], 'then that listing opens');
+    assert.deepEqual([up.vin, up.kind, up.price, up.scanPrice], ['CCC', 'price', 17500, 18000], 'the price filled is the website\'s now, and the scan\'s is kept beside it');
+    endUpkeep();
+
+    const stopped = [];
+    globalThis.chrome = { tabs: { create: async ({ url }) => { stopped.push(url); return { id: 13 }; } } };
+    const refused = { ...ctx, priceNow: async () => ({ ok: false, message: 'Lot Current couldn\'t check this car\'s price on the website just now.' }) };
+    Object.assign(up, { ...DONE_CAR, hasNext: true });
+    assert.equal(await handleUpkeepClick('upkeepNext', refused), true);
+    assert.equal(up.status, 'stopped', 'the read said no: the item stops');
+    assert.equal(up.note, 'Lot Current couldn\'t check this car\'s price on the website just now. Nothing was filled.');
+    assert.deepEqual(stopped, [], 'and no listing tab is opened');
+  } finally {
+    endUpkeep();
+    delete globalThis.chrome;
+  }
+});
+
 // Finishing an item asks the same question (finish): the done banner gets the
 // button when another item follows, and keeps its plain Close when none does or
 // the question fails.

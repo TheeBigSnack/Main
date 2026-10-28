@@ -3002,6 +3002,22 @@ test('a stop only Settings can fix, found by the read before a fill, says to sav
   assert.match(r.calls.said.at(-1)[0], /^The website changed this car since it was read\. The description no longer matches it: Your role "2nd shift sales" has a number in it, [^]+\. Fix the description, then click Open the Marketplace form again\.$/);
 });
 
+// A price note's dollar amount that the website's two prices no longer back is
+// fixed in Settings too (rewriteTemplate.js price-note-amount: "check the note in
+// Settings"), so the status says to save Settings and not to fix the description.
+test('a price-note stop found by the read before a fill says to save Settings, not to fix the description', async () => {
+  const note = 'Tax and tags extra. $500 doc fee.';
+  const before = { ...FRESH_CAR(), priceBeforeFees: 26663 }; // $500 apart when the description was written
+  const settings = { ...reviewState().settings, priceNote: note };
+  const description = template.buildTemplateDescription({ vehicle: before, dealer: settings.dealer, salesperson: settings.salesperson, priceNote: note });
+  assert.deepEqual(template.ruleProblems(template.runGuardrails(description, { vehicle: before, dealer: settings.dealer, salesperson: settings.salesperson, priceNote: note, price: 27163 })), [], 'the description holds while the prices are $500 apart');
+  const state = reviewState({ readAt: '', vehicle: before, settings, description });
+  const r = staleReader(state, () => ({ ok: true, vehicle: { ...FRESH_CAR(), priceBeforeFees: 26677 } }));
+  assert.equal(await r.run(), false);
+  assert.equal(state.step, 'review');
+  assert.deepEqual(r.calls.said.at(-1), [`The website changed this car since it was read. The description no longer matches it: The price note says $500, but the website's two prices for this car differ by $486; check the note in Settings. After you save Settings, the template writes the description again; if you edited it, click Reset to template. Then click Open the Marketplace form again.`, 'error']);
+});
+
 test('a car that sold, went sale-pending, turned new or lost its price since it was read is stopped before the form is filled', async () => {
   const cases = [
     [() => ({ ok: false, notFound: true, message: 'Not on the website any more.' }), 'not-on-website'],
@@ -3926,6 +3942,21 @@ test('the Open next To do item request carries the fields of the item it opens, 
   assert.deepEqual(fields(price), { kind: 'price', vin: 'PRC', why: '', price: 19500, listedPrice: 21000, listingUrl: 'https://www.facebook.com/marketplace/item/222/', name: 'Car P' });
   assert.deepEqual([price.origin, price.dealerTabId, price.windowId], [ORIGIN, 4, 2]);
   assert.equal(await ask(async () => { throw new Error('storage is unavailable'); }), null, 'a failed read gives no request');
+});
+
+// A car the website no longer lists is not in the saved snapshot, so its name comes from the To do row when
+// its posted entry carries none: the popup's own request names it from the snapshot, where it has none to give.
+test('the Open next To do item request names a car by its posted entry, else by its To do row, not by its VIN', async () => {
+  const ORIGIN = 'https://www.example-motors.test';
+  const k = siteKeys(ORIGIN);
+  const stored = {
+    [k.diff]: { takenAt: '2026-10-28T09:00:00.000Z', takeDown: [{ vin: 'GONE', name: 'Car G from the To do row', yours: true, why: 'gone' }], priceUpdates: [] },
+    [k.posted]: { GONE: { price: 18000, postedAt: '2026-10-20T10:00:00.000Z' } }, // no name on the posted entry
+  };
+  const request = () => compile('nextUpkeepRequest', { up: { origin: ORIGIN, vin: 'OTHER' }, siteKeys, nextUpkeepItem, state: { settings: {}, dealerTabId: 4 }, panelWindowId: 2, chrome: { storage: { local: { get: async (keys) => Object.fromEntries(keys.map((key) => [key, stored[key]])) } } } })();
+  assert.equal((await request()).name, 'Car G from the To do row');
+  stored[k.posted].GONE.name = 'Car G';
+  assert.equal((await request()).name, 'Car G', 'the posted entry\'s name first');
 });
 
 test('the Open next To do item request follows the To do order and the pilot flags', async () => {

@@ -380,9 +380,10 @@ function todoRows(items, kind, flags, order) {
 // updates, each kind in todoRows' order; a row has a button only when it is
 // yours, and a price update only when priceItemWaits says it does not wait. The
 // car just finished is passed over, its take-down and its price update alike.
-// `inputs` are what the tab reads: the saved diff, the posted list, the pilot
-// flags and this website's To do order. Returns { kind, item }, or null when
-// nothing is left. It reads only what it is given.
+// The first argument holds what the tab reads: `diff` (the saved diff), `posted`
+// (the posted list), `flags` (the pilot flags) and `order` (this website's To do
+// order). Returns { kind, item }, or null when nothing is left. It reads only
+// what it is given.
 export function nextUpkeepItem({ diff, posted, flags, order } = {}, finishedVin = '') {
   const done = String(finishedVin || '').toUpperCase();
   const d = diff && typeof diff === 'object' ? diff : null;

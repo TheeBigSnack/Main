@@ -2699,9 +2699,11 @@ async function upkeepPriceNow(req) {
 // storage as they are now, since finishing the item has just written the posted
 // list, its pilot flag and the diff. nextUpkeepItem (rescan.js) picks the
 // first take-down or price row the To do tab draws a button for, from the top
-// in the tab's order, passing over the car just finished, and the request is
-// built the way the popup builds one. Null when none is left, and when storage
-// can't be read (the done banner then shows alone).
+// in the tab's order, passing over the car just finished. The request's fields
+// are the popup's, except that the name falls back to the To do row's name, not
+// the saved snapshot's: a car gone from the website is not in the snapshot. Null
+// when none is left, and when storage can't be read (the done banner then shows
+// alone).
 async function nextUpkeepRequest() {
   const origin = up.origin;
   try {
