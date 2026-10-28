@@ -23,6 +23,7 @@ import { clearNumbersKeepingUnsynced } from './src/sync.js';
 import { loadSession, redeemInvite } from './src/account.js';
 import { SORT_ORDERS, sortOrder, newDaysOf, isNew, dateLine, filterText, sortEntries, MIN_NEW_DAYS, MAX_NEW_DAYS, DEFAULT_NEW_DAYS, holdSummary, holdSentence } from './src/readyList.js';
 import { orderedTodo, todoOrderControl } from './src/todoOrder.js';
+import { storeNames, tickedStores } from './src/normalize.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) =>
@@ -1081,7 +1082,7 @@ function basisNote() {
 function viewSettings() {
   if (!state.origin) return viewSettingsWithoutSite();
   const entries = Object.values(state.snapshot?.vehicles || {});
-  const locations = [...new Set(entries.map((e) => e.location).filter(Boolean))].sort();
+  const locations = storeNames(entries);
   const s = withDefaults(state.settings || {}, knownSite());
   const fee = feeGap(entries);
   const example = fee.example;
@@ -1091,8 +1092,8 @@ function viewSettings() {
         .map((l) => `<label><input type="checkbox" name="store" value="${esc(l)}" ${s.myStores.includes(l) ? 'checked' : ''} /> <span>${esc(l)}</span></label>`)
         .join('')
     : '<p class="hint">Scan once to see the stores.</p>';
-  // the store boxes as drawn: the ticked ones. A saved store that no box shows is not ticked here, and a Save with the boxes drawn drops it
-  const ticked = locations.filter((l) => s.myStores.includes(l));
+  // the store boxes as drawn: the ticked ones (normalize.js tickedStores). A saved store that no box shows is not ticked here, and a Save with the boxes drawn drops it
+  const ticked = tickedStores(s.myStores, locations);
   const feeNote = example
     ? `<p class="hint">On this website the main price is usually ${money(fee.gap)} higher than the lower second price it shows (often the doc fee, but only your store can say). Posting the website's main price keeps Marketplace and the website matching.</p>`
     : '';

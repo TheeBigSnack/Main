@@ -67,6 +67,7 @@ const LABELS = [
   "It's posted, record it",
   'Taken down',
   'Open & update price',
+  'Open next To do item', // upkeep.js: the done banner's button
   'Download CSV',
   'Numbers',
   'Clear the numbers',
@@ -99,12 +100,37 @@ test('the four launch-kit files exist and are not stubs', () => {
 });
 
 test('help.md names the popup and side panel controls as the code labels them', () => {
-  const ui = (read('../extension/popup.js') + read('../extension/sidepanel.js')).replace(/&amp;/g, '&');
+  const ui = (read('../extension/popup.js') + read('../extension/sidepanel.js') + read('../extension/upkeep.js')).replace(/&amp;/g, '&');
   const help = doc('help.md');
   for (const label of LABELS) {
-    assert.ok(ui.includes(label), `"${label}" is no longer a label in popup.js or sidepanel.js: update the help doc and this list together`);
+    assert.ok(ui.includes(label), `"${label}" is no longer a label in popup.js, sidepanel.js or upkeep.js: update the help doc and this list together`);
     assert.ok(help.includes(label), `docs/help.md does not name "${label}"`);
   }
+});
+
+// The address step's Back goes to the step the wizard shows before it, which
+// is Your account when accounts are set up (wizardSteps.js) and You when not.
+test('help.md says where Back goes on the address step: Your account when that step is shown, You when it is not', () => {
+  const before = (configured) => { const steps = wizardSteps(configured); return steps[steps.indexOf('address') - 1]; };
+  assert.equal(before(false), 'you', 'with no account server, the step before the address step is You');
+  assert.equal(before(true), 'account', 'with one, the step before it is Your account');
+  const step = doc('help.md').split('\n').find((l) => l.includes("**The store's address**"));
+  assert.ok(step, "docs/help.md describes the wizard's address step");
+  assert.ok(step.includes('**Back** goes to the step before this one: **Your account** when that step is shown, and **You** when it is not.'), 'docs/help.md says where Back goes on the address step');
+});
+
+// Round 13's wording of the next To do item and of the ticked stores in the
+// Settings warnings: each sentence is what the code does (upkeep.js, the
+// store-count rule in src/normalize.js tickedStores and the warnings' tests).
+test('README and help.md describe the next To do item and the ticked stores as the code does', () => {
+  const readme = read('../README.md');
+  const help = doc('help.md');
+  assert.ok(readme.includes("the panel offers **Open next To do item** when another item follows; it opens that item's listing, and you take the same steps there."), 'README.md: the next To do item');
+  assert.ok(help.includes('When an item is done, the panel offers the next To do item: **Open next To do item** opens its listing, and you take the same steps there.'), 'docs/help.md: the next To do item');
+  assert.ok(readme.includes("A number that every ticked store's name holds is not flagged either, unless the role or name reads as a price or a mileage."), 'README.md: the ticked stores in Settings');
+  assert.ok(help.includes("A number that every ticked store's name holds is not flagged."), 'docs/help.md: the ticked stores in the You step');
+  assert.ok(help.includes('unless you have ticked stores and every one of their names has the number'), 'docs/help.md: the ticked stores on the address step');
+  assert.ok(help.includes("(and again as you change the dealership's name, city or ZIP, or tick or untick a store)"), 'docs/help.md: Settings warns again as a store is ticked');
 });
 
 test('help.md names every state My listings can show a posted car in, as the code words it', () => {

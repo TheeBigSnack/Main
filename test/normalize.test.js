@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
-import { shortLocation, storeNames, matchStore, conditionFromSchemaOrg, conditionWordFromPath, toNumber, calendarDate } from '../extension/src/normalize.js';
+import { shortLocation, storeNames, tickedStores, matchStore, conditionFromSchemaOrg, conditionWordFromPath, toNumber, calendarDate } from '../extension/src/normalize.js';
 import { conditionWordFromUrl, websitePrice, normalizeVehicle } from '../extension/adapters/dealerInspireNormalize.js';
 import { fixtures } from './helpers.js';
 
@@ -76,6 +76,17 @@ test('storeNames: each store once, trimmed, sorted, blanks dropped', () => {
   assert.deepEqual(storeNames([{ location: 'B' }, { location: 'A' }, { location: 'B' }, { location: '' }, null, { location: ' A ' }, { location: 7 }]), ['A', 'B']);
   assert.deepEqual(storeNames([]), []);
   assert.deepEqual(storeNames(null), []);
+});
+
+// ---------- tickedStores: the stores whose boxes are ticked ----------
+
+test('tickedStores: the saved stores the list still names, in the list\'s order; a saved store no box shows is not ticked', () => {
+  assert.deepEqual(tickedStores(['Route 3 Motors', 'Route 2 Motors'], ['Route 2 Motors', 'Route 3 Motors']), ['Route 2 Motors', 'Route 3 Motors']);
+  assert.deepEqual(tickedStores(['Route 2 Motors', 'Oak Lot'], ['Route 2 Motors']), ['Route 2 Motors'], 'Oak Lot is saved but no box shows it');
+  assert.deepEqual(tickedStores(['Oak Lot'], ['Route 2 Motors']), []);
+  assert.deepEqual(tickedStores(['Route 2 Motors'], []), [], 'no list, no ticked store');
+  assert.deepEqual(tickedStores(undefined, ['Route 2 Motors']), [], 'nothing saved');
+  assert.deepEqual(tickedStores(null, undefined), []);
 });
 
 // ---------- matchStore: the wizard's default tick ----------

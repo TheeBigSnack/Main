@@ -11,6 +11,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildTemplateDescription, runGuardrails, ruleProblems, settingNumberWarning, settingNumberNotice, numbersAsWords } from '../extension/src/rewriteTemplate.js';
+import { tickedStores } from '../extension/src/normalize.js';
 
 const CAR = { vin: '1TESTVEH0NA000123', year: 2021, make: 'Example', model: 'Sedan', trim: 'LX', name: '2021 Example Sedan LX', mileage: 34567, price: 20986, features: ['Heated Seats', 'Backup Camera', 'Bluetooth', 'Remote Start'], descriptionRaw: '' };
 const DEALER = { name: 'Example Motors', city: 'Springfield' };
@@ -432,12 +433,26 @@ test('no warning about the role when every ticked store\'s name holds its number
   assert.deepEqual(ruleProblems(at('Route 3 Motors')).map((p) => p.code), ['setting-number'], 'a car at a store without it');
 });
 
+// The same holds for the name. A saved store that no box shows (the website no
+// longer lists it) is not ticked, so it counts for nothing (tickedStores).
+test('no warning about the name when every ticked store\'s name holds its number; two that differ warn; a saved store no box shows counts for nothing', () => {
+  const plain = settingNumberWarning('name', 'Sam 2', DEALER);
+  assert.notEqual(plain, '', 'with no store ticked, the name warns');
+  assert.equal(settingNumberWarning('name', 'Sam 2', DEALER, ['Route 2 Motors']), '', 'the one ticked store holds the 2');
+  assert.equal(settingNumberNotice('name', 'Sam 2', DEALER, ['Route 2 Motors']), '');
+  assert.equal(settingNumberWarning('name', 'Sam 2', DEALER, ['Route 2 Motors', 'Team 2 Sales']), '', 'two ticked stores that both hold it');
+  assert.equal(settingNumberWarning('name', 'Sam 2', DEALER, ['Route 2 Motors', 'Route 3 Motors']), plain, 'one of two holds the 2: the intersection, not the union');
+  assert.equal(settingNumberWarning('name', 'Sam 2', DEALER, tickedStores(['Route 2 Motors', 'Oak Lot'], ['Route 2 Motors'])), '', 'Oak Lot is saved but no box shows it, so Route 2 Motors alone counts');
+  assert.equal(settingNumberWarning('name', 'Sam 2', DEALER, tickedStores(['Oak Lot'], ['Route 2 Motors'])), plain, 'a saved store no box shows, and no other ticked store: as before');
+});
+
 test('set-up\'s You step reads the ticked stores too: the warning goes with a ticked store that holds the number, and returns when only one of two does', () => {
   const role = { name: 'Sam', title: 'Team 2' };
   const dealer = { name: 'Example Motors', city: 'Springfield', state: 'OH', zip: '43215' };
   const plain = settingNumberWarning('role', 'Team 2', dealer);
   wiz.active = true;
   wiz.step = 'you';
+  wiz.scan = { stores: ['Route 2 Motors', 'Route 3 Motors'] }; // the stores the store step draws boxes for
   wiz.settings = withDefaults({ salesperson: role, dealer, myStores: ['Route 2 Motors'] });
   assert.equal(region(wizardHtml(), 'wizTitleWarn'), '', 'the ticked store holds the 2');
   assert.equal(liveRegion(wizardHtml(), 'wizTitleSay'), '');
@@ -449,7 +464,10 @@ test('set-up\'s You step reads the ticked stores too: the warning goes with a ti
   assert.equal(region(wizardHtml(), 'wizTitleWarn'), plain, 'only one of the two ticked stores holds the 2');
   wiz.settings = withDefaults({ salesperson: role, dealer, myStores: [] });
   assert.equal(region(wizardHtml(), 'wizTitleWarn'), plain, 'no ticked store: as before');
+  wiz.settings = withDefaults({ salesperson: role, dealer, myStores: ['Route 2 Motors', 'Gone Lot'] });
+  assert.equal(region(wizardHtml(), 'wizTitleWarn'), '', 'Gone Lot is saved but the scan does not list it, so it is not ticked and counts for nothing');
   wiz.active = false;
+  wiz.scan = null;
 });
 
 test('set-up\'s address step does not bring the role\'s warning up when a ticked store holds the number the typed dealership drops', () => {
@@ -461,11 +479,27 @@ test('set-up\'s address step does not bring the role\'s warning up when a ticked
   const typed = () => { handleWizardInput({ id: 'wizDealer', value: 'Example Motors' }); return text(elements.get('wizYouWarn')); };
   wiz.active = true;
   wiz.step = 'address';
+  wiz.scan = { stores: ['Route 2 Motors', 'Route 3 Motors'] };
   wiz.settings = withDefaults({ salesperson: role, dealer: chance, myStores: [] });
   assert.match(typed(), /no longer have the number in your role/, 'with no ticked store the warning comes up, as before');
   wiz.settings = withDefaults({ salesperson: role, dealer: chance, myStores: ['Route 2 Motors'] });
   assert.equal(typed(), '', 'the ticked store holds the 2');
   wiz.active = false;
+  wiz.scan = null;
+});
+
+test('Settings: a saved store the website no longer lists has no box and counts for nothing under the role; the store it lists does', async () => {
+  const k = siteKeys(POPUP_ORIGIN);
+  const scanned = await loadPopup({});
+  await scanned.scan();
+  const snapshot = structuredClone(scanned.local[k.snapshot]);
+  Object.values(snapshot.vehicles).forEach((car) => { car.location = 'Route 2 Motors'; }); // every car at the one store that holds the 2
+  const dealer = { name: 'Example Motors', city: 'Springfield', state: 'OH', zip: '43215' };
+  const p = await loadPopup({ local: { [k.settings]: { myStores: ['Route 2 Motors', 'Oak Lot'], salesperson: { name: 'Sam', title: 'Team 2' }, dealer }, [k.snapshot]: snapshot } });
+  await p.tab('settings');
+  assert.match(p.panel(), /name="store" value="Route 2 Motors" checked/);
+  assert.doesNotMatch(p.panel(), /name="store" value="Oak Lot"/, 'the website lists no Oak Lot, so no box shows it');
+  assert.equal(region(p.panel(), 'salespersonTitleWarn'), '', 'the ticked store holds the 2; the saved Oak Lot is not ticked');
 });
 
 test('Settings: the store boxes ticked in the form decide the warning under the role, as they change and as the role is typed', async () => {

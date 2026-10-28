@@ -138,6 +138,17 @@ export function storeNames(vehicles) {
   return [...new Set(names.map((l) => l.trim()))].sort();
 }
 
+// The ticked stores: the saved choice (settings.myStores) that a store list
+// still names, in the list's order. Settings and the set-up's store step draw
+// one box per listed store, so a saved store no box shows is not ticked, and a
+// Save with the boxes drawn drops it (scanRunner.js keeps the saved stores the
+// website lists in the same way). The warnings that count the ticked stores
+// read this list.
+export function tickedStores(saved, listed) {
+  const chosen = Array.isArray(saved) ? saved : [];
+  return (Array.isArray(listed) ? listed : []).filter((store) => chosen.includes(store));
+}
+
 // Brand words are only a fallback: with one store name to go on (a
 // single-store website, or a record read on its own) there is nothing to
 // compare it with, so the text after the last brand word is the best guess

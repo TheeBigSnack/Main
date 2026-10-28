@@ -15,7 +15,7 @@ import { performScan, rememberSite, keepSeenBasis } from './src/scanRunner.js';
 import { withDefaults, saveProfile, loadProfile, settingsFromProfile, DEFAULT_SALESPERSON_TITLE, priceStepModel, suggestedPriceNote, chooseBasis, basisChangeNote, NO_DEALER_NAME, dealerNameMissing } from './src/settings.js';
 import { originsFor, httpOnlyWebsite } from './src/rescanSchedule.js';
 import { askChrome } from './src/askChrome.js';
-import { shortLocation, storeNames, storeMatchRule } from './src/normalize.js';
+import { shortLocation, storeNames, storeMatchRule, tickedStores } from './src/normalize.js';
 import { POSTING_RULES } from './src/postingRules.js';
 import { recordFlags } from './src/pilot.js';
 import { LEGAL, acceptLegal, legalHosted } from './src/legalLinks.js';
@@ -74,8 +74,8 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const WARNED_FIELDS = Object.freeze({ wizName: 'name', wizTitle: 'role', wizDealer: 'dealer' });
 // the dealership as set-up holds it: a role or a name whose numbers its name, city and ZIP all hold passes
 const dealerNow = () => (wiz.settings && wiz.settings.dealer) || {};
-// the ticked stores as set-up holds them: a role or a name whose numbers every ticked store's name holds passes too
-const storesNow = () => (wiz.settings && wiz.settings.myStores) || [];
+// the ticked stores as set-up holds them (normalize.js tickedStores, against the stores the store step draws boxes for): a role or a name whose numbers every ticked store's name holds passes too
+const storesNow = () => tickedStores(wiz.settings && wiz.settings.myStores, wiz.scan && wiz.scan.stores);
 function warningHtml(id, value) {
   const text = settingNumberWarning(WARNED_FIELDS[id], value, dealerNow(), storesNow());
   return text ? `<div class="banner warn">${esc(text)}</div>` : '';
@@ -301,7 +301,7 @@ export function wizardHtml() {
       // the hint says that instead.
       const matchedBy = stores.length ? storeMatchRule(wiz.site, stores) : null;
       const matched = matchedBy ? matchedBy.store : null;
-      const ticked = s.myStores.filter((st) => stores.includes(st));
+      const ticked = tickedStores(s.myStores, stores);
       const byMatch = matched ? ticked.length === 1 && ticked[0] === matched : !ticked.length;
       const every = s.storesChosen && !s.myStores.length; // chosen before, with the stores in view: every store
       const hint = !stores.length ? ''
