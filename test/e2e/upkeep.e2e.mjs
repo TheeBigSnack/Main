@@ -341,7 +341,8 @@ try {
   await listing6.click('text=Mark as sold'); // the person
   await panel6.waitForSelector('#upkeepDone', { timeout: 20000 });
   assert.match(await panel6.textContent('#upkeepDone'), /sold or removed/);
-  assert.ok(await panel6.$('#upkeepNext'), 'another To do item follows, so Open next To do item is offered');
+  // the done banner is drawn before the next item is looked up (upkeep.js finish), so the button can come a moment later
+  await panel6.waitForSelector('#upkeepNext', { timeout: 5000 }).catch(() => assert.fail('another To do item follows, so Open next To do item is offered'));
   const logBeforeNext = await listingActions();
   assert.deepEqual(logBeforeNext, ['save 515151', 'sold 434343', 'sold 424242', 'sold 515151'], "the person's clicks, the last one just now");
   const secondListing = context.waitForEvent('page', { timeout: 30000 });
