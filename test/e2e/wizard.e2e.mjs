@@ -247,6 +247,8 @@ try {
   await panel.click('#wizNext'); // -> rules
   assert.match(await panel.textContent('ol.rules'), /You publish every post\.[\s\S]*Ads law applies\./);
   assert.match(await panel.textContent('#panel'), stepOf('rules'));
+  // Next is drawn disabled here, so the keyboard is given to the step's heading, not dropped to the page
+  assert.equal(await panel.evaluate(() => document.activeElement && document.activeElement.tagName), 'H3', 'the keyboard stays in the set-up when Next draws the rules');
   assert.equal(await panel.isDisabled('#wizNext'), true, 'the rules must be ticked before Next');
   await panel.check('#wizRulesRead');
   assert.equal(await panel.isDisabled('#wizNext'), false);
@@ -287,6 +289,8 @@ try {
   await panel.click('#wizFinish');
   await panel.waitForFunction(() => /Set up\./.test(document.querySelector('.banner.good')?.textContent || ''), null, { timeout: 30000 });
   assert.match(await panel.textContent('.banner.good'), /1 car is ready to post[\s\S]*Automatic rescans are on/);
+  // the finished set-up has no heading: the keyboard goes to the panel itself, so the next Tab is Close
+  assert.equal(await panel.evaluate(() => document.activeElement && document.activeElement.id), 'panel', 'the keyboard stays in the set-up when Finish draws the done step');
   await panel.screenshot({ path: join(shots, 'wizard-4-done.png') });
 
   const saved = await panel.evaluate(async (o) => {

@@ -76,8 +76,8 @@ export function scanLine({ cars = 0, siteName = '', stores = [] } = {}) {
 // The control that gets the keyboard focus back when the set-up step is drawn
 // again (sidepanel.js refocusWizard): the one that had it, when the step still
 // draws its id; else the step's Next button (Read is gone once the scan is
-// done); else null, and the step's heading takes the focus. drawnIds are the
-// ids the new step draws.
+// done); else null, and the heading takes the focus when the keyboard was in
+// the panel. drawnIds are the ids the new step draws.
 export function wizardFocusId(kept, drawnIds) {
   if (!kept || !kept.id) return null;
   if (drawnIds.includes(kept.id)) return kept.id;

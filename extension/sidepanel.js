@@ -2592,10 +2592,12 @@ function refocus(kept) {
 function render() {
   $('site').textContent = state.siteName || '';
   const views = { idle: viewIdle, rules: viewRules, checking: viewChecking, blocked: viewBlocked, review: viewReview, filling: viewFilling, probe: viewProbe, publish: viewPublish, done: viewDone, notSaved: viewNotSaved, queueDone: viewQueueDone, wizard: wizardHtml };
+  const inPanel = keyboardInPanel(); // read before anything is drawn
   if (state.step === 'wizard') {
     const kept = focusNow();
     $('panel').innerHTML = wizardHtml();
     refocusWizard(kept);
+    if (inPanel) keepKeyboard(); // the control kept was drawn disabled or not drawn: the heading, or the panel itself
     return;
   }
   if (state.step === 'upkeep') {
@@ -2603,7 +2605,6 @@ function render() {
     return;
   }
   const kept = (state.step === 'idle' && $('panelReady')) || state.step === 'publish' ? focusNow() : null; // the list, or the publish step (the Listing link box), redrawn under the person
-  const inPanel = keyboardInPanel();
   $('panel').innerHTML = queueBar() + (views[state.step] || viewIdle)();
   if (kept) refocus(kept);
   if (inPanel) keepKeyboard(); // a no-op when refocus got the keyboard back
@@ -2630,17 +2631,13 @@ function keepKeyboard() {
 }
 
 // The set-up is drawn again on every press, which removes the focused button:
-// the control the step keeps (wizardFocusId) takes the focus, else the heading.
+// the control the step keeps (wizardFocusId) takes the focus. When it cannot
+// (none drawn, or drawn disabled), render gives the focus to the heading.
 function refocusWizard(kept) {
   const drawn = [...$('panel').querySelectorAll('[id]')].map((el) => el.id);
   const id = wizardFocusId(kept, drawn);
   const el = id ? $(id) : null;
-  if (el) return el.focus();
-  const heading = $('panel').querySelector('h3');
-  if (heading) {
-    heading.tabIndex = -1;
-    heading.focus();
-  }
+  if (el) el.focus();
 }
 
 // The list part only, after a keystroke in the search box: the box keeps its focus and caret.
