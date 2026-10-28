@@ -220,6 +220,17 @@ test('a change of the price setting is not a website price change: each listing 
   assert.equal(postedBasis(null, 'anything else'), 'website');
 });
 
+// A car the scan carried over unread is as of when its details were last read
+// (scanCar), so a listing that got its price after that reading is left for the
+// next scan to read, as a car the scan read before its price is.
+test('a listing priced after a car was last read, when the scan carried that car over unread, keeps no basis stamped from that reading', () => {
+  const snap = { takenAt: '2026-10-03T09:01:00.000Z', startedAt: '2026-10-03T09:00:00.000Z', carriedReadAt: { V1: '2026-10-02T09:00:00.000Z' }, vehicles: { V1: { vin: 'V1', price: 16000, priceBeforeFees: 15500 } } };
+  const posted = { V1: { name: 'Car', price: 15500, postedAt: '2026-10-02T12:00:00.000Z' } };
+  assert.equal(withPostedBasis(posted, 'website', snap), undefined, 'read at 09:00 on the 2nd, before the post at 12:00: nothing is stamped');
+  assert.equal(withPostedBasis(posted, 'website', { ...snap, carriedReadAt: { V1: null } }), undefined, 'no read time: nothing is stamped');
+  assert.equal(withPostedBasis(posted, 'website', { ...snap, carriedReadAt: { V1: '2026-10-02T13:00:00.000Z' } }).V1.basis, 'beforeFees', 'read at 13:00, after the post: the car\'s own prices give the basis');
+});
+
 // The posting rules every salesperson ticks (legal/posting-rules.md,
 // src/postingRules.js) say to change a listing's price only when the website
 // changes: no made-up drops, no raising a price to lower it later. A dealer

@@ -105,6 +105,25 @@ function scanBefore(entry, snap) {
   return priced !== null && taken !== null && taken < priced;
 }
 
+// The time a scan says its car's details were last read, for a car it carried
+// over unread (carriedReadAt, scanRunner.js); undefined for a car it read.
+function carriedReadOf(snap, vin) {
+  return snap && typeof snap === 'object' && snap.carriedReadAt && typeof snap.carriedReadAt === 'object' && Object.prototype.hasOwnProperty.call(snap.carriedReadAt, vin) ? snap.carriedReadAt[vin] : undefined;
+}
+
+// Whether a scan's reading of a car, as scanCar dates it, was taken before a
+// listing got the price it carries (`entry`): a car the scan carried over
+// unread is as of when its details were last read (null when unknown, which
+// is before the price); any other car is as of when the scan began (scanBefore).
+// False when the listing carries no time.
+function readBefore(entry, snap, vin) {
+  const carried = carriedReadOf(snap, vin);
+  if (carried === undefined) return scanBefore(entry, snap);
+  const priced = pricedAt(entry);
+  const read = msOf(carried);
+  return priced !== null && (read === null || read < priced);
+}
+
 // A car as a scan shows it, for reading a listing's basis (seenBasis): only
 // a scan taken once the listing had its price can say which website price it
 // was given. A scan from before (this computer's last scan, when the car was
@@ -128,7 +147,7 @@ export function scanCar(entry, snap, vin) {
   // the scan read is as of when the scan began (startedAt, so a scan that began
   // before the listing got its price is not trusted for it, though it finished
   // after), else as of its finish. A carried car with no read time is not priced.
-  const carried = snap.carriedReadAt && typeof snap.carriedReadAt === 'object' && Object.prototype.hasOwnProperty.call(snap.carriedReadAt, vin) ? snap.carriedReadAt[vin] : undefined;
+  const carried = carriedReadOf(snap, vin);
   const taken = carried !== undefined ? msOf(carried) : (msOf(snap.startedAt) ?? msOf(snap.takenAt));
   return taken !== null && taken >= priced ? car : null;
 }
@@ -171,16 +190,18 @@ export function listingWebsitePrice(entry, now, basis = 'website', seen = [now])
 // basis was recorded per entry, as the setting changes: the basis its price
 // is on in the last scan (`snapshot`; postedBasis), else the basis in force
 // until now (`basis`, the setting being changed). An entry that got its
-// price after that scan was taken (posted or updated on another computer and
-// brought by sync since) is left as it is: the scan shows the website as it
-// was before (scanCar), and the next scan reads the entry's basis
-// (withSeenBasis). undefined when nothing is stamped, so nothing is written.
+// price after the scan's reading of its car was taken (posted or updated on
+// another computer and brought by sync since; for a car the scan carried over
+// unread, the time its details were last read) is left as it is: the scan
+// shows the website as it was before (scanCar), and the next scan reads the
+// entry's basis (withSeenBasis). undefined when nothing is stamped, so nothing
+// is written.
 export function withPostedBasis(posted, basis, snapshot = null) {
   if (!posted || typeof posted !== 'object') return undefined;
   let changed = false;
   const next = {};
   for (const [vin, e] of Object.entries(posted)) {
-    if (e && typeof e === 'object' && !PRICE_BASES.includes(e.basis) && !scanBefore(e, snapshot)) {
+    if (e && typeof e === 'object' && !PRICE_BASES.includes(e.basis) && !readBefore(e, snapshot, vin)) {
       next[vin] = { ...e, basis: postedBasis(e, basis, [scanCar(e, snapshot, vin)]) };
       changed = true;
     } else next[vin] = e;
@@ -332,12 +353,7 @@ export function listingLine(entry, snap, vin, basis = 'website') {
 // and nothing is offered to record or fill. False when the listing carries no
 // time, or when a car the scan read has no time for it.
 export function priceItemWaits(item, entry, diff) {
-  if (!item || !item.yours || !entry || typeof entry !== 'object') return false;
-  const carried = diff && typeof diff === 'object' && diff.carriedReadAt && typeof diff.carriedReadAt === 'object' && Object.prototype.hasOwnProperty.call(diff.carriedReadAt, item.vin) ? diff.carriedReadAt[item.vin] : undefined;
-  if (carried === undefined) return scanBefore(entry, diff);
-  const priced = pricedAt(entry);
-  const read = msOf(carried);
-  return priced !== null && (read === null || read < priced);
+  return Boolean(item && item.yours && entry && typeof entry === 'object' && readBefore(entry, diff, item.vin));
 }
 
 function whatGotReady(before, now) {
