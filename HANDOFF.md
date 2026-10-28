@@ -12,7 +12,7 @@ Written 2026-10-10 after Brandon's merge round. Every PR state below was read fr
 
 ### 0. Latest state (2026-10-28, read this first)
 - PR #27 (round 11) is merged as `b97b08c`. Brandon's 2026-10-28 instruction: keep working until the session limit, re-check your own work, and approve what would otherwise need his approval, while never doing the things in section A (no spending, no paid services, no wider permissions, no outward-facing actions, no real Facebook accounts, no detection tricks, no dealer-specific values, no secrets in git). Park those in this file.
-- Round 12 is on `claude/project-thread-ofbx1q`, based on the default branch. Section 33 says what it holds, what was already built, and what is still open.
+- PR #28 (round 12) is merged as `abd3688`, the default branch's head (read from GitHub on 2026-10-28). Round 13 is on `claude/project-thread-ofbx1q`, based on that head. Section 34 says what it holds, what was verified and what is still open.
 - The default branch's unit suite was red from 22 October (a date-bound test); round 12 fixes it.
 
 ### A. The rules that never change
@@ -1448,6 +1448,7 @@ These were open in section 30.5 and are in the code now (the commits are on the 
 - **City and mileage half of the number-in-role warning** (23.2, third bullet): a city or store name that reads as a mileage still fails the mileage check with the plain reason. The city must match Marketplace's location suggestions (`extension/src/rewriteTemplate.js` near lines 1315 to 1319), and a change to `settingNumberProblems` needs its hosted mirror (`supabase/functions/_shared/guardrails.ts` near line 1107) and a redeploy (section 30.2).
 - **First 23.2 bullet** (a scan that finished after a post): believed covered by round 12's start-time dating, not re-checked in round 13. Its toolbar part stays parked (33.4).
 - Unchanged from 33.4: the second window's copy, the price-note steering words, "New tires, engine runs great.", the branding flake, the toolbar count, the To do after a sync item, and the live check.
+- A stash named `round11-wip`, made on 2026-10-15 on this branch's name, is in this clone (`git stash list`). It predates round 13, so it was left as it is for its owner to decide.
 
 ### 34.4 Owner decisions this round parks
 - **Fee sums in price notes** (34.3, first item): the threshold and the money test. The CHANGELOG records the current refusal as a known limit, and the proposal changes that limit, so it needs the owner's word before it ships.
@@ -1456,10 +1457,10 @@ These were open in section 30.5 and are in the code now (the commits are on the 
 
 ### 34.5 Proofs of the round
 - Proof 1, two read-only review lenses (correctness and tests; project rules) at `b74d432`, the last builder commit: FINDINGS, three items, none blocking. (1) The upkeep e2e looked for the Open next To do item button as soon as the done banner showed, but the button is drawn after a storage read: fixed in `b7c57c9` (it waits for the button). (2) The price-note-amount reason's ending had no test, and the contract test's comment said every price-note reason ended in the Settings words: fixed in `735626e`. The status line already gave the Settings fix for that stop, so that commit pins existing behaviour rather than fixing a bug. (3) Three comments on the Settings fix did not mention price-note stops: fixed in `fca56a5`.
-- Proof 2 (a fresh read-only proof of the whole round, after the fixes and the CHANGELOG move): pending, see 34.7.
+- Proof 2, two read-only review lenses on the whole round at `0073be1`: FINDINGS, five items, none blocking. The side panel's next-item request had no test of its fields; a price-note stop beside a description stop had no test of the status line's fix; README's tester copy did not mention the store rule or the button; the address step's help sentence did not mention the store rule, and the Settings help sentence did not say the warning follows a ticked or unticked store; HANDOFF section 0 still described round 12. The fixes are the fix commits after `0073be1` (see `git log`).
 
 ### 34.6 Browser flows at `9d19c57`
-- Pending: the flows run locally with `LOTSYNC_E2E_CHANNEL=chromium`: upkeep, panel, popup, wizard, standard, post, queue, platforms, branding, manager.
+- All ten browser flows passed at `9d19c57` on the `chromium` channel (`LOTSYNC_E2E_CHANNEL=chromium`, which every flow uses when the variable is unset): upkeep, panel, popup, wizard, standard, post, queue, platforms, branding and manager.
 
 ### 34.7 Proof 2 and the merge
 - Pending.
