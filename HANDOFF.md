@@ -11,7 +11,7 @@ The owner's first message will be something like "read HANDOFF.md and continue" 
 Written 2026-10-10 after Brandon's merge round. Every PR state below was read from GitHub that day. Re-check with `mcp__github__pull_request_read` before you act, because merges change it. Read this section, then `CLAUDE.md`, then `CHANGELOG.md` "Unreleased". Sections 0 to 24 below are history and reference.
 
 ### 0. Latest state (2026-10-28, read this first)
-- PR #27 (round 11) is merged as `b97b08c`. Brandon's 2026-10-28 instruction: keep working until the session limit, re-check your own work, and approve what would otherwise need his approval, while never doing the things in section A (no spending, no paid services, no wider permissions, no outward-facing actions, no real Facebook accounts, no detection tricks, no dealer-specific values, no secrets in git). Park those in this file.
+- PR #27 (round 11) is merged as `b97b08c`. Brandon's 2026-10-28 instruction: keep working until the session limit, re-check your own work, and approve what would otherwise need his approval, while never doing the things in section A (no spending, no paid services, no wider permissions, no outward-facing actions, no merge unless he asks for it in a thread, no real Facebook accounts, no detection tricks, no dealer-specific values, no secrets in git). Park those in this file.
 - PR #28 (round 12) is merged as `abd3688`, the default branch's head (read from GitHub on 2026-10-28). Round 13 is on `claude/project-thread-ofbx1q`, based on that head. Section 34 says what it holds, what was verified and what is still open.
 - The default branch's unit suite was red from 22 October (a date-bound test); round 12 fixes it.
 
@@ -1463,9 +1463,10 @@ These were open in section 30.5 and are in the code now (the commits are on the 
 ### 34.6 Browser flows at `9d19c57`
 - All ten browser flows passed at `9d19c57` on the `chromium` channel (`LOTSYNC_E2E_CHANNEL=chromium`, which every flow uses when the variable is unset): upkeep, panel, popup, wizard, standard, post, queue, platforms, branding and manager.
 
-### 34.7 Proof 3 and the merge
-- Proof 3, two read-only review lenses (tests; docs and HANDOFF) on the fix commits after `6675311`, through `5fbeca8` (the commit that records proof 2b): FINDINGS, none on the code. The tests lens had one nit: a fixture gave two take-downs a reason no pilot flag carries (fixed in `f3cddb8`). The docs lens had two should items and four nits, fixed in `f3cddb8`, `0f0a058` and the HANDOFF commit that adds this paragraph: the merge wording here disagreed with section A (now it matches section A); proof 2's fixes had no changelog bullet (`0f0a058`); 34.5 counted five items for six (split now); 34.7 named no commit (`5fbeca8` is named now); and section F gave a stale count (now 2064).
-- Pending: a fresh read-only proof at the head that carries these fixes, then the pull request, its CI, and the merge. Section A says a merge waits for Brandon's ask in a thread, so the merge is his to ask for; the proof and the CI results go in the pull request.
+### 34.7 Proofs 3 to 5 and the merge
+- Proof 3, two read-only review lenses (tests; docs and HANDOFF) on the fix commits after `6675311`, through `5fbeca8` (the commit that records proof 2b): FINDINGS, none on the code. The tests lens had one nit, a fixture whose take-downs carried a reason no pilot flag has (fixed in `f3cddb8`). The docs lens had two should items and four nits, all fixed in `0f0a058` or `8ecc95a`: the merge wording, which now matches section A; proof 2's fixes with no changelog bullet; 34.5's count of six items; 34.7's missing commit name; the next-item wording; and section F's stale count.
+- Proof 4, two read-only review lenses on `8ecc95a` (tests; docs and HANDOFF): FINDINGS, none on the code. The tests lens found one should, a model name in this section, which the repository's rule forbids (fixed in `49b82d5`). The docs lens found the same should and five nits, all fixed in the commits after `49b82d5`: the count and commit name of the proof 3 paragraph, the next-item wording (now take-down and price rows), section 0's summary of section A (now names the merge rule), and the missing proof 3 changelog bullet.
+- Pending: the final proof on the head that carries these fixes, the record of its result, then the pull request, its CI, and the merge. Section A says a merge waits for Brandon's ask in a thread, so the merge is his to ask for; the proof and the CI results go in the pull request.
 
 ## 11. Quick reference
 ```
