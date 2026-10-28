@@ -1398,7 +1398,7 @@ These were open in section 30.5 and are in the code now (the commits are on the 
 ### 33.3 Verification
 - `npm test`: 2043 pass, 0 fail at the round's last code commit, `d5c3a66` (2040 at `308855f`) (the README count is updated in each commit that adds tests). `63f27b1` and `308855f` were each run in a clean worktree before they were pushed.
 - Browser flows run locally with `LOTSYNC_E2E_CHANNEL=chromium`: wizard, popup, panel, standard all passed. Post, queue, upkeep, branding, manager, demo and the rest run in CI on the round's PR.
-- The Opus proof of the round is recorded in section 33.6 when it has been run.
+- The proofs of the round are recorded in section 33.6.
 
 ### 33.4 Still open (not built this round)
 - **Second window's copy** (section 23.2, second bullet): a second window whose save was refused still holds that post, so "Back to the list" there can drop the other window's post. Data-loss risk: needs a careful design.
@@ -1422,8 +1422,11 @@ These were open in section 30.5 and are in the code now (the commits are on the 
 - `owner-3`: a background read against the tab's read. Needs a live dealer site. Parked.
 - The Supabase production drift (section C) and the supabase-js pin (section G) are unchanged.
 
-### 33.6 Opus proof
-- Pending. The round's PR will be proofed by an Opus reviewer before it merges; the findings and their fixes are recorded here before the merge.
+### 33.6 Proofs of the round
+- Proof 1 (on cfa21b9 and 515e9c7): FINDINGS, none blocks merge. (1) withPostedBasis took a listing's basis from a car carried over unread and read before the listing's price: fixed in d5c3a66, with a test in test/rescan.test.js. (2) The help's wording for carried cars did not say so: fixed in d7daa24. (3) To do shows a waiting price item for a listing that a sync brought already at that price: parked in 33.4, because the toolbar count must change with it.
+- Proof 2 (at d7daa24): FINDINGS, one should-fix item. 33.4 said To do shows such an item as waiting; it waits only when the listing's price came after the scan began, and otherwise shows the change with its buttons. Fixed in 050d29b.
+- Proof 3 (at 050d29b): FINDINGS, three nits, none in the code. The 33.3 count said 2042 (fixed in 3b3bdd4). The help's To do paragraph said a waiting item reads as My listings does in every case (fixed in fb6b042). The price-to-post paragraph implied that a reading showing both prices is passed over; the code stops there (fixed in e420eda and 8cee209).
+- Proof 4 (at 8cee209): PROVED, no findings. npm test gives 2043 pass, 0 fail, and on the parent commit the new test fails at its first assertion.
 
 ## 11. Quick reference
 ```
