@@ -20,7 +20,9 @@
 // sold and Delete posted to a listing: before each of the test's clicks as
 // the person the log holds only the clicks it made before, and at the end
 // exactly its three (one Update, two Mark as sold), with every listing in
-// the state those clicks left.
+// the state those clicks left. Last, after those checks, two cars are on To
+// do: the first is marked sold on Facebook, and Open next To do item opens the
+// second one's listing, with nothing clicked for the person.
 //
 // The real facebook.com is never automated. Run: npm run test:e2e:upkeep
 
@@ -306,6 +308,55 @@ try {
     434343: { ...INITIAL_LISTINGS[434343], sold: true },
     515151: { ...INITIAL_LISTINGS[515151], price: 36883 },
   });
+
+  // ---- 6. Open next To do item: after the checks above, two cars are on To do. The Wagoneer's sale-pending item is finished on Facebook (Mark as sold); the button then opens the second item's listing, and the Next click adds nothing to the mock's log, since nothing is clicked for the person ----
+  // The second is a Wagoneer Series II (listing 616161, the same year, make and model, a different trim), posted by hand and dropped by the website, so a scan would list it under Take down too.
+  const SERIES_II = '1C4SJVBT0NS000616';
+  popup = await openPopup();
+  await popup.evaluate(async ({ diffKey, postedKey, vin, listingUrl }) => {
+    const got = await chrome.storage.local.get([diffKey, postedKey]);
+    const diff = got[diffKey];
+    diff.takeDown = [...diff.takeDown, { vin, name: '2022 Jeep Wagoneer Series II', stock: 'W616', url: '', yours: true, why: 'gone', text: 'Gone from the website (sold or removed)', lastPrice: 41500 }];
+    const posted = got[postedKey];
+    posted[vin] = { name: '2022 Jeep Wagoneer Series II', price: 41500, postedAt: '2026-09-26T21:00:00.000Z', listingUrl };
+    await chrome.storage.local.set({ [diffKey]: diff, [postedKey]: posted });
+  }, { diffKey: `diff:${origin}`, postedKey, vin: SERIES_II, listingUrl: `${marketOrigin}/marketplace/item/616161/` });
+  await popup.close();
+  popup = await openPopup();
+  await tab(popup, 'todo').click();
+  assert.equal(await tab(popup, 'todo').locator('.count').textContent(), '2', 'two items on To do');
+  // the side panel is open before the request is made, as it is when a person works the list (it takes the request as it arrives)
+  const panel6 = watch(await context.newPage());
+  panelRef = panel6;
+  await panel6.goto(extUrl('sidepanel.html'));
+  const firstListing = context.waitForEvent('page', { timeout: 30000 });
+  await popup.click(`button[data-action="upkeep"][data-kind="takeDown"][data-vin="${WAGONEER}"]`);
+  await popup.waitForFunction(() => /side panel/i.test(document.querySelector('#status').textContent));
+  await popup.close();
+  const listing6 = watch(await firstListing);
+  await listing6.waitForLoadState();
+  assert.match(listing6.url(), /\/marketplace\/item\/515151\/$/, 'the first item\'s own listing opens');
+  await panel6.waitForSelector('#takeDownWaiting', { timeout: 20000 });
+  await listing6.waitForTimeout(3500); // the panel's first read of the page is its starting point, before the person's click
+  await listing6.click('text=Mark as sold'); // the person
+  await panel6.waitForSelector('#upkeepDone', { timeout: 20000 });
+  assert.match(await panel6.textContent('#upkeepDone'), /sold or removed/);
+  assert.ok(await panel6.$('#upkeepNext'), 'another To do item follows, so Open next To do item is offered');
+  const logBeforeNext = await listingActions();
+  assert.deepEqual(logBeforeNext, ['save 515151', 'sold 434343', 'sold 424242', 'sold 515151'], "the person's clicks, the last one just now");
+  const secondListing = context.waitForEvent('page', { timeout: 30000 });
+  await panel6.click('#upkeepNext');
+  const listing7 = watch(await secondListing);
+  await listing7.waitForLoadState();
+  assert.match(listing7.url(), /\/marketplace\/item\/616161\/$/, 'the next item\'s listing opens');
+  await panel6.waitForSelector('#takeDownWaiting', { timeout: 20000 });
+  assert.match(await panel6.textContent('#panel'), /Take down: 2022 Jeep Wagoneer Series II/);
+  assert.equal(await panel6.$('#upkeepNext'), null, 'the second item is open, not done');
+  await listing7.waitForTimeout(3500); // polls over the new page: nothing is ticked off, nothing is clicked
+  assert.deepEqual(await listingActions(), logBeforeNext, 'the Next click adds no entry to the log');
+  assert.deepEqual((await listingState())['616161'], INITIAL_LISTINGS['616161'], 'the next listing is untouched');
+  await panel6.click('#upkeepCancel'); // Not now
+  await panel6.close();
   assert.deepEqual(errors, [], 'no console errors');
   facebook.assertNone();
   console.log('Upkeep E2E passed. Screenshots in test/e2e/screenshots/');

@@ -356,6 +356,44 @@ export function priceItemWaits(item, entry, diff) {
   return Boolean(item && item.yours && entry && typeof entry === 'object' && readBefore(entry, diff, item.vin));
 }
 
+// One kind of To do item in the tab's order (src/todoOrder.js orderedTodo, which
+// this module does not import): the scan's own order, or with 'oldest', each
+// item oldest first by its open pilot flag of that kind, an item with no open
+// flag last, in the scan's order.
+function todoRows(items, kind, flags, order) {
+  const list = Array.isArray(items) ? items.filter((x) => x && typeof x === 'object') : [];
+  if (order !== 'oldest') return list;
+  const openAt = (vin) => {
+    const f = (Array.isArray(flags) ? flags : []).find((x) => x && !x.doneAt && x.vin === vin && x.kind === kind);
+    const t = f && f.flaggedAt ? Date.parse(f.flaggedAt) : NaN;
+    return Number.isNaN(t) ? null : t;
+  };
+  return list
+    .map((item, i) => ({ item, i, t: openAt(item.vin) }))
+    .sort((a, b) => (a.t === null) - (b.t === null) || (a.t ?? 0) - (b.t ?? 0) || a.i - b.i)
+    .map((x) => x.item);
+}
+
+// The next To do item once the car `finishedVin` is done (upkeep.js, Open next
+// To do item): the first row the To do tab draws a button for, in the tab's
+// order (popup.js viewTodo). Take-downs come before price updates, each kind in
+// todoRows' order; a row has a button only when it is yours, and a price update
+// only when priceItemWaits says it does not wait. The car just finished is
+// passed over, its take-down and its price update alike. `inputs` are what the
+// tab reads: the saved diff, the posted list, the pilot flags and this website's
+// To do order. Returns { kind, item }, or null when nothing is left. It reads
+// only what it is given.
+export function nextUpkeepItem({ diff, posted, flags, order } = {}, finishedVin = '') {
+  const done = String(finishedVin || '').toUpperCase();
+  const d = diff && typeof diff === 'object' ? diff : null;
+  const rows = [
+    ...todoRows(d && d.takeDown, 'takeDown', flags, order).map((item) => ({ kind: 'takeDown', item, button: Boolean(item.yours) })),
+    ...todoRows(d && d.priceUpdates, 'price', flags, order).map((item) => ({ kind: 'price', item, button: Boolean(item.yours) && !priceItemWaits(item, posted && posted[item.vin], d) })),
+  ];
+  const hit = rows.find((r) => r.button && String(r.item.vin || '').toUpperCase() !== done);
+  return hit ? { kind: hit.kind, item: hit.item } : null;
+}
+
 function whatGotReady(before, now) {
   const changes = [];
   if (!before.photoCount && now.photoCount) changes.push('photos added');

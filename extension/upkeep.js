@@ -44,13 +44,14 @@ export const up = {
   origin: null, vin: null, kind: null, price: null, listingUrl: '', name: '', listedPrice: null,
   why: '', // a take-down's reason (src/rescan.js): 'not-pre-owned' is a car not sold, so its listing is deleted
   listingId: '', // the listing's id, from its saved link or from this car's own listing page once opened (onListing)
-  tabId: null, status: 'idle', // idle | checking | stopped | opening | open-failed | waiting | filled | done | gone
+  tabId: null, status: 'idle', // idle | checking | stopped | opening | open-failed | waiting | filled | done | gone | finding (the next To do item is being looked for)
   scanPrice: null, // a price update: the price the last scan found, when the website shows another one now
   basis: null, // a price update: the basis the read worked the price out on, kept on a listing that carries none (markPriceUpdated)
   note: '', filledShown: '', seen: null, error: '', fills: 0, stuck: false, boxShows: '',
   names: null, // the last scan's cars by VIN, read once for a take-down recorded without its name (namesakesNow)
   baseline: null, // { url, sold, unavailable } from the first read of the current page
   offTarget: false, // the tab is showing some other page
+  hasNext: false, // done: another To do item follows (ctx.nextItem), so Open next To do item is offered
 };
 let poller = null;
 let starts = 0; // the To do item being opened: a later one (or Not now) wins over a read still under way
@@ -82,7 +83,7 @@ function stopPolling() {
 export async function startUpkeep(req, ctx) {
   stopPolling();
   const run = ++starts;
-  Object.assign(up, { active: true, origin: req.origin, vin: String(req.vin || '').toUpperCase(), kind: req.kind, why: String(req.why || ''), price: req.price || null, scanPrice: null, basis: null, listingUrl: listingLink(req.listingUrl, ctx.map()), name: req.name || req.vin, listedPrice: req.listedPrice || null, listingId: '', tabId: null, status: req.kind === 'price' ? 'checking' : 'opening', note: '', filledShown: '', seen: null, error: '', fills: 0, names: null, baseline: null, offTarget: false, stuck: false, boxShows: '' });
+  Object.assign(up, { active: true, origin: req.origin, vin: String(req.vin || '').toUpperCase(), kind: req.kind, why: String(req.why || ''), price: req.price || null, scanPrice: null, basis: null, listingUrl: listingLink(req.listingUrl, ctx.map()), name: req.name || req.vin, listedPrice: req.listedPrice || null, listingId: '', tabId: null, status: req.kind === 'price' ? 'checking' : 'opening', note: '', filledShown: '', seen: null, error: '', fills: 0, names: null, baseline: null, offTarget: false, stuck: false, boxShows: '', hasNext: false });
   ctx.render();
   if (up.kind === 'price') {
     let now;
@@ -366,6 +367,49 @@ async function finish(ctx, how) {
   if (accountsConfigured() && (await loadSession(chrome.storage.local))) chrome.runtime.sendMessage({ type: 'syncNow', origin: up.origin }).catch(() => {});
   up.status = 'done';
   up.note = how === 'detected' ? (up.kind === 'price' ? `The listing now shows ${money(up.price)}.` : 'The listing shows it as sold or removed.') : 'Marked done.';
+  const run = starts;
+  ctx.render();
+  // whether another To do item follows: the done banner is drawn already, and the button comes with the answer
+  const more = await hasNextItem(ctx);
+  if (run !== starts || !up.active || up.status !== 'done') return; // closed, or another item started, meanwhile
+  up.hasNext = more;
+  if (more) ctx.render();
+}
+
+// Whether a To do item follows the one just finished: ctx.nextItem answers with
+// the next item's request (sidepanel.js nextUpkeepRequest), or with nothing. A
+// failure counts as nothing, so the done banner shows without the button.
+async function hasNextItem(ctx) {
+  try {
+    return Boolean(await ctx.nextItem?.());
+  } catch (e) {
+    return false;
+  }
+}
+
+// Open next To do item: the next item the To do tab offers opens. The status
+// becomes finding before anything is awaited, so the button is gone and a second
+// click starts nothing. A request starts that item, which checks a price first
+// as any item does; none (or a failure) brings the done banner back without
+// the button.
+async function openNextItem(ctx) {
+  if (up.status !== 'done' || !up.hasNext) return; // the button is not drawn then
+  up.status = 'finding';
+  ctx.render();
+  const run = starts;
+  let req = null;
+  try {
+    req = (await ctx.nextItem?.()) || null;
+  } catch (e) {
+    req = null; // a failure reads as no next item
+  }
+  if (run !== starts || !up.active || up.status !== 'finding') return; // Not now, or another item, meanwhile
+  if (req) {
+    await startUpkeep(req, ctx);
+    return;
+  }
+  up.status = 'done';
+  up.hasNext = false;
   ctx.render();
 }
 
@@ -388,12 +432,13 @@ export function endUpkeep() {
   starts += 1; // a read or an opening still under way stops there
   up.active = false;
   up.status = 'idle';
+  up.hasNext = false;
 }
 
 export function upkeepHtml() {
   const title = up.kind === 'price' ? `Update the price: ${esc(up.name)}` : `Take down: ${esc(up.name)}`;
   const error = up.error ? `<div class="banner bad">${esc(up.error)}</div>` : '';
-  const note = up.note && up.status !== 'stopped' ? `<p class="hint" id="upkeepNote">${esc(up.note)}</p>` : '';
+  const note = up.note && up.status !== 'stopped' && up.status !== 'finding' ? `<p class="hint" id="upkeepNote">${esc(up.note)}</p>` : '';
   // Facebook's saved-car alerts are for a price that goes down, so the line is said only then
   const saversLine = up.listedPrice && up.price < up.listedPrice ? ' Facebook can let people who saved this car know about the new price; Lot Current doesn\'t.' : '';
   let body = '';
@@ -407,6 +452,7 @@ export function upkeepHtml() {
   }
   else if (up.status === 'gone') body = '<div class="banner warn">The listing tab was closed. Did you finish?</div>';
   else if (up.status === 'done') body = `<div class="banner good" id="upkeepDone">Done. ${esc(up.note)}</div>`;
+  else if (up.status === 'finding') body = '<p class="hint" id="upkeepFinding">Finding the next To do item…</p>';
   else if (up.kind === 'price') {
     body = up.stuck
       ? `<div class="banner warn" id="priceStuck">The Price box shows "${esc(up.boxShows)}", not ${money(up.price)}. Lot Current has filled it ${MAX_FILLS} times and the form keeps showing that price, so it has stopped filling. Type ${money(up.price)} in the Price box yourself, then click <b>Update</b>.</div>`
@@ -418,8 +464,11 @@ export function upkeepHtml() {
       ? `<div class="banner info" id="takeDownWaiting">On Facebook, click <b>Delete</b> on this listing: the website no longer lists the car as pre-owned, and it was not sold, so do not mark it sold. Lot Current will notice and mark it done.</div>`
       : `<div class="banner info" id="takeDownWaiting">On Facebook, click <b>Mark as sold</b> (or <b>Delete</b>) on this listing. Lot Current will notice and mark it done.</div>`;
   }
-  const buttons = up.status === 'done' || up.status === 'stopped'
-    ? `<button type="button" class="primary" id="upkeepClose">Close</button>`
+  // Open next To do item leads when another item follows, with Close plain beside it
+  const next = up.status === 'done' && up.hasNext ? `<button type="button" class="primary" id="upkeepNext">Open next To do item</button>` : '';
+  const close = `<button type="button" class="${next ? 'plain' : 'primary'}" id="upkeepClose">Close</button>`;
+  const buttons = up.status === 'done' || up.status === 'stopped' || up.status === 'finding'
+    ? `${next}${close}`
     : up.status === 'checking'
     ? `<button type="button" class="plain" id="upkeepCancel">Not now</button>`
     : `<button type="button" class="primary" id="upkeepDoneBtn">${up.kind === 'price' ? 'I updated it' : 'I took it down'}</button><button type="button" class="plain" id="upkeepCancel">Not now</button>`;
@@ -440,6 +489,9 @@ export async function handleUpkeepClick(id, ctx) {
     case 'upkeepClose':
       endUpkeep();
       ctx.onClose();
+      return true;
+    case 'upkeepNext':
+      await openNextItem(ctx);
       return true;
     default:
       return false;

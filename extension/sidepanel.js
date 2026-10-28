@@ -11,7 +11,7 @@
 //
 // This file never clicks anything on the Facebook page.
 
-import { markPosted, basisPrice, postedBasis, pendingText, scanCar } from './src/rescan.js';
+import { markPosted, basisPrice, postedBasis, pendingText, scanCar, nextUpkeepItem } from './src/rescan.js';
 import { DECISION } from './src/classify.js';
 import { draftRecord, draftPill, draftScanCar } from './src/drafts.js';
 import { shortLocation, storeNames } from './src/normalize.js';
@@ -2691,10 +2691,46 @@ async function upkeepPriceNow(req) {
   return { ok: true, price: basisPrice(fresh.vehicle, basis), basis };
 }
 
+// The request for the To do item upkeep offers next, once the one it has just
+// finished is done (upkeep.js, Open next To do item). The lists are read from
+// storage as they are now, since finishing the item has just written the posted
+// list, its pilot flag and the diff. nextUpkeepItem (rescan.js) picks the row
+// the To do tab would put a button on first, after the car just finished, and
+// the request is built the way the popup builds one. Null when none is left,
+// and when storage can't be read (the done banner then shows alone).
+async function nextUpkeepRequest() {
+  const origin = up.origin;
+  try {
+    const k = siteKeys(origin);
+    const got = await chrome.storage.local.get([k.diff, k.posted, k.pilot]);
+    const posted = got[k.posted] || {};
+    const next = nextUpkeepItem({ diff: got[k.diff], posted, flags: got[k.pilot]?.flags, order: state.settings?.todoOrder }, up.vin);
+    if (!next) return null;
+    const { kind, item } = next;
+    const p = posted[item.vin] || {};
+    return {
+      origin,
+      vin: item.vin,
+      kind,
+      why: kind === 'takeDown' ? item.why || '' : '',
+      price: kind === 'price' ? Number(item.to) || null : null,
+      listingUrl: p.listingUrl || '',
+      name: p.name || item.name || item.vin,
+      listedPrice: p.price || null,
+      dealerTabId: state.dealerTabId,
+      windowId: panelWindowId,
+      at: Date.now(),
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
 const upkeepCtx = {
   render: () => { if (state.step === 'upkeep') render(); }, // a late poll never redraws another step's view
   map: () => state.map || FORM_MAP,
   priceNow: (req) => upkeepPriceNow(req),
+  nextItem: () => nextUpkeepRequest(),
   onClose: () => { state.step = 'idle'; render(); },
 };
 

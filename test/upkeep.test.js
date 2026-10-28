@@ -432,7 +432,7 @@ test('a price update whose Price box keeps another price after Lot Current\'s fi
 // in a finally and await rig.started after it.
 const WANT_PRICE = 18500;
 const LISTED_PAGE = { url: at('111'), matchesId: true, sold: false, unavailable: false, matchesVin: false, vinInText: false, matchesName: true, matchesPrice: true, prices: ['20000'], formOnPage: true, hasPriceBox: true, priceBoxValue: '20000' };
-async function priceRig(page) {
+async function priceRig(page, { nextItem } = {}) {
   const rig = { page: { ...page }, fills: 0 };
   const flush = async () => { for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve)); };
   rig.tick = async () => { mock.timers.tick(1500); await flush(); };
@@ -452,7 +452,7 @@ async function priceRig(page) {
     },
   };
   mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
-  const ctx = { render: () => {}, map: () => FORM_MAP, priceNow: async () => ({ ok: true, price: WANT_PRICE, basis: 'website' }) };
+  const ctx = { render: () => {}, map: () => FORM_MAP, priceNow: async () => ({ ok: true, price: WANT_PRICE, basis: 'website' }), nextItem };
   rig.started = startUpkeep({ origin: 'https://www.example-motors.test', vin: 'aaa', kind: 'price', price: WANT_PRICE, listingUrl: LISTED_PAGE.url, name: 'Car A', listedPrice: 20000 }, ctx);
   await flush();
   await rig.tick(); // the wait before the first poll ends
@@ -587,4 +587,124 @@ test('an open-failed listing with no saved link says to open it from Your listin
   Object.assign(up, { kind: 'price', listingUrl: 'https://www.facebook.com/marketplace/item/123/' });
   assert.match(upkeepHtml(), /Open the listing yourself, with the link above, and change the price there by hand\./, 'with a saved link, the link above is named');
   Object.assign(up, { status: 'idle', error: '', listingUrl: '' });
+});
+
+// Open next To do item (upkeep.js): an item that is done offers the next To do
+// item when ctx.nextItem has one (the side panel reads the lists as they are
+// stored: sidepanel.js nextUpkeepRequest). The button starts that item, which
+// only opens its listing: nothing on Facebook is clicked for the person.
+const noop = () => {};
+const NEXT = { origin: 'https://www.example-motors.test', vin: 'BBB', kind: 'takeDown', why: 'gone', price: null, listingUrl: 'https://www.facebook.com/marketplace/item/222/', name: 'Car B', listedPrice: 21000, dealerTabId: null, windowId: null, at: 1 };
+const DONE_CAR = { active: true, origin: 'https://www.example-motors.test', vin: 'AAA', kind: 'takeDown', why: 'gone', status: 'done', note: 'Marked done.', name: 'Car A', listingUrl: '', listedPrice: null, hasNext: false, error: '' };
+
+test('the Open next To do item button is drawn only when the item is done and another one follows', () => {
+  Object.assign(up, { ...DONE_CAR, hasNext: true });
+  try {
+    assert.match(upkeepHtml(), /<button type="button" class="primary" id="upkeepNext">Open next To do item<\/button>/);
+    assert.match(upkeepHtml(), /<button type="button" class="plain" id="upkeepClose">Close<\/button>/, 'Close is kept beside it');
+    up.hasNext = false;
+    assert.doesNotMatch(upkeepHtml(), /upkeepNext/, 'no next item, no button');
+    Object.assign(up, { hasNext: true, status: 'waiting' });
+    assert.doesNotMatch(upkeepHtml(), /upkeepNext/, 'an item not done yet offers none');
+    Object.assign(up, { hasNext: true, status: 'stopped', note: 'The website shows no price for this car right now, so there is no price to fill. Nothing was filled.' });
+    assert.doesNotMatch(upkeepHtml(), /upkeepNext/, 'a stopped item offers none');
+  } finally {
+    endUpkeep();
+  }
+});
+
+test('Open next To do item asks for the next item once, and starts it: its listing opens, and nothing is clicked', async () => {
+  const opened = [];
+  let asked = 0;
+  globalThis.chrome = { tabs: { create: async ({ url }) => { opened.push(url); return { id: 31 }; } } };
+  const ctx = { render: noop, map: () => FORM_MAP, nextItem: async () => { asked += 1; return NEXT; }, onClose: noop };
+  try {
+    Object.assign(up, { ...DONE_CAR, hasNext: true });
+    assert.equal(await handleUpkeepClick('upkeepNext', ctx), true);
+    assert.equal(asked, 1, 'the next item is asked for once');
+    assert.deepEqual([up.vin, up.kind, up.name, up.status, up.hasNext], ['BBB', 'takeDown', 'Car B', 'waiting', false]);
+    assert.deepEqual(opened, [NEXT.listingUrl], 'only that item\'s listing is opened');
+  } finally {
+    endUpkeep();
+    delete globalThis.chrome;
+  }
+});
+
+test('a second Open next To do item click while the next item is being found starts nothing', async () => {
+  let asked = 0;
+  let answer = null;
+  const ctx = { render: noop, map: () => FORM_MAP, nextItem: () => { asked += 1; return new Promise((resolve) => { answer = resolve; }); }, onClose: noop };
+  try {
+    Object.assign(up, { ...DONE_CAR, hasNext: true });
+    const first = handleUpkeepClick('upkeepNext', ctx);
+    assert.equal(up.status, 'finding', 'the status turns to finding before anything is awaited');
+    assert.match(upkeepHtml(), /Finding the next To do item/);
+    assert.doesNotMatch(upkeepHtml(), /upkeepNext/, 'the button is not drawn while the next item is found');
+    assert.doesNotMatch(upkeepHtml(), /upkeepNote|Marked done\./, 'the done note is not repeated under the finding line');
+    assert.equal(await handleUpkeepClick('upkeepNext', ctx), true);
+    assert.equal(asked, 1, 'the second click asks for nothing');
+    answer(null);
+    assert.equal(await first, true);
+    assert.equal(up.status, 'done', 'no item came back: the done banner is restored');
+    assert.equal(up.hasNext, false);
+  } finally {
+    endUpkeep();
+  }
+});
+
+test('when no To do item is left, the done banner stays and no Next button is drawn', async () => {
+  const ctx = { render: noop, map: () => FORM_MAP, nextItem: async () => null, onClose: noop };
+  try {
+    Object.assign(up, { ...DONE_CAR, hasNext: true });
+    assert.equal(await handleUpkeepClick('upkeepNext', ctx), true);
+    assert.equal(up.status, 'done');
+    assert.equal(up.hasNext, false);
+    const html = upkeepHtml();
+    assert.match(html, /id="upkeepDone"/);
+    assert.doesNotMatch(html, /upkeepNext/);
+    assert.match(html, /id="upkeepClose"/);
+  } finally {
+    endUpkeep();
+  }
+});
+
+test('when the next To do item cannot be found, the done banner stays and no Next button is drawn', async () => {
+  const ctx = { render: noop, map: () => FORM_MAP, nextItem: async () => { throw new Error('storage is unavailable'); }, onClose: noop };
+  try {
+    Object.assign(up, { ...DONE_CAR, hasNext: true });
+    assert.equal(await handleUpkeepClick('upkeepNext', ctx), true);
+    assert.equal(up.status, 'done');
+    assert.equal(up.hasNext, false);
+    assert.match(upkeepHtml(), /id="upkeepDone"/);
+    assert.doesNotMatch(upkeepHtml(), /upkeepNext/);
+  } finally {
+    endUpkeep();
+  }
+});
+
+// Finishing an item asks the same question (finish): the done banner gets the
+// button when another item follows, and keeps its plain Close when none does or
+// the question fails.
+test('finishing an item offers Open next To do item only when another item follows', async () => {
+  const cases = [
+    [async () => NEXT, true],
+    [async () => null, false],
+    [async () => { throw new Error('storage is unavailable'); }, false],
+  ];
+  for (const [nextItem, offered] of cases) {
+    const rig = await priceRig(LISTED_PAGE, { nextItem });
+    try {
+      for (let i = 0; i < 5; i++) await rig.tick();
+      rig.page.priceBoxValue = String(WANT_PRICE);
+      await rig.tick();
+      rig.page = { ...UPDATED_PAGE }; // the listing shows the new price: the item is done
+      await rig.tick();
+      assert.equal(up.status, 'done');
+      assert.match(upkeepHtml(), /id="upkeepDone"/, 'the done banner shows');
+      assert.equal(/id="upkeepNext"/.test(upkeepHtml()), offered, `button drawn: ${offered}`);
+    } finally {
+      endRig();
+      await rig.started;
+    }
+  }
 });
