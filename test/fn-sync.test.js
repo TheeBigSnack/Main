@@ -529,10 +529,11 @@ test('sync: a listing keeps the price basis it was posted at: written on insert 
 });
 
 test('sync: to-do items: a new flag goes in, an upload closes an open one, a closed one is never reopened, an open price flag takes the new prices', async () => {
+  // Times are relative to now: the upload's `since` is thirty days back from the real clock, so fixed dates would age out.
   const flags = [
-    { dealership_id: D1, vin: VIN(1), kind: 'takeDown', flagged_at: '2026-09-20T10:00:00.000Z' },
-    { dealership_id: D1, vin: VIN(2), kind: 'price', flagged_at: '2026-09-21T10:00:00.000Z', done_at: '2026-09-22T10:00:00.000Z', how: 'detected', from_price: 20000, to_price: 19000 },
-    { dealership_id: D1, vin: VIN(3), kind: 'price', flagged_at: '2026-09-23T10:00:00.000Z', from_price: 30000, to_price: 29000 },
+    { dealership_id: D1, vin: VIN(1), kind: 'takeDown', flagged_at: at(-60 * 24 * 12) },
+    { dealership_id: D1, vin: VIN(2), kind: 'price', flagged_at: at(-60 * 24 * 11), done_at: at(-60 * 24 * 10), how: 'detected', from_price: 20000, to_price: 19000 },
+    { dealership_id: D1, vin: VIN(3), kind: 'price', flagged_at: at(-60 * 24 * 9), from_price: 30000, to_price: 29000 },
   ];
   world({ rows: { todo_items: flags } });
   const handler = await load();
