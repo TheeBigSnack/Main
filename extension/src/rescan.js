@@ -96,11 +96,12 @@ function pricedAt(entry) {
   return msOf(entry.updatedAt) ?? msOf(entry.draftSavedAt) ?? msOf(entry.postedAt);
 }
 
-// Whether a scan was taken before a listing got its price: false when
-// either time is unknown.
+// Whether a scan was taken before a listing got its price: a scan counts from
+// when it began (startedAt), or from when it finished (takenAt) when it has
+// no start time, as scanCar reads a car. False when either time is unknown.
 function scanBefore(entry, snap) {
   const priced = pricedAt(entry);
-  const taken = snap && typeof snap === 'object' ? msOf(snap.takenAt) : null;
+  const taken = snap && typeof snap === 'object' ? (msOf(snap.startedAt) ?? msOf(snap.takenAt)) : null;
   return priced !== null && taken !== null && taken < priced;
 }
 
@@ -319,14 +320,14 @@ export function listingLine(entry, snap, vin, basis = 'website') {
 
 // Whether a price item on To do for one of your listings (`item`: a
 // diffScans item, or the one Mark posted adds for a draft, drafts.js
-// withPriceUpdate) was worked out on a scan (the diff's, `diff.takenAt`)
-// taken before the listing, as it is stored now (`entry`), got the price it
-// carries: updated or posted since, on another computer and brought by sync,
-// which settles no to-do list (settleDiff runs when a scan is saved). The
-// item's prices are then the listing's and the website's as they were before
-// that, so its price waits for the next scan, as My listings says
-// (listingLine), and nothing is offered to record or fill. The same rule as
-// scanCar (scanBefore): false when either time is unknown.
+// withPriceUpdate) was worked out on a scan taken before the listing, as it is
+// stored now (`entry`), got the price it carries: updated or posted since, on
+// another computer and brought by sync, which settles no to-do list (settleDiff
+// runs when a scan is saved). The scan counts from when it began (the diff's
+// `startedAt`, else `takenAt`). The item's prices are then the listing's and the
+// website's as they were before that, so its price waits for the next scan, as
+// My listings says (listingLine), and nothing is offered to record or fill. The
+// same rule as scanCar (scanBefore): false when either time is unknown.
 export function priceItemWaits(item, entry, diff) {
   return Boolean(item && item.yours && entry && typeof entry === 'object' && scanBefore(entry, diff));
 }

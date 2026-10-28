@@ -1770,14 +1770,14 @@ test('schemaOrg scan: past the page limit, the pages read longest ago come first
   assert.deepEqual(vinsOf(s1), V.slice(0, 6), 'no more than the limit');
   assert.deepEqual([one.res.leftForLater, one.res.complete, Object.keys(one.snapshot.vehicles).length], [4, false, 6]);
   assert.equal(one.diff.warnings[0], "This lot has more car pages than one scan reads, so 4 cars' pages were left for the next scan.");
-  assert.equal(one.snapshot.vehicles[V[0]].pageReadAt, one.res.fetchedAt);
+  assert.equal(one.snapshot.vehicles[V[0]].pageReadAt, one.res.startedAt);
   await tick();
   const s2 = fakeSiteSearch(links);
   const two = await scanWithSearch({ adapter: schemaOrg, search: s2, site, settings, prevSnapshot: one.snapshot, options });
   assert.deepEqual(vinsOf(s2).slice(0, 4).sort(), V.slice(6).sort(), 'the cars never read come first');
   assert.equal(vinsOf(s2).length, 6);
   assert.equal(Object.keys(two.snapshot.vehicles).length, 10, 'every car is in the lot now');
-  assert.equal(two.snapshot.vehicles[V[5]].pageReadAt, one.res.fetchedAt, 'a car not read this time keeps when it was read');
+  assert.equal(two.snapshot.vehicles[V[5]].pageReadAt, one.res.startedAt, 'a car not read this time keeps when it was read');
   assert.equal(two.diff.warnings[0], "This lot has more car pages than one scan reads, so 4 cars' pages were left for the next scan. A car whose page was not read this time shows what the last scan read.");
   await tick();
   const s3 = fakeSiteSearch(links);

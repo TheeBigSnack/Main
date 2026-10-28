@@ -897,7 +897,7 @@ test('To do and My listings offer no Updated at the last scan\'s price for a lis
   const last = structuredClone(first.local[k.snapshot]);
   const diff = structuredClone(first.local[k.diff]);
   last.takenAt = diff.takenAt = new Date(Date.now() - 2 * 3600e3).toISOString();
-  last.startedAt = last.takenAt;
+  last.startedAt = diff.startedAt = last.takenAt; // that scan began two hours ago too, so its diff says so as well
   const synced = { [ram.vin]: { ...posted[ram.vin], price: 26663, updatedAt: new Date(Date.now() - 3600e3).toISOString() } };
   const p = await loadPopup({ local: { [k.settings]: settings, [k.snapshot]: last, [k.diff]: diff, [k.posted]: structuredClone(synced) } });
   const todo = p.panel();

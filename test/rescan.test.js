@@ -669,6 +669,29 @@ test('a To do price item from a scan taken before the listing\'s price waits for
   assert.equal(waits(null, synced, d), false);
 });
 
+// The same rule read off when the scan began (startedAt, as scanCar reads a
+// car): a scan that began before the listing got its price waits, though it
+// finished after the price, and one that began after it does not.
+test('a To do price item is dated from when its scan began: one that began before the listing got its price waits, though it finished after', () => {
+  const at = (day) => `2026-10-0${day}T09:00:00.000Z`;
+  const s = repriced(snapshot(LOT, MY_STORE, at(2)), VIN.ram, 27163, 26673);
+  const listed = { name: 'Ram', price: 27663, basis: 'website', postedAt: at(1) };
+  const d = { ...diffScans(s, s, { posted: { [VIN.ram]: listed }, confirm: confirmed(), basis: 'website' }), takenAt: at(2) };
+  const [item] = d.priceUpdates;
+  const synced = { ...listed, price: 26663, updatedAt: at(3) }; // updated on another computer at 09:00 on the 3rd
+  assert.equal(rescan.priceItemWaits(item, synced, { ...d, startedAt: '2026-10-03T08:59:00.000Z', takenAt: '2026-10-03T09:01:00.000Z' }), true, 'began a minute before the update, finished a minute after it: from when it began');
+});
+
+test('a To do price item from a scan that began after the listing got its price does not wait, even when it finished after that too', () => {
+  const at = (day) => `2026-10-0${day}T09:00:00.000Z`;
+  const s = repriced(snapshot(LOT, MY_STORE, at(2)), VIN.ram, 27163, 26673);
+  const listed = { name: 'Ram', price: 27663, basis: 'website', postedAt: at(1) };
+  const d = { ...diffScans(s, s, { posted: { [VIN.ram]: listed }, confirm: confirmed(), basis: 'website' }), takenAt: at(2) };
+  const [item] = d.priceUpdates;
+  const synced = { ...listed, price: 26663, updatedAt: at(3) };
+  assert.equal(rescan.priceItemWaits(item, synced, { ...d, startedAt: '2026-10-03T09:01:00.000Z', takenAt: '2026-10-03T09:02:00.000Z' }), false, 'began a minute after the update: the item stands');
+});
+
 // Updated on a listing that carries no basis records the basis its new price
 // was worked out on (My listings: listingLine's basis; To do: the one
 // diffScans names on a price item for your listing), so a switch of Price to
@@ -1700,6 +1723,14 @@ test('a scan that began before a listing got its price does not price its cars, 
   assert.ok(Date.parse(out.snapshot.startedAt) < Date.parse(postedAt), 'the scan began before the post');
 });
 
+test('a car this scan read is dated from when the scan began, so a scan that began before a listing got its price never reads the car as after it', async () => {
+  const cars = standardCars(6);
+  // each request takes a moment, so the scan's start and its finish are told apart
+  const day1 = await scanWithSearch({ adapter: schemaOrg, search: fakeSiteSearch(thinListSite(cars), { delay: 5 }), site: STD_SITE, settings: withDefaults({}, STD_SITE), prevSnapshot: null, posted: {}, options: schemaOrg.scanOptions(STD) });
+  assert.ok(Date.parse(day1.res.startedAt) < Date.parse(day1.res.fetchedAt), 'the scan took a moment');
+  assert.equal(day1.snapshot.vehicles[cars[0].vin].pageReadAt, day1.res.startedAt, 'its page was read as of when the scan began, not when it finished');
+});
+
 test('a car carried over unread keeps the time its details were read, so a listing priced after that reading is not priced from the scan that carried it', async () => {
   const cars = standardCars(6);
   const pause = () => new Promise((resolve) => setTimeout(resolve, 5));
@@ -1709,7 +1740,7 @@ test('a car carried over unread keeps the time its details were read, so a listi
   const bad = cars[2];
   const day2 = await rescanOf(thinListSite(cars, { [bad.path]: httpError(500) }), day1.snapshot);
   assert.deepEqual(day2.res.unread, [bad.vin]);
-  assert.equal(day2.snapshot.carriedReadAt[bad.vin], day1.res.fetchedAt, 'the carried car keeps the time its page was last read');
+  assert.equal(day2.snapshot.carriedReadAt[bad.vin], day1.res.startedAt, 'the carried car keeps the time its page was last read: when that scan began');
   // the listing is priced after the car's last reading; the scan that carries the car is later still
   const entry = { updatedAt: new Date(Date.parse(day1.res.fetchedAt) + 1).toISOString() };
   assert.equal(rescan.scanCar(entry, day2.snapshot, bad.vin), null, 'a reading from before the price does not price the car');
