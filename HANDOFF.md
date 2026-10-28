@@ -1396,7 +1396,7 @@ These were open in section 30.5 and are in the code now (the commits are on the 
 - sp-03 was built in `504a04d` above.
 
 ### 33.3 Verification
-- `npm test`: 2042 pass, 0 fail at the round's last code commit (2040 at `308855f`) (the README count is updated in each commit that adds tests). `63f27b1` and `308855f` were each run in a clean worktree before they were pushed.
+- `npm test`: 2043 pass, 0 fail at the round's last code commit, `d5c3a66` (2040 at `308855f`) (the README count is updated in each commit that adds tests). `63f27b1` and `308855f` were each run in a clean worktree before they were pushed.
 - Browser flows run locally with `LOTSYNC_E2E_CHANNEL=chromium`: wizard, popup, panel, standard all passed. Post, queue, upkeep, branding, manager, demo and the rest run in CI on the round's PR.
 - The Opus proof of the round is recorded in section 33.6 when it has been run.
 
