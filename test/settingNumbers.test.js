@@ -484,6 +484,8 @@ test('set-up\'s address step does not bring the role\'s warning up when a ticked
   assert.match(typed(), /no longer have the number in your role/, 'with no ticked store the warning comes up, as before');
   wiz.settings = withDefaults({ salesperson: role, dealer: chance, myStores: ['Route 2 Motors'] });
   assert.equal(typed(), '', 'the ticked store holds the 2');
+  wiz.settings = withDefaults({ salesperson: role, dealer: chance, myStores: ['Route 2 Motors', 'Gone Lot'] });
+  assert.equal(typed(), '', 'Gone Lot is saved but the scan does not list it, so the ticked store that holds the 2 is the one counted');
   wiz.active = false;
   wiz.scan = null;
 });
@@ -626,6 +628,32 @@ test('Settings: the store boxes ticked in the form decide the warning under the 
   boxes[0].checked = false;
   p.el('panel').listeners.input({ target: { name: 'salespersonTitle', value: 'Team 2 sales' } });
   assert.equal(warned(), settingNumberWarning('role', 'Team 2 sales', dealer), 'nothing ticked: the warning is back');
+});
+
+test('Settings: ticking a store redraws the warning under the name too, from the saved name and the boxes as they are', async () => {
+  const k = siteKeys(POPUP_ORIGIN);
+  const scanned = await loadPopup({});
+  await scanned.scan();
+  const snapshot = structuredClone(scanned.local[k.snapshot]);
+  const cars = Object.values(snapshot.vehicles);
+  cars.forEach((car, i) => { car.location = i % 2 ? 'Route 3 Motors' : 'Route 2 Motors'; });
+  const dealer = { name: 'Example Motors', city: 'Springfield', state: 'OH', zip: '43215' };
+  const p = await loadPopup({ local: { [k.settings]: { myStores: [], salesperson: { name: 'Sam 2', title: 'Team 2' }, dealer }, [k.snapshot]: snapshot } });
+  await p.tab('settings');
+  const boxes = [{ value: 'Route 2 Motors', checked: false }, { value: 'Route 3 Motors', checked: false }];
+  globalThis.document.querySelectorAll = (sel) => (sel === 'input[name="store"]:checked' ? boxes.filter((b) => b.checked) : []);
+  const warned = () => unesc(p.el('salespersonNameWarn').innerHTML.replace(/<[^>]+>/g, '')).trim();
+  const plain = settingNumberWarning('name', 'Sam 2', dealer);
+  const tick = (value, checked) => {
+    boxes.find((b) => b.value === value).checked = checked;
+    p.el('panel').listeners.change({ target: { name: 'store', value, id: '', classList: { contains: () => false } } });
+  };
+  assert.equal(unesc(region(p.panel(), 'salespersonNameWarn').replace(/<[^>]+>/g, '')).trim(), plain, 'no store ticked: the name warns, as drawn');
+  tick('Route 2 Motors', true);
+  assert.equal(warned(), '', 'Route 2 Motors is ticked and holds the 2: the name warning goes');
+  tick('Route 2 Motors', false);
+  assert.equal(warned(), plain, 'unticked again: the name warns again, word for word');
+  assert.equal(p.el('salespersonNameSay').textContent, settingNumberNotice('name', 'Sam 2', dealer), 'and its live region says it whole');
 });
 
 // Set-up's You step comes before the address step, so it reads the

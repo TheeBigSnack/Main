@@ -638,7 +638,7 @@ test('a second Open next To do item click while the next item is being found sta
     Object.assign(up, { ...DONE_CAR, hasNext: true });
     const first = handleUpkeepClick('upkeepNext', ctx);
     assert.equal(up.status, 'finding', 'the status turns to finding before anything is awaited');
-    assert.match(upkeepHtml(), /Finding the next To do item/);
+    assert.match(upkeepHtml(), /<p class="hint" id="upkeepFinding">Finding the next To do item…<\/p>/, 'the lookup line, whole');
     assert.doesNotMatch(upkeepHtml(), /upkeepNext/, 'the button is not drawn while the next item is found');
     assert.match(upkeepHtml(), /id="upkeepClose"/, 'Close is the one button drawn while the next item is found');
     assert.doesNotMatch(upkeepHtml(), /upkeepDoneBtn|upkeepCancel/, 'no I took it down or Not now while the next item is found');
