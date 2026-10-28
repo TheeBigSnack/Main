@@ -983,16 +983,16 @@ A cloud session in the Lot Current project (the "Build the plan's Claude steps" 
 
 ### 23.2 Still open from this round
 
-- A scan that read a car before the side panel did but finished after the post was recorded (or the draft saved, or the price updated) counts as taken since, so until the next scan My listings and To do can show the older price it read as a price change. A To do item waiting for the next scan still counts on the toolbar icon.
+- A scan that read a car before the side panel did but finished after the post was recorded (or the draft saved, or the price updated) counts as taken since, so until the next scan My listings and To do can show the older price it read as a price change. A To do item waiting for the next scan still counts on the toolbar icon. The scan part is believed covered by round 12's start-time dating (section 33.1), not re-checked in round 13; the toolbar part stays parked (33.4).
 - A second window's copy stopped by the re-check whose save was refused still holds that post, so **Back to the list** there can drop the other window's post once that window's side panel has closed.
-- The set-up and Settings warning about a number in the role counts the dealership's name, city and ZIP as facts but not a ticked store's name; a dealership city or store name that reads as a mileage still fails with the plain mileage reason.
-- The old-name check still passes the name glued after the stem of a word it lists (s, p, b, c, "al", "pi", "mate" and the like), a regular expression's `\b` or `\s` included.
+- The set-up and Settings warning about a number in the role counts the dealership's name, city and ZIP as facts but not a ticked store's name; a dealership city or store name that reads as a mileage still fails with the plain mileage reason. Round 13 closed the store half (section 34.1); the city and mileage half stays open (section 34.3).
+- The old-name check still passes the name glued after the stem of a word it lists (s, p, b, c, "al", "pi", "mate" and the like), a regular expression's `\b` or `\s` included. Round 13 closed the regular-expression half (section 34.1); the word-stem half stays open (section 34.3).
 - The price note's word rule: a steer said only in listed words ("Do not go to the dealer.", "Cash price paid to the secretary.") still passes, since the fee places' words are on the list; "incl", "see", "agent" and "signing" are not on it, so a note using them is refused; fees written as amounts joined only by marks ("$1,299 + $499", "$499.00/$25.00") reach seven digits and are refused in a note that says "not the dealer". The help says each.
 - The list after "new": a listed part followed by state wording other than the known state words ("New tires, engine runs great.") is still read as claimed.
-- When a description's stops mix a number in Settings with a refused price note, the side panel's status line still says to fix the description (or Reset to template), although both fixes are in Settings; the checks line lists each reason with its own fix. Open the Marketplace form is off meanwhile, so the status line rarely shows.
+- When a description's stops mix a number in Settings with a refused price note, the side panel's status line still says to fix the description (or Reset to template), although both fixes are in Settings; the checks line lists each reason with its own fix. Open the Marketplace form is off meanwhile, so the status line rarely shows. Done in round 13 (section 34.1).
 - The Supabase functions were unpinned (`@2`) until round 11, when they were pinned to 2.117.2 (`a2cc20f`). A Deno lockfile, or a newer pin, is still the owner's call, since it changes what production imports on the next deploy.
 - Round 11 held back, for a decision: (a) the click-time refusal of action-named controls (`security-2`): the form map's neverFill cannot name action words, because `test/posting.test.js` forbids them anywhere in the map, so the refusal needs Brandon to say whether neverFill may name actions; (b) the worker's photo-server grant check (`security-6`): it refuses the e2e fixture's http photo server on 127.0.0.1, so the post flow fails, and it needs a decision on loopback or http photo servers (a loopback exception reopens a local-service fetch path; a fixture change needs an https or granted mock).
-- Round 11 not built: the set-up check of a background read against the tab's read (`owner-3`), which needs a live dealer site to tell whether the two differ, and the next to-do item from upkeep without reopening the popup (`salesperson-4`).
+- Round 11 not built: the set-up check of a background read against the tab's read (`owner-3`), which needs a live dealer site to tell whether the two differ, and the next to-do item from upkeep without reopening the popup (`salesperson-4`). Round 13 built `salesperson-4` (section 34.1).
 - Version 0.6.0 waits for the live-check walkthrough's results.
 
 ## 24. The dealer-branding round (2026-10-08, pull request #13)
@@ -1402,13 +1402,13 @@ These were open in section 30.5 and are in the code now (the commits are on the 
 
 ### 33.4 Still open (not built this round)
 - **Second window's copy** (section 23.2, second bullet): a second window whose save was refused still holds that post, so "Back to the list" there can drop the other window's post. Data-loss risk: needs a careful design.
-- **Set-up and Settings warning about a number in the role** (23.2, third bullet): counts the dealership name, city and ZIP as facts but not a ticked store's name; a city or store name that reads as a mileage still fails with the plain mileage reason.
+- **Set-up and Settings warning about a number in the role** (23.2, third bullet): counts the dealership name, city and ZIP as facts but not a ticked store's name; a city or store name that reads as a mileage still fails with the plain mileage reason. The store half is done in round 13 (section 34.1); the city and mileage half is open (section 34.3).
 - **Price note's steering words** (23.2, fifth bullet): "Do not go to the dealer." passes because the words are on the closed list; "incl", "see", "agent" and "signing" are refused. Needs a decision on how strict the list should be.
 - **"New tires, engine runs great."** (23.2, sixth bullet): a listed part followed by unknown state wording is read as claimed. That is a false block in the rewrite guard, not a false claim, so it is low priority.
-- **Side panel status line** (23.2, seventh bullet): when a stop mixes a Settings number with a refused price note, the line still says to fix the description; both fixes are in Settings. Planned for round 13.
-- **salesperson-4**: the next to-do item from upkeep without reopening the popup. Planned for round 13.
+- **Side panel status line** (23.2, seventh bullet): when a stop mixes a Settings number with a refused price note, the line still says to fix the description; both fixes are in Settings. Done in round 13 (section 34.1).
+- **salesperson-4**: the next to-do item from upkeep without reopening the popup. Done in round 13 (section 34.1).
 - **Branding flake** (31.3): not fixed, not explained. CI runs the branding flow on every PR; if it fails, read the message first (section 31.3).
-- **Old-name check** (23.2, fourth bullet): the old-name check still passes a name glued after the stem of a word it lists (such as "s", "p", "al" or "mate"), a regular expression's `\b` or `\s` included. Not built this round.
+- **Old-name check** (23.2, fourth bullet): the old-name check still passes a name glued after the stem of a word it lists (such as "s", "p", "al" or "mate"), a regular expression's `\b` or `\s` included. The regular-expression half is done in round 13 (section 34.1); the word-stem half is open (section 34.3).
 - **Toolbar count** (`todoCountFor` in `extension/src/rescanSchedule.js`): a waiting price item (**Price compared at the next scan**, no button) still counts on the toolbar badge. Whether it should is a decision for the owner, so it is not changed here.
 - **To do after a sync** (`viewTodo` in `extension/popup.js`; `priceItemWaits` and `settleDiff` in `extension/src/rescan.js`): when sync brings one of your listings already at a price item's price, To do shows that item as **Price compared at the next scan** (no buttons) if the listing got that price after the scan's reading (`priceItemWaits`), and otherwise as the change the scan saved, with its buttons, while My listings says **Matches the website**. The saved diff is settled only when a scan is saved. Fixing it means settling the saved diff when sync brings a listing, and the toolbar count (`todoCountFor`) must change with it, so it is parked for the owner.
 - **Live check still needed**: nothing here has been run on a real dealer website (the cloud network blocks dealer sites). The scan-timing change should be seen once on the pilot dealer's site: post a car while a rescan is running, then check My listings and To do.
@@ -1427,6 +1427,42 @@ These were open in section 30.5 and are in the code now (the commits are on the 
 - Proof 2 (at d7daa24): FINDINGS, one should-fix item. 33.4 said To do shows such an item as waiting; it waits only when the listing's price came after the scan began, and otherwise shows the change with its buttons. Fixed in 050d29b.
 - Proof 3 (at 050d29b): FINDINGS, three nits, none in the code. The 33.3 count said 2042 (fixed in 3b3bdd4). The help's To do paragraph said a waiting item reads as My listings does in every case (fixed in fb6b042). The price-to-post paragraph implied that a reading showing both prices is passed over; the code stops there (fixed in e420eda and 8cee209).
 - Proof 4 (at 8cee209): PROVED, no findings. npm test gives 2043 pass, 0 fail, and on the parent commit the new test fails at its first assertion.
+
+## 34. The round-13 round (2026-10-28, branch `claude/project-thread-ofbx1q`, based on the default branch after PR #28)
+
+### 34.1 What the round holds (CHANGELOG "Unreleased", "Round 13")
+- `7c031ce`: the status line names the Settings fix when a price-note stop comes with a number in Settings (`extension/sidepanel.js` `settingsFix`). A price-note stop on its own also gets the Settings sentence, in the checks line on the review screen too, since that line reads the same function. Tests: `test/panelFlow.test.js`, `test/rewriteTemplate.test.js`.
+- `152bb80`: the old-name check reports the name after a regular expression's escape (`test/brandName.test.js`). The word-stem half is unchanged (34.3).
+- `0bb90fe`: a number that every ticked store's name holds is no longer flagged in the role or the name (`extension/src/rewriteTemplate.js` `settingWarning`, `storeNumbers`; `extension/popup.js`; `extension/wizard.js` `storesNow`). The intersection of the ticked stores counts, never the union, so a car at a store without the number still fails the guard. Tests: `test/settingNumbers.test.js`.
+- `b74d432`: after a To do item is done, the side panel offers the next one (`extension/upkeep.js` `finish`, `openNextItem`, `upkeepHtml`; `extension/sidepanel.js` `nextUpkeepRequest`; `extension/src/rescan.js` `nextUpkeepItem`). The button only opens that listing; a price item still checks the car on the website before anything is filled. `extension/popup.js` is unchanged. Tests: `test/rescan.test.js` (including the parity with the popup's first button row), `test/upkeep.test.js`, `test/e2e/upkeep.e2e.mjs` (a second item seeded in storage).
+- `735626e`, `b7c57c9`, `fca56a5`: the review's fixes (34.5). `d22c53d`: the CHANGELOG bullet for them. `9d19c57`: the Round 13 block moved below Round 12, the order the file uses.
+
+### 34.2 Verification
+- Red first, for each item: the builder watched its new tests fail before its change. The status line's tests failed on the wording (panelFlow tests 51 and 56); the old-name spellings test failed on the three regular expression forms; the store test failed on the warning; the next-item tests failed on the missing function, the missing button and the e2e's Next step. A review lens also checked each commit's parent with `git archive` and overlaid the commit's tests: commit `7c031ce` two tests failed, `0bb90fe` all four new tests failed, `b74d432` all thirteen new tests failed.
+- `npm test` at `9d19c57`: 2062 pass, 0 fail. README line 108 says 2062.
+- Browser flows at `9d19c57`: see 34.6.
+
+### 34.3 Still open (not built this round)
+- **Fee sums in price notes** (23.2, fifth bullet, the amount half): "$1,299 + $499" reads as seven digits and is refused in a note that says "not the dealer". The proposed fix is not built, because it changes a deliberate threshold and its hosted copy (34.4). The proposal: a run is a fee sum when every mark between its amounts is "+" or "/" and one amount has a comma or cents; such a run is refused only from ten digits, a North American phone length, and other runs keep seven. Both copies change in one commit (`extension/src/rewriteTemplate.js` near the price-note reader, and `supabase/functions/_shared/guardrails.ts`), with tests through `problems()` in `test/priceNoteWords.test.js` and samples in `supabase/tests/port-check.mjs`. The hosted copy needs a redeploy of the rewrite function, which is the owner's call. The steering word list does not change (33.4).
+- **Word-stem half of the old-name check** (23.2, fourth bullet): a word-start rule for the single-letter stems (s, p, b, c) flips ten existing negatives in `test/brandName.test.js`; a rule for every stem flips sixteen. Only a dictionary of English compounds removes both sides, and the repo has none.
+- **City and mileage half of the number-in-role warning** (23.2, third bullet): a city or store name that reads as a mileage still fails the mileage check with the plain reason. The city must match Marketplace's location suggestions (`extension/src/rewriteTemplate.js` near lines 1315 to 1319), and a change to `settingNumberProblems` needs its hosted mirror (`supabase/functions/_shared/guardrails.ts` near line 1107) and a redeploy (section 30.2).
+- **First 23.2 bullet** (a scan that finished after a post): believed covered by round 12's start-time dating, not re-checked in round 13. Its toolbar part stays parked (33.4).
+- Unchanged from 33.4: the second window's copy, the price-note steering words, "New tires, engine runs great.", the branding flake, the toolbar count, the To do after a sync item, and the live check.
+
+### 34.4 Owner decisions this round parks
+- **Fee sums in price notes** (34.3, first item): the threshold and the money test. The CHANGELOG records the current refusal as a known limit, and the proposal changes that limit, so it needs the owner's word before it ships.
+- **The word-stem half of the old-name check** (34.3, second item).
+- **The city and mileage half of the number-in-role warning** (34.3, third item), which also needs a redeploy of the rewrite function.
+
+### 34.5 Proofs of the round
+- Proof 1, two read-only review lenses (correctness and tests; project rules) at `b74d432`, the last builder commit: FINDINGS, three items, none blocking. (1) The upkeep e2e looked for the Open next To do item button as soon as the done banner showed, but the button is drawn after a storage read: fixed in `b7c57c9` (it waits for the button). (2) The price-note-amount reason's ending had no test, and the contract test's comment said every price-note reason ended in the Settings words: fixed in `735626e`. The status line already gave the Settings fix for that stop, so that commit pins existing behaviour rather than fixing a bug. (3) Three comments on the Settings fix did not mention price-note stops: fixed in `fca56a5`.
+- Proof 2 (a fresh read-only proof of the whole round, after the fixes and the CHANGELOG move): pending, see 34.7.
+
+### 34.6 Browser flows at `9d19c57`
+- Pending: the flows run locally with `LOTSYNC_E2E_CHANNEL=chromium`: upkeep, panel, popup, wizard, standard, post, queue, platforms, branding, manager.
+
+### 34.7 Proof 2 and the merge
+- Pending.
 
 ## 11. Quick reference
 ```
