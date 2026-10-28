@@ -10,6 +10,11 @@ The owner's first message will be something like "read HANDOFF.md and continue" 
 
 Written 2026-10-10 after Brandon's merge round. Every PR state below was read from GitHub that day. Re-check with `mcp__github__pull_request_read` before you act, because merges change it. Read this section, then `CLAUDE.md`, then `CHANGELOG.md` "Unreleased". Sections 0 to 24 below are history and reference.
 
+### 0. Latest state (2026-10-28, read this first)
+- PR #27 (round 11) is merged as `b97b08c`. Brandon's 2026-10-28 instruction: keep working until the session limit, re-check your own work, and approve what would otherwise need his approval, while never doing the things in section A (no spending, no paid services, no wider permissions, no outward-facing actions, no real Facebook accounts, no detection tricks, no dealer-specific values, no secrets in git). Park those in this file.
+- Round 12 is on `claude/project-thread-ofbx1q`, based on the default branch. Section 33 says what it holds, what was already built, and what is still open.
+- The default branch's unit suite was red from 22 October (a date-bound test); round 12 fixes it.
+
 ### A. The rules that never change
 - A person publishes every post. The extension never clicks Publish, Update, Delete or Mark as sold.
 - Merge a pull request only when Brandon asks for that merge in a thread. Use a merge commit, pass `expectedHeadSha`, and check every CI job on the head first. Never rebase or force-push the default branch. Do not close a PR unless Brandon asks.
@@ -1370,6 +1375,50 @@ The items came from an audit of the whole project. Each finding was checked agai
 
 - Everything in 31.4 stands: the production Supabase drift decision (section C), whether the Supabase GitHub integration applies migrations on merge (D.1), the redeploy of the `rewrite` function for the hosted guard's parity, and the owner decisions in 30.4.
 - Merge order when he asks: #16 to #22 are merged; then this round's PR, based on the default branch.
+
+## 33. The round-12 round (2026-10-28, branch `claude/project-thread-ofbx1q`, based on the default branch after PR #27)
+
+### 33.1 What the round holds (CHANGELOG "Unreleased", "Round 12")
+- `a7409db`: the to-do sync test's dates were fixed September dates that aged out of the thirty-day window on the real clock; the default branch's unit suite was red from 22 October. The test now dates its flags relative to now.
+- `504a04d`: the set-up keeps the keyboard through Next, Back and Read (`extension/sidepanel.js` `render`, `refocusWizard`). Five tests failed on the old code and the Back test passes both ways (`test/wizardKeyboard.test.js`); two focus checks were added to `test/e2e/wizard.e2e.mjs`.
+- `63f27b1` and `308855f`: a scan's cars count from when the scan began. The adapters stamp `fetchedAt` at the end of a scan, so a scan that began before a listing's post, draft save or price update read as taken after it, and showed the older price as a change. Now `scanRunner.js` records `startedAt` before the adapter runs, `makeSnapshot` stores it, and `scanCar`, `scanBefore` (so `priceItemWaits` on To do), `pageReadAt` (the carried-over path) and the side panel's own calls (`snapshotStartedAt`, `snapshotCarriedReadAt`, both loaded and updated in `adoptChanges`) all use it. `readIsOld` in the side panel keeps the finish time on purpose: a scan that finished after the panel's read and contradicts it must trigger a re-read, and a start time would consider fewer scans.
+- `0c4e01c`: the help's draft-pill sentence and its docs-test pins say a scan "started", not "taken", since the draft was saved.
+- `docs/help.md` line for My listings also says a scan counts from when it started.
+
+### 33.2 Already built on the branch, checked and not changed
+These were open in section 30.5 and are in the code now (the commits are on the default branch):
+- sp-02: the set-up's done step with no ready car points to the Not ready tab (`66fd624`, `extension/src/wizardSteps.js`).
+- sp-05: the disabled Rewrite and Guess buttons stay reachable while the rewrite service is off (`ffb614c`).
+- sp-07: each Copy button in "Couldn't fill" names its field (`0414e6c`).
+- sp-08: when upkeep cannot open the listing tab it shows `upkeepOpenFailed` ("Open the listing yourself..."), not the waiting banner that says to click Edit listing (`extension/upkeep.js`).
+- sp-03 was built in `504a04d` above.
+
+### 33.3 Verification
+- `npm test`: 2040 pass, 0 fail at `308855f` and at the round's last commit (the README count is updated in each commit that adds tests). `63f27b1` and `308855f` were each run in a clean worktree before they were pushed.
+- Browser flows run locally with `LOTSYNC_E2E_CHANNEL=chromium`: wizard, popup, panel, standard all passed. Post, queue, upkeep, branding, manager, demo and the rest run in CI on the round's PR.
+- The Opus proof of the round is recorded in section 33.6 when it has been run.
+
+### 33.4 Still open (not built this round)
+- **Second window's copy** (section 23.2, second bullet): a second window whose save was refused still holds that post, so "Back to the list" there can drop the other window's post. Data-loss risk: needs a careful design.
+- **Set-up and Settings warning about a number in the role** (23.2, third bullet): counts the dealership name, city and ZIP as facts but not a ticked store's name; a city or store name that reads as a mileage still fails with the plain mileage reason.
+- **Price note's steering words** (23.2, fifth bullet): "Do not go to the dealer." passes because the words are on the closed list; "incl", "see", "agent" and "signing" are refused. Needs a decision on how strict the list should be.
+- **"New tires, engine runs great."** (23.2, last bullets): a listed part followed by unknown state wording is read as claimed. That is a false block in the rewrite guard, not a false claim, so it is low priority.
+- **Side panel status line** (23.2, sixth bullet): when a stop mixes a Settings number with a refused price note, the line still says to fix the description; both fixes are in Settings. Planned for round 13.
+- **salesperson-4**: the next to-do item from upkeep without reopening the popup. Planned for round 13.
+- **Branding flake** (31.3): not fixed, not explained. CI runs the branding flow on every PR; if it fails, read the message first (section 31.3).
+- **Live check still needed**: nothing here has been run on a real dealer website (the cloud network blocks dealer sites). The scan-timing change should be seen once on the pilot dealer's site: post a car while a rescan is running, then check My listings and To do.
+
+### 33.5 Owner decisions this round parks (not changed, and not Brandon-approval items)
+- `security-2`: refusing action-named controls at the click conflicts with `test/posting.test.js`, which forbids action words anywhere in the form map. Changing that guard is a safety-policy change, so it stays parked (section 23.2 has the detail).
+- `security-6`: the photo-server grant check breaks the post flow's mock server on `http://127.0.0.1`. A loopback exception reopens a local fetch path; a fixture change needs an https or granted mock. Parked.
+- `I-10`: Dealer Inspire's mileage unit. Changing it would hold back every Dealer Inspire car, including the pilot's. Parked.
+- `I-23`: last sync per salesperson on the manager page. Needs migration 0017 or later and production sign-off. Parked.
+- `I-49`: legal text hash, after the attorney's review. Parked.
+- `owner-3`: a background read against the tab's read. Needs a live dealer site. Parked.
+- The Supabase production drift (section C) and the supabase-js pin (section G) are unchanged.
+
+### 33.6 Opus proof
+- Pending. The round's PR will be proofed by an Opus reviewer before it merges; the findings and their fixes are recorded here before the merge.
 
 ## 11. Quick reference
 ```
