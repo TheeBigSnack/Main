@@ -692,6 +692,25 @@ test('a To do price item from a scan that began after the listing got its price 
   assert.equal(rescan.priceItemWaits(item, synced, { ...d, startedAt: '2026-10-03T09:01:00.000Z', takenAt: '2026-10-03T09:02:00.000Z' }), false, 'began a minute after the update: the item stands');
 });
 
+// A car the scan carried over unread is dated as scanCar dates it: by the time
+// its details were last read (diff.carriedReadAt, scanRunner.js), not by when
+// the scan began. A read from before the listing got its price waits, though
+// the scan began after the price; a car with no read time waits, as My listings
+// says for it; a read after the price stands.
+test('a To do price item for a car carried over unread is dated from when its details were read, not when the scan began', () => {
+  const at = (day) => `2026-10-0${day}T09:00:00.000Z`;
+  const s = repriced(snapshot(LOT, MY_STORE, at(2)), VIN.ram, 27163, 26673);
+  const listed = { name: 'Ram', price: 27663, basis: 'website', postedAt: at(1) };
+  const d = { ...diffScans(s, s, { posted: { [VIN.ram]: listed }, confirm: confirmed(), basis: 'website' }), takenAt: at(2) };
+  const [item] = d.priceUpdates;
+  const synced = { ...listed, price: 26663, updatedAt: at(3) }; // updated at 09:00 on the 3rd
+  const began = { startedAt: '2026-10-03T09:01:00.000Z', takenAt: '2026-10-03T09:02:00.000Z' }; // the scan began after the update
+  assert.equal(rescan.priceItemWaits(item, synced, { ...d, ...began, carriedReadAt: { [VIN.ram]: at(2) } }), true, 'read on the 2nd, before the update: waits');
+  assert.equal(rescan.priceItemWaits(item, synced, { ...d, ...began, carriedReadAt: { [VIN.ram]: null } }), true, 'no read time: not priced, so it waits');
+  assert.equal(rescan.priceItemWaits(item, synced, { ...d, ...began, carriedReadAt: { [VIN.ram]: '2026-10-03T09:30:00.000Z' } }), false, 'read after the update: the item stands');
+  assert.equal(rescan.priceItemWaits(item, synced, { ...d, ...began, carriedReadAt: { OTHER: at(2) } }), false, 'a car this scan read is dated from when it began, as before');
+});
+
 // Updated on a listing that carries no basis records the basis its new price
 // was worked out on (My listings: listingLine's basis; To do: the one
 // diffScans names on a price item for your listing), so a switch of Price to
@@ -1741,13 +1760,26 @@ test('a car carried over unread keeps the time its details were read, so a listi
   const day2 = await rescanOf(thinListSite(cars, { [bad.path]: httpError(500) }), day1.snapshot);
   assert.deepEqual(day2.res.unread, [bad.vin]);
   assert.equal(day2.snapshot.carriedReadAt[bad.vin], day1.res.startedAt, 'the carried car keeps the time its page was last read: when that scan began');
+  assert.deepEqual(day2.diff.carriedReadAt, day2.snapshot.carriedReadAt, 'the scan\'s diff carries the same read times, for its To do items');
   // the listing is priced after the car's last reading; the scan that carries the car is later still
   const entry = { updatedAt: new Date(Date.parse(day1.res.fetchedAt) + 1).toISOString() };
   assert.equal(rescan.scanCar(entry, day2.snapshot, bad.vin), null, 'a reading from before the price does not price the car');
   assert.notEqual(rescan.scanCar(entry, day2.snapshot, cars[0].vin), null, 'a car read after the price is priced');
+  assert.equal(rescan.priceItemWaits({ vin: bad.vin, yours: true }, entry, day2.diff), true, 'its To do price item waits for the next scan too, from the same reading');
   await pause();
   const day3 = await rescanOf(thinListSite(cars), day2.snapshot);
   assert.equal(rescan.scanCar(entry, day3.snapshot, bad.vin), day3.snapshot.vehicles[bad.vin], 'read again after the price: priced');
+});
+
+// performScan builds a saved diff in two places (scanWithSearch's, and the one
+// it makes when Settings are read again after the scan). Each one carries the
+// read times of the cars carried over unread, so a To do price item for such a
+// car is dated as scanCar dates it. performScan needs a tab, so this reads the
+// two places in scanRunner.js.
+test('both places scanRunner.js builds a saved diff carry the read times of the cars carried over unread', () => {
+  const src = readFileSync(new URL('../extension/src/scanRunner.js', import.meta.url), 'utf8');
+  const carries = src.match(/if \((\w+)\.carriedReadAt\) diff\.carriedReadAt = \1\.carriedReadAt;/g) || [];
+  assert.equal(carries.length, 2, 'once in scanWithSearch, once in performScan');
 });
 
 test('The first held-back read says it is held back, that the saved list stays, and when the new list is offered', () => {

@@ -320,16 +320,24 @@ export function listingLine(entry, snap, vin, basis = 'website') {
 
 // Whether a price item on To do for one of your listings (`item`: a
 // diffScans item, or the one Mark posted adds for a draft, drafts.js
-// withPriceUpdate) was worked out on a scan taken before the listing, as it is
-// stored now (`entry`), got the price it carries: updated or posted since, on
-// another computer and brought by sync, which settles no to-do list (settleDiff
-// runs when a scan is saved). The scan counts from when it began (the diff's
-// `startedAt`, else `takenAt`). The item's prices are then the listing's and the
-// website's as they were before that, so its price waits for the next scan, as
-// My listings says (listingLine), and nothing is offered to record or fill. The
-// same rule as scanCar (scanBefore): false when either time is unknown.
+// withPriceUpdate) was worked out on a reading taken before the listing, as it
+// is stored now (`entry`), got the price it carries: updated or posted since,
+// on another computer and brought by sync, which settles no to-do list
+// (settleDiff runs when a scan is saved). A car the scan read counts from when
+// the scan began (the diff's `startedAt`, else `takenAt`). A car it carried over
+// unread counts from when its details were last read (the diff's
+// `carriedReadAt`), as scanCar dates it, and one with no read time waits. The
+// item's prices are then the listing's and the website's as they were before
+// that, so its price waits for the next scan, as My listings says (listingLine),
+// and nothing is offered to record or fill. False when the listing carries no
+// time, or when a car the scan read has no time for it.
 export function priceItemWaits(item, entry, diff) {
-  return Boolean(item && item.yours && entry && typeof entry === 'object' && scanBefore(entry, diff));
+  if (!item || !item.yours || !entry || typeof entry !== 'object') return false;
+  const carried = diff && typeof diff === 'object' && diff.carriedReadAt && typeof diff.carriedReadAt === 'object' && Object.prototype.hasOwnProperty.call(diff.carriedReadAt, item.vin) ? diff.carriedReadAt[item.vin] : undefined;
+  if (carried === undefined) return scanBefore(entry, diff);
+  const priced = pricedAt(entry);
+  const read = msOf(carried);
+  return priced !== null && (read === null || read < priced);
 }
 
 function whatGotReady(before, now) {

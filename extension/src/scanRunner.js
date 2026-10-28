@@ -83,6 +83,8 @@ export async function scanWithSearch({ adapter, search, site, settings, prevSnap
   if (!res.complete) diff.warnings.unshift(incompleteWarning(res));
   diff.takenAt = res.fetchedAt;
   diff.startedAt = res.startedAt;
+  // a car carried over unread is dated by when its details were read, so its To do price item is too (priceItemWaits)
+  if (snapshot.carriedReadAt) diff.carriedReadAt = snapshot.carriedReadAt;
   diff.requests = res.requests;
   // Text that repeats across the lot (disclaimers, legal lines) is kept so the
   // description writer can strip it. A scan that read every car's
@@ -278,6 +280,7 @@ export async function performScan({ tabId, origin, settings = null, settingsFrom
     const diff = diffScans(snapshot, snap, { posted, confirm: out.res.confirm, basis: s.basis });
     diff.takenAt = out.res.fetchedAt;
     diff.startedAt = out.res.startedAt;
+    if (snap.carriedReadAt) diff.carriedReadAt = snap.carriedReadAt;
     diff.requests = out.res.requests;
     if (!out.res.complete) diff.warnings.unshift(out.diff.warnings[0]);
     result = { ...out, snapshot: snap, diff };
