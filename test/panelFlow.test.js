@@ -3897,9 +3897,9 @@ test('the checking view has a Back button for a single post, and none for a queu
 // Open next To do item (sidepanel.js nextUpkeepRequest): the request for the next item is built from the
 // lists as they are stored. It carries what that item needs to open its listing and fill a price: the kind;
 // a take-down's reason, and an empty one for a price item; a price item's new price; the price its listing
-// was posted at; the listing's link; and its name, the posted entry's first. nextUpkeepItem (rescan.js,
-// pinned in rescan.test.js) picks the item. Compiled as written, with the real nextUpkeepItem and storage keys,
-// and a stub for the one storage read.
+// has now (the posted entry's price); the listing's link; and its name, the posted entry's first. nextUpkeepItem
+// (rescan.js, pinned in rescan.test.js) picks the item. Compiled as written, with the real nextUpkeepItem and
+// storage keys, and a stub for the one storage read.
 test('the Open next To do item request carries the fields of the item it opens, and none when storage cannot be read', async () => {
   const ORIGIN = 'https://www.example-motors.test';
   const k = siteKeys(ORIGIN);
@@ -3926,4 +3926,33 @@ test('the Open next To do item request carries the fields of the item it opens, 
   assert.deepEqual(fields(price), { kind: 'price', vin: 'PRC', why: '', price: 19500, listedPrice: 21000, listingUrl: 'https://www.facebook.com/marketplace/item/222/', name: 'Car P' });
   assert.deepEqual([price.origin, price.dealerTabId, price.windowId], [ORIGIN, 4, 2]);
   assert.equal(await ask(async () => { throw new Error('storage is unavailable'); }), null, 'a failed read gives no request');
+});
+
+test('the Open next To do item request follows the To do order and the pilot flags', async () => {
+  const ORIGIN = 'https://www.example-motors.test';
+  const k = siteKeys(ORIGIN);
+  const stored = {
+    [k.diff]: {
+      takenAt: '2026-10-28T09:00:00.000Z',
+      takeDown: [
+        { vin: 'TKA', name: 'Car A', yours: true, why: 'not-pre-owned' },
+        { vin: 'TKB', name: 'Car B', yours: true, why: 'not-pre-owned' },
+      ],
+      priceUpdates: [],
+    },
+    [k.posted]: {
+      TKA: { price: 18000, postedAt: '2026-10-20T10:00:00.000Z', name: 'Car A', listingUrl: 'https://www.facebook.com/marketplace/item/333/' },
+      TKB: { price: 17000, postedAt: '2026-10-20T10:00:00.000Z', name: 'Car B', listingUrl: 'https://www.facebook.com/marketplace/item/444/' },
+    },
+    [k.pilot]: {
+      flags: [
+        { vin: 'TKA', kind: 'takeDown', flaggedAt: '2026-10-25T09:00:00.000Z' },
+        { vin: 'TKB', kind: 'takeDown', flaggedAt: '2026-10-01T09:00:00.000Z' },
+      ],
+    },
+  };
+  const up = { origin: ORIGIN, vin: 'SOLD' }; // the car just finished is on neither list
+  const nextVin = (settings) => compile('nextUpkeepRequest', { up, siteKeys, nextUpkeepItem, state: { settings, dealerTabId: 4 }, panelWindowId: 2, chrome: { storage: { local: { get: async (keys) => Object.fromEntries(keys.map((key) => [key, stored[key]])) } } } })().then((r) => r && r.vin);
+  assert.equal(await nextVin({ todoOrder: 'listed' }), 'TKA', 'the scan\'s own order gives the first row');
+  assert.equal(await nextVin({ todoOrder: 'oldest' }), 'TKB', 'oldest first gives the row flagged first');
 });
