@@ -2698,10 +2698,10 @@ async function upkeepPriceNow(req) {
 // finished is done (upkeep.js, Open next To do item). The lists are read from
 // storage as they are now, since finishing the item has just written the posted
 // list, its pilot flag and the diff. nextUpkeepItem (rescan.js) picks the
-// first row the To do tab draws a button for, from the top in the tab's
-// order, passing over the car just finished, and the request is built the
-// way the popup builds one. Null when none is left, and when storage can't
-// be read (the done banner then shows alone).
+// first take-down or price row the To do tab draws a button for, from the top
+// in the tab's order, passing over the car just finished, and the request is
+// built the way the popup builds one. Null when none is left, and when storage
+// can't be read (the done banner then shows alone).
 async function nextUpkeepRequest() {
   const origin = up.origin;
   try {
