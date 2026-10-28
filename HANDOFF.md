@@ -1439,7 +1439,7 @@ These were open in section 30.5 and are in the code now (the commits are on the 
 
 ### 34.2 Verification
 - Red first, for each item: the builder watched its new tests fail before its change. The status line's tests failed on the wording (panelFlow tests 51 and 56); the old-name spellings test failed on the three regular expression forms; the store test failed on the warning; the next-item tests failed on the missing function, the missing button and the e2e's Next step. A review lens also checked each commit's parent with `git archive` and overlaid the commit's tests: commit `7c031ce` two tests failed, `0bb90fe` all four new tests failed, `b74d432` all thirteen new tests failed.
-- `npm test` at `9d19c57`: 2062 pass, 0 fail. README line 108 says 2062.
+- `npm test` at `9d19c57`: 2062 pass, 0 fail. After the fix commits, where `9014baf` adds one test, `4702a84` (subject 'Test To do order and pilot flags of the Open next To do item request') adds one more, and `162a672` adds assertions only, `npm test` gives 2064 pass, 0 fail, and README line 109 says 2064.
 - Browser flows at `9d19c57`: see 34.6.
 
 ### 34.3 Still open (not built this round)
@@ -1458,12 +1458,13 @@ These were open in section 30.5 and are in the code now (the commits are on the 
 ### 34.5 Proofs of the round
 - Proof 1, two read-only review lenses (correctness and tests; project rules) at `b74d432`, the last builder commit: FINDINGS, three items, none blocking. (1) The upkeep e2e looked for the Open next To do item button as soon as the done banner showed, but the button is drawn after a storage read: fixed in `b7c57c9` (it waits for the button). (2) The price-note-amount reason's ending had no test, and the contract test's comment said every price-note reason ended in the Settings words: fixed in `735626e`. The status line already gave the Settings fix for that stop, so that commit pins existing behaviour rather than fixing a bug. (3) Three comments on the Settings fix did not mention price-note stops: fixed in `fca56a5`.
 - Proof 2, two read-only review lenses on the whole round at `0073be1`: FINDINGS, five items, none blocking. The side panel's next-item request had no test of its fields; a price-note stop beside a description stop had no test of the status line's fix; README's tester copy did not mention the store rule or the button; the address step's help sentence did not mention the store rule, and the Settings help sentence did not say the warning follows a ticked or unticked store; HANDOFF section 0 still described round 12. The fixes are the fix commits after `0073be1` (see `git log`).
+- Proof 2b, two read-only review lenses (tests; docs) on the fix commits `71eba48` to `6675311`: FINDINGS, six items, five should and one nit. Neither lens found a defect in the code. (1) The next-item request test did not cover the To do order or the pilot flags: fixed in `4702a84`. (2) The comment above that test named the wrong price for listedPrice (a nit): fixed in `4702a84`. (3) The popup's request for an item, its reason and listed price, had no pin: fixed in `162a672`. (4) The address step's help said Back leads to the You step, which is wrong when the account step is shown: fixed in the commit that records this proof. (5) HANDOFF 34.2 gave the README count as 2062, and 34.7 still said proof 2 and pending: fixed in the same commit.
 
 ### 34.6 Browser flows at `9d19c57`
 - All ten browser flows passed at `9d19c57` on the `chromium` channel (`LOTSYNC_E2E_CHANNEL=chromium`, which every flow uses when the variable is unset): upkeep, panel, popup, wizard, standard, post, queue, platforms, branding and manager.
 
-### 34.7 Proof 2 and the merge
-- Pending.
+### 34.7 Proof 3 and the merge
+- Pending: proof 3, a read-only proof of the fix commits after `6675311`, through the commit that records this proof, then the PR, its CI and the merge. The owner's standing direction of 2026-10-28 lets the thread merge its own proofed PR once CI is green.
 
 ## 11. Quick reference
 ```
