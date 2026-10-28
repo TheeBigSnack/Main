@@ -3935,8 +3935,8 @@ test('the Open next To do item request follows the To do order and the pilot fla
     [k.diff]: {
       takenAt: '2026-10-28T09:00:00.000Z',
       takeDown: [
-        { vin: 'TKA', name: 'Car A', yours: true, why: 'not-pre-owned' },
-        { vin: 'TKB', name: 'Car B', yours: true, why: 'not-pre-owned' },
+        { vin: 'TKA', name: 'Car A', yours: true, why: 'gone' },
+        { vin: 'TKB', name: 'Car B', yours: true, why: 'gone' },
       ],
       priceUpdates: [],
     },
