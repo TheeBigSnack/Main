@@ -154,6 +154,7 @@ test('a rescan records the price basis the last saved scan shows for a listing w
   // the last saved scan, taken on Jan 2nd, showed a second price $500 below each car's main price
   const last = structuredClone(day1.snapshot);
   last.takenAt = '2020-01-02T12:00:00.000Z';
+  last.startedAt = last.takenAt;
   for (const car of [kept, cut]) last.vehicles[car.vin].priceBeforeFees = car.price - 500;
   const posted = {
     // posted at the main price before that scan
@@ -197,6 +198,7 @@ test('a rescan held back as a website hiccup records no price basis, even one th
   // the last saved scan, taken after the post, showed a second price $500 below the car's main price
   const last = structuredClone(full.snapshot);
   last.takenAt = '2020-01-02T12:00:00.000Z';
+  last.startedAt = last.takenAt;
   last.vehicles[car.vin].priceBeforeFees = car.price - 500;
   const posted = { [car.vin]: { name: 'Posted car', price: car.price - 500, postedAt: '2020-01-01T12:00:00.000Z' } }; // synced with no basis
   Object.assign(store, {

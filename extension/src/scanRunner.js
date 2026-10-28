@@ -65,7 +65,9 @@ export async function scanWithSearch({ adapter, search, site, settings, prevSnap
   // only what may have changed. An adapter that needs none of it ignores it.
   const confirmUrls = { ...((prevSnapshot && prevSnapshot.missingPages) || {}) };
   for (const [vin, entry] of Object.entries(last)) if (entry && typeof entry.url === 'string' && entry.url) confirmUrls[vin] = entry.url;
+  const startedAt = new Date().toISOString();
   const res = await adapter.scan(search, { ...(options || {}), confirmVins, confirmUrls, lastSeen: last, postedVins: Object.keys(posted || {}) });
+  res.startedAt = startedAt;
   if (!res.ok) return { ok: false, message: res.message, res };
   const vehicles = res.records.map(adapter.normalize).filter(Boolean);
   // The adapter's normalise sees one record, so its store label is a guess
@@ -151,7 +153,7 @@ export function confirmOrder(vins, unchecked) {
 // check left unchecked, with why (unchecked), so the next scan checks them
 // last (confirmOrder).
 function snapshotOf({ site, res, vehicles, assessments, carry }) {
-  const snapshot = makeSnapshot({ site, takenAt: res.fetchedAt, complete: res.complete, vehicles, assessments, previous: carry.previous || null });
+  const snapshot = makeSnapshot({ site, takenAt: res.fetchedAt, startedAt: res.startedAt, complete: res.complete, vehicles, assessments, previous: carry.previous || null });
   const readNow = new Set(Array.isArray(res.pagesRead) ? res.pagesRead : []);
   for (const [vin, entry] of Object.entries(snapshot.vehicles)) {
     const before = carry.last[vin] && carry.last[vin].pageReadAt;

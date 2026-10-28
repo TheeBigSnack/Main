@@ -124,9 +124,11 @@ export function scanCar(entry, snap, vin) {
   if (priced === null) return car;
   // A car carried over from an earlier scan (its page not read this time) is
   // as of the time its details were read (carriedReadAt, scanRunner.js); a car
-  // the scan read is as of the scan. A carried car with no read time is not priced.
+  // the scan read is as of when the scan began (startedAt, so a scan that began
+  // before the listing got its price is not trusted for it, though it finished
+  // after), else as of its finish. A carried car with no read time is not priced.
   const carried = snap.carriedReadAt && typeof snap.carriedReadAt === 'object' && Object.prototype.hasOwnProperty.call(snap.carriedReadAt, vin) ? snap.carriedReadAt[vin] : undefined;
-  const taken = carried !== undefined ? msOf(carried) : msOf(snap.takenAt);
+  const taken = carried !== undefined ? msOf(carried) : (msOf(snap.startedAt) ?? msOf(snap.takenAt));
   return taken !== null && taken >= priced ? car : null;
 }
 
@@ -241,12 +243,14 @@ export function firstSeenAt(previous, vin, takenAt) {
  *   previous  the last saved snapshot (null on a first scan): each car's
  *             firstSeenAt comes over from it (firstSeenAt above)
  */
-export function makeSnapshot({ site, takenAt, complete, vehicles, assessments, previous = null }) {
+export function makeSnapshot({ site, takenAt, startedAt, complete, vehicles, assessments, previous = null }) {
   const entries = {};
   vehicles.forEach((v, i) => {
     entries[v.vin] = { ...snapshotEntry(v, assessments[i]), firstSeenAt: firstSeenAt(previous, v.vin, takenAt) };
   });
-  return { version: 1, site, takenAt, complete: complete !== false, vehicles: entries };
+  const snapshot = { version: 1, site, takenAt, complete: complete !== false, vehicles: entries };
+  if (msOf(startedAt) !== null) snapshot.startedAt = startedAt;
+  return snapshot;
 }
 
 function isPending(e) {

@@ -667,6 +667,7 @@ async function lastScanOf(ram, settings, takenAt, price, lower) {
   assert.equal(first.status(), '', 'the scan went through');
   const last = structuredClone(first.local[k.snapshot]);
   last.takenAt = takenAt;
+  last.startedAt = takenAt; // a scan taken then began then: the car is read as of when the scan began (rescan.js scanCar)
   Object.assign(last.vehicles[ram.vin], { price, priceBeforeFees: lower });
   return last;
 }
@@ -790,6 +791,7 @@ test('a draft filled after the last scan is not compared with that scan\'s older
   // that scan, two days ago, before the website's $500 cut
   const last = structuredClone(first.local[k.snapshot]);
   last.takenAt = new Date(Date.now() - 2 * 86400e3).toISOString();
+  last.startedAt = last.takenAt;
   Object.assign(last.vehicles[ram.vin], { price: 27663, priceBeforeFees: 27173 });
   const savedAt = new Date(Date.now() - 3600e3).toISOString(); // filled an hour ago, at the website's price then
   const drafts = { [ram.vin]: { name: ram.name, savedAt, price: 27163, basis: 'website' } };
@@ -895,6 +897,7 @@ test('To do and My listings offer no Updated at the last scan\'s price for a lis
   const last = structuredClone(first.local[k.snapshot]);
   const diff = structuredClone(first.local[k.diff]);
   last.takenAt = diff.takenAt = new Date(Date.now() - 2 * 3600e3).toISOString();
+  last.startedAt = last.takenAt;
   const synced = { [ram.vin]: { ...posted[ram.vin], price: 26663, updatedAt: new Date(Date.now() - 3600e3).toISOString() } };
   const p = await loadPopup({ local: { [k.settings]: settings, [k.snapshot]: last, [k.diff]: diff, [k.posted]: structuredClone(synced) } });
   const todo = p.panel();
