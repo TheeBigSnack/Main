@@ -38,7 +38,7 @@ import {
   automaticTaxOn, portalSessionParams, allowedReturnUrl, parseAllowedOrigins, formEncode, applyStripeEvent, verifyStripeSignature,
   keyMode, NO_BILLING_ACCOUNT_MESSAGE,
 } from '../_shared/billing.mjs';
-import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
+import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.117.2';
 
 const config = {
   secretKey: env('STRIPE_SECRET_KEY'),

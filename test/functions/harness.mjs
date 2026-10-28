@@ -1,7 +1,7 @@
 // What the Edge Function tests (test/fn-*.test.js) run the real handlers
 // with, under Node and with no network:
 //
-//   - the module hook (loader.mjs) that points npm:@supabase/supabase-js@2
+//   - the module hook (loader.mjs) that points npm:@supabase/supabase-js@2.117.2
 //     at fake-supabase.mjs;
 //   - a global Deno with env.get (from a map each test sets) and serve,
 //     which keeps the handler the function passes it; loadFunction imports
