@@ -724,9 +724,10 @@ test('a To do price item for a car carried over unread is dated from when its de
 });
 
 // The next To do item after one is done (upkeep.js, Open next To do item) is
-// the first row the To do tab draws a button for, in the tab's order, after the
-// car just finished (popup.js viewTodo): take-downs first, a button only on your
-// own items, and a price update only when priceItemWaits says it does not wait.
+// the first take-down or price row the To do tab draws a button for, in the
+// tab's order, after the car just finished (popup.js viewTodo): take-downs
+// first, a button only on your own items, and a price update only when
+// priceItemWaits says it does not wait.
 const at3 = (day) => `2026-10-0${day}T09:00:00.000Z`;
 const takeRow = (vin, extra = {}) => ({ vin, name: `Car ${vin}`, stock: vin, yours: true, why: 'gone', text: 'Gone from the website (sold or removed)', lastPrice: 20000, ...extra });
 const priceRow = (vin, extra = {}) => ({ vin, name: `Car ${vin}`, yours: true, from: 20000, to: 19000, change: -1000, ...extra });
