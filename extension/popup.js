@@ -933,15 +933,17 @@ const field = (label, name, value, attrs = 'type="text"') =>
 // steps say the same (wizard.js).
 // A role or a name whose numbers the dealership's name, city and ZIP all hold
 // passes (the number check reads them as facts), so their warnings follow
-// those fields too: `dealer` is the dealership as the form holds it now.
+// those fields too: `dealer` is the dealership as the form holds it now. So
+// does one whose numbers every ticked store's name holds: `stores` is the
+// ticked store names (the store boxes as the form holds them).
 const WARNED_FIELDS = Object.freeze({ salespersonName: 'name', salespersonTitle: 'role', dealerName: 'dealer' });
 const DEALER_FIELDS = Object.freeze({ dealerName: 'name', dealerCity: 'city', dealerZip: 'zip' });
-function settingWarningHtml(name, value, dealer) {
-  const text = settingNumberWarning(WARNED_FIELDS[name], value, dealer);
+function settingWarningHtml(name, value, dealer, stores) {
+  const text = settingNumberWarning(WARNED_FIELDS[name], value, dealer, stores);
   return text ? `<div class="banner warn">${esc(text)}</div>` : '';
 }
-const settingNotice = (name, value, dealer) => settingNumberNotice(WARNED_FIELDS[name], value, dealer);
-const settingWarning = (name, value, dealer) => `<div id="${name}Warn">${settingWarningHtml(name, value, dealer)}</div><div id="${name}Say" class="sr" aria-live="polite">${esc(settingNotice(name, value, dealer))}</div>`;
+const settingNotice = (name, value, dealer, stores) => settingNumberNotice(WARNED_FIELDS[name], value, dealer, stores);
+const settingWarning = (name, value, dealer, stores) => `<div id="${name}Warn">${settingWarningHtml(name, value, dealer, stores)}</div><div id="${name}Say" class="sr" aria-live="polite">${esc(settingNotice(name, value, dealer, stores))}</div>`;
 // A price note that says "not the dealer" may say only where the fees go and
 // what the price includes (src/rewriteTemplate.js priceNoteWarning): Settings
 // says so under the note, read with the dealership's name and city as the
@@ -965,11 +967,13 @@ function refreshSettingWarnings(target) {
   const box = (name) => (target.form && target.form.elements && typeof target.form.elements.namedItem === 'function' ? target.form.elements.namedItem(name) : null);
   const now = (name) => (name === target.name ? target.value : (box(name) || { value: savedValues[name] }).value);
   const dealer = Object.fromEntries(Object.entries(DEALER_FIELDS).map(([name, key]) => [key, now(name)]));
+  // the store boxes share one name, so the ticked ones are read off the page, not with namedItem
+  const stores = [...document.querySelectorAll('input[name="store"]:checked')].map((b) => b.value);
   for (const name of Object.keys(WARNED_FIELDS)) {
     const shown = $(`${name}Warn`);
-    if (shown) shown.innerHTML = settingWarningHtml(name, now(name), dealer);
+    if (shown) shown.innerHTML = settingWarningHtml(name, now(name), dealer, stores);
     const say = $(`${name}Say`);
-    const notice = settingNotice(name, now(name), dealer);
+    const notice = settingNotice(name, now(name), dealer, stores);
     if (say && say.textContent !== notice) say.textContent = notice;
   }
   const noteShown = $('priceNoteWarn');
@@ -1087,6 +1091,8 @@ function viewSettings() {
         .map((l) => `<label><input type="checkbox" name="store" value="${esc(l)}" ${s.myStores.includes(l) ? 'checked' : ''} /> <span>${esc(l)}</span></label>`)
         .join('')
     : '<p class="hint">Scan once to see the stores.</p>';
+  // the store boxes as drawn: the ticked ones. A saved store that no box shows is not ticked here, and a Save with the boxes drawn drops it
+  const ticked = locations.filter((l) => s.myStores.includes(l));
   const feeNote = example
     ? `<p class="hint">On this website the main price is usually ${money(fee.gap)} higher than the lower second price it shows (often the doc fee, but only your store can say). Posting the website's main price keeps Marketplace and the website matching.</p>`
     : '';
@@ -1094,9 +1100,9 @@ function viewSettings() {
     ${versionHtml()}
     <fieldset><legend>You</legend>
       ${field('Your name', 'salespersonName', s.salesperson.name, 'type="text" placeholder="Your first name" aria-describedby="salespersonNameWarn"')}
-      ${settingWarning('salespersonName', s.salesperson.name, s.dealer)}
+      ${settingWarning('salespersonName', s.salesperson.name, s.dealer, ticked)}
       ${field('Your role', 'salespersonTitle', s.salesperson.title, 'type="text" aria-describedby="salespersonTitleWarn"')}
-      ${settingWarning('salespersonTitle', s.salesperson.title, s.dealer)}
+      ${settingWarning('salespersonTitle', s.salesperson.title, s.dealer, ticked)}
       <p class="hint">Every description is signed "I'm [name], [role] at [dealership]". Posing as a private seller isn't allowed.</p>
       ${field('Your closing line (optional)', 'closingLine', s.salesperson.closingLine, `type="text" maxlength="300" aria-describedby="closingLineHint" placeholder="e.g. Ask for me by name when you come in."`)}
       <p class="hint" id="closingLineHint">Added after that sign-off on every description, in place of "Message me to set up a test drive or ask a question." About you, not the car: no prices or numbers (a phone number is fine), up to ${CLOSING_LINE_MAX_WORDS} words. Follows you to any computer you sign in to Chrome on.</p>
@@ -1111,7 +1117,7 @@ function viewSettings() {
     </fieldset>
     <fieldset><legend>Dealership, named on every listing</legend>
       ${field('Dealership name', 'dealerName', s.dealer.name, `type="text"${state.snapshot ? '' : ' placeholder="Filled in from the website at the first scan"'} aria-describedby="dealerNameWarn"`)}
-      ${settingWarning('dealerName', s.dealer.name, s.dealer)}
+      ${settingWarning('dealerName', s.dealer.name, s.dealer, ticked)}
       ${field('City', 'dealerCity', s.dealer.city)}
       ${field('State', 'dealerState', s.dealer.state, 'type="text" placeholder="e.g. OH" maxlength="2"')}
       ${field('ZIP', 'dealerZip', s.dealer.zip, 'type="text" placeholder="e.g. 43215" inputmode="numeric"')}
@@ -1906,6 +1912,7 @@ async function init() {
     if (ev.target.id === 'pickAll' || ev.target.classList.contains('pick')) onPickChange(ev.target);
     else if (ev.target.id === 'readySort') changeReadySort(ev.target.value);
     else if (ev.target.id === 'todoOrder') changeTodoOrder(ev.target.value);
+    else if (ev.target.name === 'store') refreshSettingWarnings(ev.target); // a store box ticked or unticked: the warnings under the role and the name follow it
   });
   // the Ready tab's search box: filters as you type, Escape clears it; in
   // Settings, the warning under the name, role, dealership name or price note follows the typing

@@ -409,6 +409,105 @@ test('no warning about the role or the name when the dealership\'s name, city or
   wiz.active = false;
 });
 
+// ---------- the ticked stores' names ----------
+// A number every ticked store's name holds is a fact, as the dealership's own
+// is: a car at a ticked store passes the check for it, since the check reads
+// the car's own store. What counts is the numbers every ticked store holds
+// (the intersection, never the union), and no ticked store changes nothing.
+// The check itself is unchanged: a car at a store without the number still fails.
+test('no warning about the role when every ticked store\'s name holds its number, and a car at a store without it still fails', () => {
+  const plain = settingNumberWarning('role', 'Team 2', DEALER);
+  assert.notEqual(plain, '', 'with no store ticked, the role warns');
+  assert.equal(settingNumberWarning('role', 'Team 2', DEALER, ['Route 2 Motors']), '', 'the one ticked store holds the 2');
+  assert.equal(settingNumberNotice('role', 'Team 2', DEALER, ['Route 2 Motors']), '');
+  assert.equal(settingNumberWarning('role', 'Team 2', DEALER, ['Route 2 Motors', 'Team 2 Sales']), '', 'two ticked stores that both hold it');
+  // one of two holds it: the warning stays as it was, word for word
+  assert.equal(settingNumberWarning('role', 'Team 2', DEALER, ['Route 2 Motors', 'Route 3 Motors']), plain, 'the intersection, not the union');
+  assert.equal(settingNumberNotice('role', 'Team 2', DEALER, ['Route 2 Motors', 'Route 3 Motors']), settingNumberNotice('role', 'Team 2', DEALER));
+  assert.equal(settingNumberWarning('role', 'Team 2', DEALER, ['Route 3 Motors']), plain, 'a ticked store without the 2');
+  for (const stores of [[], undefined]) assert.equal(settingNumberWarning('role', 'Team 2', DEALER, stores), plain, `no ticked store: ${stores}`);
+  // the check reads the car's own store: a car at the store that holds the 2 passes, one at a store without it fails
+  const at = (location) => checked(ctxFor({ vehicle: { ...CAR, location }, salesperson: { name: 'Sam', title: 'Team 2' } })).g;
+  assert.deepEqual(at('Route 2 Motors').problems, [], 'a car at the store that holds the 2');
+  assert.deepEqual(ruleProblems(at('Route 3 Motors')).map((p) => p.code), ['setting-number'], 'a car at a store without it');
+});
+
+test('set-up\'s You step reads the ticked stores too: the warning goes with a ticked store that holds the number, and returns when only one of two does', () => {
+  const role = { name: 'Sam', title: 'Team 2' };
+  const dealer = { name: 'Example Motors', city: 'Springfield', state: 'OH', zip: '43215' };
+  const plain = settingNumberWarning('role', 'Team 2', dealer);
+  wiz.active = true;
+  wiz.step = 'you';
+  wiz.settings = withDefaults({ salesperson: role, dealer, myStores: ['Route 2 Motors'] });
+  assert.equal(region(wizardHtml(), 'wizTitleWarn'), '', 'the ticked store holds the 2');
+  assert.equal(liveRegion(wizardHtml(), 'wizTitleSay'), '');
+  const elements = new Map();
+  globalThis.document = { getElementById: (id) => { if (!elements.has(id)) elements.set(id, countingElement(id)); return elements.get(id); } };
+  handleWizardInput({ id: 'wizTitle', value: 'Team 2 sales' });
+  assert.equal(text(elements.get('wizTitleWarn')), '', 'and as the role is typed');
+  wiz.settings = withDefaults({ salesperson: role, dealer, myStores: ['Route 2 Motors', 'Route 3 Motors'] });
+  assert.equal(region(wizardHtml(), 'wizTitleWarn'), plain, 'only one of the two ticked stores holds the 2');
+  wiz.settings = withDefaults({ salesperson: role, dealer, myStores: [] });
+  assert.equal(region(wizardHtml(), 'wizTitleWarn'), plain, 'no ticked store: as before');
+  wiz.active = false;
+});
+
+test('set-up\'s address step does not bring the role\'s warning up when a ticked store holds the number the typed dealership drops', () => {
+  const role = { name: 'Sam', title: 'Team 2' };
+  const chance = { name: '2nd Chance Auto', city: 'Springfield', state: 'OH', zip: '43215' };
+  const boxes = { wizDealer: { value: 'Example Motors' }, wizCity: { value: 'Springfield' }, wizState: { value: 'OH' }, wizZip: { value: '43215' } };
+  const elements = new Map();
+  globalThis.document = { getElementById: (id) => boxes[id] || (elements.has(id) ? elements.get(id) : elements.set(id, countingElement(id)).get(id)) };
+  const typed = () => { handleWizardInput({ id: 'wizDealer', value: 'Example Motors' }); return text(elements.get('wizYouWarn')); };
+  wiz.active = true;
+  wiz.step = 'address';
+  wiz.settings = withDefaults({ salesperson: role, dealer: chance, myStores: [] });
+  assert.match(typed(), /no longer have the number in your role/, 'with no ticked store the warning comes up, as before');
+  wiz.settings = withDefaults({ salesperson: role, dealer: chance, myStores: ['Route 2 Motors'] });
+  assert.equal(typed(), '', 'the ticked store holds the 2');
+  wiz.active = false;
+});
+
+test('Settings: the store boxes ticked in the form decide the warning under the role, as they change and as the role is typed', async () => {
+  const k = siteKeys(POPUP_ORIGIN);
+  // the fixture's cars, moved to two invented stores: one of them holds the role's number, the other does not
+  const scanned = await loadPopup({});
+  await scanned.scan();
+  const snapshot = structuredClone(scanned.local[k.snapshot]);
+  const cars = Object.values(snapshot.vehicles);
+  assert.ok(cars.length > 1, 'the fixture has cars to move');
+  cars.forEach((car, i) => { car.location = i % 2 ? 'Route 3 Motors' : 'Route 2 Motors'; });
+  const dealer = { name: 'Example Motors', city: 'Springfield', state: 'OH', zip: '43215' };
+  const p = await loadPopup({ local: { [k.settings]: { myStores: ['Route 2 Motors'], salesperson: { name: 'Sam', title: 'Team 2' }, dealer }, [k.snapshot]: snapshot } });
+  await p.tab('settings');
+  assert.match(p.panel(), /name="store" value="Route 2 Motors" checked/, 'the store ticked in Settings is drawn ticked');
+  assert.equal(region(p.panel(), 'salespersonTitleWarn'), '', 'the ticked store holds the 2');
+  // the store boxes share one name, so the page is read by its checked boxes, as the form holds them now
+  const boxes = [{ value: 'Route 2 Motors', checked: true }, { value: 'Route 3 Motors', checked: false }];
+  globalThis.document.querySelectorAll = (sel) => (sel === 'input[name="store"]:checked' ? boxes.filter((b) => b.checked) : []);
+  const plain = settingNumberWarning('role', 'Team 2', dealer);
+  const tick = (value, checked) => {
+    boxes.find((b) => b.value === value).checked = checked;
+    p.el('panel').listeners.change({ target: { name: 'store', value, id: '', classList: { contains: () => false } } });
+  };
+  const warned = () => unesc(p.el('salespersonTitleWarn').innerHTML.replace(/<[^>]+>/g, '')).trim();
+  tick('Route 3 Motors', true);
+  assert.equal(warned(), plain, 'two ticked, only one holds the 2: the warning comes back, word for word');
+  assert.equal(p.el('salespersonTitleSay').textContent, settingNumberNotice('role', 'Team 2', dealer));
+  tick('Route 2 Motors', false);
+  assert.equal(warned(), plain, 'only Route 3 Motors is ticked');
+  tick('Route 2 Motors', true);
+  tick('Route 3 Motors', false);
+  assert.equal(p.el('salespersonTitleWarn').innerHTML, '', 'only Route 2 Motors is ticked again: no warning');
+  assert.equal(p.el('salespersonTitleSay').textContent, '');
+  // typing in the role reads the ticked boxes too
+  p.el('panel').listeners.input({ target: { name: 'salespersonTitle', value: 'Team 2 sales' } });
+  assert.equal(p.el('salespersonTitleWarn').innerHTML, '', 'typing keeps the ticked store\'s word');
+  boxes[0].checked = false;
+  p.el('panel').listeners.input({ target: { name: 'salespersonTitle', value: 'Team 2 sales' } });
+  assert.equal(warned(), settingNumberWarning('role', 'Team 2 sales', dealer), 'nothing ticked: the warning is back');
+});
+
 // Set-up's You step comes before the address step, so it reads the
 // dealership as set-up held it then. A dealership name, city or ZIP typed on
 // the address step that no longer holds the number in the role or the name

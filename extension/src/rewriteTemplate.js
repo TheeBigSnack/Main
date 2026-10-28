@@ -1311,7 +1311,8 @@ const saysWords = (text, words) => new RegExp(`\\b${escapeRe(oneLine(words)).rep
 // soon as the field holds such a number (settingNumberWarning). The digits of
 // a dealership's name alone ("1st Choice Auto") pass: the name is among the
 // facts the number check reads (sourceNumbers), with its city and ZIP, so a
-// role or a name whose numbers those hold passes too. Not covered: the
+// role or a name whose numbers those hold passes too, as does one whose
+// numbers every ticked store's name holds (settingWarning). Not covered: the
 // dealership's city and the store the website lists the car at
 // (vehicle.location) are in the description as well, and one that reads as a
 // mileage ("100 Mile House") fails the mileage check with the plain reason,
@@ -1444,21 +1445,33 @@ function settingNumberProblems(prose, check, { role, name, dealerName }) {
   return { problems: blamed.map(([setting, value]) => ({ code: 'setting-number', text: settingNumberText(setting, value) })), gone };
 }
 
+// The numbers every one of the ticked stores' names holds: the intersection,
+// never the union, so a number that one ticked store holds and another does
+// not is no fact. None with no store ticked.
+function storeNumbers(stores) {
+  const names = (Array.isArray(stores) ? stores : []).map((name) => numbersIn(name));
+  if (!names.length) return new Set();
+  return new Set([...names[0]].filter((n) => names.every((set) => set.has(n))));
+}
+
 // The warning set-up and Settings show under the role, the name or the
 // dealership's name while it holds a number that keeps the form shut: a
 // digit in the role or the name, unless the dealership's name, city and ZIP
 // (dealer, as the form holds them now) hold every number in it, which the
-// number check reads as facts, and it reads as neither a price nor a mileage;
-// a dealership name only when it reads as a price or a mileage. `text` quotes
-// the number and a way to write the value, so it follows every key; `notice`
-// says the same without them, so it stays the same while the warning stands.
-// null for no warning. Plain text.
-function settingWarning(setting, value, dealer = {}) {
+// number check reads as facts, or every ticked store's name holds it (stores,
+// the ticked store names as the form holds them now: a car at each ticked
+// store passes the check for those numbers, since the check reads the car's
+// own store), and it reads as neither a price nor a mileage; a dealership name
+// only when it reads as a price or a mileage. `text` quotes the number and a
+// way to write the value, so it follows every key; `notice` says the same
+// without them, so it stays the same while the warning stands. null for no
+// warning. Plain text.
+function settingWarning(setting, value, dealer = {}, stores = []) {
   const v = oneLine(value);
   const w = SETTING_WORDS[setting];
   if (!w || !/\d/.test(v)) return null;
   if (setting !== 'dealer') {
-    const facts = sourceNumbers({ dealer: dealer || {} });
+    const facts = new Set([...sourceNumbers({ dealer: dealer || {} }), ...storeNumbers(stores)]);
     const amounts = [...mileageClaims(v), ...dollarAmounts(v)];
     if (!amounts.length && [...numbersIn(v)].every((n) => facts.has(n))) return null;
   }
@@ -1476,11 +1489,11 @@ function settingWarning(setting, value, dealer = {}) {
   return { text: say(` (${numbers.map((n) => `"${n}"`).join(', ')})`, like), notice: say('', '') };
 }
 // The warning shown under the field ('' for none).
-export const settingNumberWarning = (setting, value, dealer) => (settingWarning(setting, value, dealer) || { text: '' }).text;
+export const settingNumberWarning = (setting, value, dealer, stores) => (settingWarning(setting, value, dealer, stores) || { text: '' }).text;
 // What a screen reader is told when the warning comes ('' for none): the
 // warning without the number and the example, which change as the person
 // types, so a live region written with it is spoken once, not on every key.
-export const settingNumberNotice = (setting, value, dealer) => (settingWarning(setting, value, dealer) || { notice: '' }).notice;
+export const settingNumberNotice = (setting, value, dealer, stores) => (settingWarning(setting, value, dealer, stores) || { notice: '' }).notice;
 
 // The problems a person may still post with: the length and the tone. Every
 // other problem (a number, price, mileage or claim the website doesn't make,

@@ -74,11 +74,13 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const WARNED_FIELDS = Object.freeze({ wizName: 'name', wizTitle: 'role', wizDealer: 'dealer' });
 // the dealership as set-up holds it: a role or a name whose numbers its name, city and ZIP all hold passes
 const dealerNow = () => (wiz.settings && wiz.settings.dealer) || {};
+// the ticked stores as set-up holds them: a role or a name whose numbers every ticked store's name holds passes too
+const storesNow = () => (wiz.settings && wiz.settings.myStores) || [];
 function warningHtml(id, value) {
-  const text = settingNumberWarning(WARNED_FIELDS[id], value, dealerNow());
+  const text = settingNumberWarning(WARNED_FIELDS[id], value, dealerNow(), storesNow());
   return text ? `<div class="banner warn">${esc(text)}</div>` : '';
 }
-const noticeOf = (id, value) => settingNumberNotice(WARNED_FIELDS[id], value, dealerNow());
+const noticeOf = (id, value) => settingNumberNotice(WARNED_FIELDS[id], value, dealerNow(), storesNow());
 const warningRegion = (id, value) => `<div id="${id}Warn">${warningHtml(id, value)}</div><div id="${id}Say" class="sr" aria-live="polite">${esc(noticeOf(id, value))}</div>`;
 // The address step comes after the You step, which read the role and the
 // name against the dealership as set-up held it then. A dealership name, city
@@ -90,8 +92,8 @@ const warningRegion = (id, value) => `<div id="${id}Warn">${warningHtml(id, valu
 function youWarnings(typed) {
   const s = wiz.settings || withDefaults({}, wiz.site || {});
   return [['role', s.salesperson.title], ['name', s.salesperson.name]]
-    .filter(([setting, value]) => !settingNumberWarning(setting, value, dealerNow()))
-    .map(([setting, value]) => [setting, settingNumberWarning(setting, value, typed)])
+    .filter(([setting, value]) => !settingNumberWarning(setting, value, dealerNow(), storesNow()))
+    .map(([setting, value]) => [setting, settingNumberWarning(setting, value, typed, storesNow())])
     .filter(([, text]) => text)
     .map(([setting, text]) => `The dealership's name, city and ZIP typed here no longer have the number in your ${setting}. ${text} Your ${setting} is on the You step.`);
 }
