@@ -1385,6 +1385,7 @@ The items came from an audit of the whole project. Each finding was checked agai
 - `0c4e01c`: the help's draft-pill sentence and its docs-test pins say a scan "started", not "taken", since the draft was saved.
 - `docs/help.md` line for My listings also says a scan counts from when it started.
 - **A car carried over unread, in To do** (`extension/src/scanRunner.js` saves `carriedReadAt` on the diff at both places one is built; `extension/src/rescan.js` `priceItemWaits` reads it): the To do price item for such a car is dated from when its details were last read, as My listings dates it. Before this, a scan that began after a listing's price update could leave To do offering a change from the reading taken before that update, while My listings said "Price compared at the next scan". Tests: the new To do test and the carried-car test in `test/rescan.test.js`, and a source check that both places carry the times.
+- **A listing's basis from a carried reading** (`withPostedBasis` in `extension/src/rescan.js`, through the shared `readBefore`): when the price setting changed, a listing with no basis could take the setting's basis from a car the scan carried over unread, read before the listing got its price. The first proof of this round found it, and the parent commit had it too. It now waits like a car the scan read before its price. The test is in `test/rescan.test.js`.
 
 ### 33.2 Already built on the branch, checked and not changed
 These were open in section 30.5 and are in the code now (the commits are on the default branch):
@@ -1409,6 +1410,7 @@ These were open in section 30.5 and are in the code now (the commits are on the 
 - **Branding flake** (31.3): not fixed, not explained. CI runs the branding flow on every PR; if it fails, read the message first (section 31.3).
 - **Old-name check** (23.2, fourth bullet): the old-name check still passes a name glued after the stem of a word it lists (such as "s", "p", "al" or "mate"), a regular expression's `\b` or `\s` included. Not built this round.
 - **Toolbar count** (`todoCountFor` in `extension/src/rescanSchedule.js`): a waiting price item (**Price compared at the next scan**, no button) still counts on the toolbar badge. Whether it should is a decision for the owner, so it is not changed here.
+- **To do after a sync** (`viewTodo` in `extension/popup.js`; `settleDiff` in `extension/src/rescan.js`): when sync brings a listing already at a price item's price, To do shows that item as **Price compared at the next scan**, while My listings says **Matches the website**. The saved diff is settled only when a scan is saved. Fixing it means settling the saved diff when sync brings a listing, and the toolbar count (`todoCountFor`) must change with it, so it is parked for the owner.
 - **Live check still needed**: nothing here has been run on a real dealer website (the cloud network blocks dealer sites). The scan-timing change should be seen once on the pilot dealer's site: post a car while a rescan is running, then check My listings and To do.
 
 ### 33.5 Owner decisions this round parks (not changed, and not Brandon-approval items)
