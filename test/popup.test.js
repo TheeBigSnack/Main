@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { loadPopup, POPUP_ORIGIN } from './popupHarness.js';
 import { fixtures, raw, vehicle, sampleVin, MY_STORE } from './helpers.js';
 import { PROFILE_KEY } from '../extension/src/settings.js';
-import { siteKeys } from '../extension/src/storageKeys.js';
+import { siteKeys, GLOBAL_KEYS } from '../extension/src/storageKeys.js';
 import { POSTING_RULES } from '../extension/src/postingRules.js';
 import { noteFlags, resolveFlag, beginPost, endPost, noteFill, notePostStep } from '../extension/src/pilot.js';
 import { STORAGE_FULL } from '../extension/src/storage.js';
@@ -1262,6 +1262,12 @@ test('To do: Dismiss on a posted car that needs a look keeps it off until the re
   assert.match(retyped.panel(), /Delete the listing: the car was not sold\./);
   assert.match(retyped.panel(), new RegExp(`data-kind="takeDown" data-vin="${car.vin}" title="Opens your listing so you can delete it"`));
   assert.equal(retyped.local[k.pilot]?.flags?.length || 0, 0, 'no sold-car flag in the numbers');
+
+  await retyped.click('upkeep', { kind: 'takeDown', vin: car.vin }); // Open listing: the side panel gets the request
+  const request = retyped.local[GLOBAL_KEYS.upkeepRequest];
+  assert.equal(request.kind, 'takeDown');
+  assert.equal(request.why, 'not-pre-owned', 'a car not sold is deleted, not marked sold');
+  assert.equal(request.listedPrice, retyped.local[k.posted][car.vin].price, 'the listing\'s own price');
 });
 
 test('a car published from a draft and then unmarked goes back to Ready with Post, not the draft pill, and its draft record stays', async () => {
