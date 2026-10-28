@@ -2650,6 +2650,9 @@ test('the status line ends the reasons with one full stop, also when a reason en
   assert.equal(blocker([note]), `The description fails a check that must pass before the form is filled: ${note} After you save Settings, the template writes the description again; if you edited it, click Reset to template.`);
   assert.equal(blocker(['Says "new brakes", but the website says nothing about new or replaced parts for this car']), 'The description fails a check that must pass before the form is filled: Says "new brakes", but the website says nothing about new or replaced parts for this car. Fix the description (or use Reset to template) first.');
   assert.doesNotMatch(blocker(['One.', note]), /\.\./);
+  // a description stop beside a price-note stop keeps the description's own fix (settingsFix gives the Settings sentence only when every stop is a Settings stop)
+  const mixed = blocker(['Says "new brakes", but the website says nothing about new or replaced parts for this car', note]);
+  assert.match(mixed, /Fix the description \(or use Reset to template\) first\.$/, mixed);
   // the website-changed line (carStillCurrent) ends its reasons the same way
   assert.match(fnText('carStillCurrent'), /const why = stops\.map\(\(p\) => p\.text\)\.join\('; '\);/);
   assert.match(fnText('carStillCurrent'), /\$\{why\}\$\{\/\[\.!\?\]\$\/\.test\(why\) \? '' : '\.'\}/);
