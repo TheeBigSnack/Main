@@ -249,9 +249,10 @@ async function runScan(ctx) {
   // popup's To do to offer once scans agree.
   const kept = r.diff.unreliable && data[k.snapshot] ? data[k.snapshot] : r.snapshot;
   const diff = withWithheld(r.diff, r.snapshot, data[k.diff]);
-  const stores = storeNames(r.vehicles);
-  // the Price step judges the same entries Settings does, so the two agree on whether a lower second price is offered
-  const scan = { cars: r.vehicles.length, stores, vehicles: r.vehicles.map((v) => ({ location: v && v.location })), siteName: r.site.name, ready: Object.values(kept.vehicles).filter((v) => v.decision === 'ready').length, warnings: r.diff.warnings || [], price: priceStepModel(Object.values(kept.vehicles)) };
+  // the lot as Settings holds it: the snapshot kept above, which a held-back read keeps from the last scan and which carries the cars a read did not return. Its stores, the stores its cars name (the role and name warnings), the Price step and the ready count all judge these entries, so set-up and Settings agree
+  const lot = Object.values(kept.vehicles);
+  const stores = storeNames(lot);
+  const scan = { cars: r.vehicles.length, stores, vehicles: lot.map((v) => ({ location: v && v.location })), siteName: r.site.name, ready: lot.filter((v) => v.decision === 'ready').length, warnings: r.diff.warnings || [], price: priceStepModel(lot) };
   try {
     // under the diff's lock, the key the background rescan writes under, so a rescan in between is not overwritten
     await withLock(k.diff, () => chrome.storage.local.set({ [k.snapshot]: kept, [k.diff]: diff, [k.boilerplate]: r.boilerplate, [k.settings]: r.settings }));

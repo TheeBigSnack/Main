@@ -134,7 +134,7 @@ test('README and help.md state the next To do item and the ticked-store rule in 
   assert.ok(help.includes('When an item is done, the panel offers the next To do item: **Open next To do item** opens its listing, and you take the same steps there.'), 'docs/help.md: the next To do item');
   assert.ok(readme.includes("A number that every ticked store's name holds is not flagged either, unless a car on the lot names no store, or the role or name reads as a price or a mileage."), 'README.md: the ticked stores in Settings');
   assert.equal(help.split("A number that every ticked store's name holds is not flagged, unless a car on the lot names no store, or the role or name reads as a price or a mileage.").length - 1, 2, 'docs/help.md: the ticked stores in the You step and in Settings');
-  assert.ok(help.includes('unless you have ticked stores, every one of their names has the number, and no car on the lot names no store; a price or a mileage in the role or name keeps the warning either way'), 'docs/help.md: the ticked stores on the address step');
+  assert.ok(help.includes('unless you have ticked stores, every one of their names has the number, and no car on the lot names no store; a price or a mileage in the role or name is the You step\'s warning, which this step does not repeat'), 'docs/help.md: the ticked stores on the address step');
   assert.ok(help.includes("(and again as you change the dealership's name, city or ZIP, or tick or untick a store)"), 'docs/help.md: Settings warns again as a store is ticked');
 });
 

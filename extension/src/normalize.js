@@ -154,10 +154,12 @@ export function tickedStores(saved, listed) {
 // The stores a role or name warning counts: the ticked ones, unless a car on the
 // lot names no store. The description check reads a car's own store, so a car
 // with no store name has no store's number among its facts, and such a lot keeps
-// the warning whatever the boxes say.
+// the warning whatever the boxes say. A lot with no list of cars at all (a set-up
+// resumed from a read saved before the list was kept) is not known to be named,
+// so it keeps the warning too, until its next read.
 export function warningStores(vehicles, ticked) {
-  const cars = Array.isArray(vehicles) ? vehicles : [];
-  const unnamed = cars.some((car) => !(car && String(car.location || '').trim()));
+  if (!Array.isArray(vehicles)) return [];
+  const unnamed = vehicles.some((car) => !(car && String(car.location || '').trim()));
   return unnamed ? [] : ticked;
 }
 

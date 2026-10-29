@@ -382,3 +382,26 @@ test('set-up\'s You step keeps the role\'s warning while a car on the read names
   await nextUntil('you');
   assert.equal(warningText('wizTitleWarn'), '', 'every car is named, so the ticked store holds the number');
 });
+
+test('set-up\'s You step counts the stores over the lot Settings reads: a read held back keeps the last scan\'s lot, so a car on that lot with no store name keeps the role\'s warning', async () => {
+  const dealer = { name: 'Example Motors', city: 'Springfield', state: 'OH', zip: '43210' };
+  const settings = { ...structuredClone(STORED), myStores: ['Route 2 Motors'], salesperson: { name: 'Sam', title: 'Team 2' }, dealer };
+  const plain = settingNumberWarning('role', 'Team 2', dealer);
+  assert.notEqual(plain, '', 'the role\'s number is one the dealership does not hold');
+  // twelve cars on the last scan, all at the ticked store but the first, which names no store
+  const lot = Array.from({ length: 12 }, (_, i) => ['usedNormal', { vin: `LOT${i}`, extra_fields: { meta_location: i ? 'Route 2 Motors' : '', location_rt: i ? 'Route 2 Motors' : '' } }]);
+  // this read finds one car, at the ticked store: most of the lot is missing, so the read is held back and the last scan's lot stands
+  const one = RECORDS.slice(0, 1).map((r) => ({ ...structuredClone(r), extra_fields: { ...r.extra_fields, meta_location: 'Route 2 Motors', location_rt: 'Route 2 Motors' } }));
+  browser({ local: { [k.settings]: settings, [k.snapshot]: snapshot(lot, settings) }, records: one });
+  await start();
+  await nextUntil('you');
+  assert.equal(warningText('wizTitleWarn'), plain, 'the car with no store name on the last scan keeps the warning, as Settings keeps it');
+});
+
+test('set-up\'s first read drops a saved store the website no longer lists, so no car is held back as at another store', async () => {
+  browser({ local: { [k.settings]: { ...structuredClone(STORED), myStores: ['Gone Motors'] } } });
+  await start();
+  await nextUntil('store');
+  assert.equal(wiz.settings.myStores.includes('Gone Motors'), false, 'the store the website does not list is not kept');
+  assert.ok(wiz.scan.ready > 0, 'the cars the website lists as ready are still ready, with no store filter');
+});

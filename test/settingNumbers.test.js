@@ -452,7 +452,7 @@ test('set-up\'s You step reads the ticked stores too: the warning goes with a ti
   const plain = settingNumberWarning('role', 'Team 2', dealer);
   wiz.active = true;
   wiz.step = 'you';
-  wiz.scan = { stores: ['Route 2 Motors', 'Route 3 Motors'] }; // the stores the store step draws boxes for
+  wiz.scan = { stores: ['Route 2 Motors', 'Route 3 Motors'], vehicles: [{ location: 'Route 2 Motors' }, { location: 'Route 3 Motors' }] }; // the stores the store step draws boxes for, each car named
   wiz.settings = withDefaults({ salesperson: role, dealer, myStores: ['Route 2 Motors'] });
   assert.equal(region(wizardHtml(), 'wizTitleWarn'), '', 'the ticked store holds the 2');
   assert.equal(liveRegion(wizardHtml(), 'wizTitleSay'), '');
@@ -482,7 +482,7 @@ test('set-up\'s address step does not bring the role\'s warning up when a ticked
   const typed = () => { handleWizardInput({ id: 'wizDealer', value: 'Example Motors' }); return text(elements.get('wizYouWarn')); };
   wiz.active = true;
   wiz.step = 'address';
-  wiz.scan = { stores: ['Route 2 Motors', 'Route 3 Motors'] };
+  wiz.scan = { stores: ['Route 2 Motors', 'Route 3 Motors'], vehicles: [{ location: 'Route 2 Motors' }, { location: 'Route 3 Motors' }] };
   wiz.settings = withDefaults({ salesperson: role, dealer: chance, myStores: [] });
   assert.equal(typed(), TYPED_WARNING('role', 'Team 2'), 'with no ticked store the warning comes up, as before');
   wiz.settings = withDefaults({ salesperson: role, dealer: chance, myStores: ['Route 2 Motors'] });
@@ -561,7 +561,7 @@ test('set-up\'s address step counts only the ticked stores the list names: a sav
   const typed = () => { handleWizardInput({ id: 'wizDealer', value: 'Example Motors' }); return text(elements.get('wizYouWarn')); };
   wiz.active = true;
   wiz.step = 'address';
-  wiz.scan = { stores: ['Route 3 Motors'] };
+  wiz.scan = { stores: ['Route 3 Motors'], vehicles: [{ location: 'Route 3 Motors' }] };
   wiz.settings = withDefaults({ salesperson: role, dealer: chance, myStores: ['Route 2 Motors'] });
   assert.equal(typed(), TYPED_WARNING('role', 'Team 2'), 'Route 2 Motors holds the 2, but the list does not name it: no count');
   wiz.active = false;
@@ -582,6 +582,26 @@ test('set-up\'s address step keeps the role\'s warning when a car on the read na
   assert.equal(typed(), TYPED_WARNING('role', 'Team 2'), 'the car with no store name still fails the number check');
   wiz.scan = { stores: ['Route 2 Motors'], vehicles: [{ location: 'Route 2 Motors' }] };
   assert.equal(typed(), '', 'with every car named, the ticked store holds the 2');
+  wiz.active = false;
+  wiz.scan = null;
+});
+
+test('set-up\'s address step still brings the role\'s warning up when a ticked store holds the 2 the You step counted and the typed name drops the 3', () => {
+  const role = { name: 'Sam', title: 'Team 2 Unit 3' };
+  const dealer = { name: 'Route 3 Auto', city: 'Springfield', state: 'OH', zip: '43215' };
+  const boxes = { wizDealer: { value: 'Example Motors' }, wizCity: { value: 'Springfield' }, wizState: { value: 'OH' }, wizZip: { value: '43215' } };
+  const elements = new Map();
+  globalThis.document = { getElementById: (id) => boxes[id] || (elements.has(id) ? elements.get(id) : elements.set(id, countingElement(id)).get(id)) };
+  const typed = () => { handleWizardInput({ id: 'wizDealer', value: 'Example Motors' }); return text(elements.get('wizYouWarn')); };
+  wiz.active = true;
+  wiz.step = 'address';
+  wiz.scan = { stores: ['Route 2 Motors'], vehicles: [{ location: 'Route 2 Motors' }] };
+  wiz.settings = withDefaults({ salesperson: role, dealer, myStores: ['Route 2 Motors'] });
+  // the You step: the 2 is held by the ticked store, the 3 by the dealership's name
+  assert.equal(settingNumberWarning('role', 'Team 2 Unit 3', dealer, ['Route 2 Motors']), '', 'the You step gives no warning');
+  const typedDealer = { name: 'Example Motors', city: 'Springfield', state: 'OH', zip: '43215' };
+  const want = `The dealership's name, city and ZIP typed here no longer have the number in your role. ${settingNumberWarning('role', 'Team 2 Unit 3', typedDealer, ['Route 2 Motors'])} Your role is on the You step.`;
+  assert.equal(typed(), want, 'the typed name drops the 3, which the You step never counted against the role');
   wiz.active = false;
   wiz.scan = null;
 });

@@ -100,7 +100,8 @@ test('warningStores: a lot with a car that names no store counts no ticked store
   assert.deepEqual(warningStores([{ location: 'Route 2 Motors' }, { location: '' }], ticked), [], 'a car with no store name');
   assert.deepEqual(warningStores([{ location: 'Route 2 Motors' }, { location: '   ' }], ticked), [], 'a blank store name is no name');
   assert.deepEqual(warningStores([{ location: 'Route 2 Motors' }, {}], ticked), [], 'a car with no location field');
-  assert.deepEqual(warningStores(undefined, ticked), ticked, 'no list of cars: the ticked stores count as they are');
+  assert.deepEqual(warningStores(undefined, ticked), [], 'no list of cars (a set-up resumed from a read saved before the list was kept): the lot is not known, so the warning stays');
+  assert.deepEqual(warningStores(null, ticked), [], 'the same for a null list');
   assert.deepEqual(warningStores([], ticked), ticked);
   assert.deepEqual(warningStores([{ location: '' }], []), [], 'nothing ticked: nothing to count');
 });
