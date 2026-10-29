@@ -666,6 +666,7 @@ test('a second Open next To do item click while the next item is being found sta
     assert.match(lookupDrawn, /id="upkeepClose">Close<\/button>/, 'Close is drawn in that render');
     assert.doesNotMatch(lookupDrawn, /id="upkeepNext"/, 'the Open next To do item button is not drawn in that render');
     assert.match(drawn.at(-1), /<p class="hint" id="upkeepFinding">Finding the next To do item…<\/p>/, 'the last render while the lookup is held is still the lookup line');
+    const below = (html) => html.slice(html.indexOf('</section>')); // the panel under the car's name and VIN
     const second = handleUpkeepClick('upkeepNext', ctx);
     assert.equal(asked, 1, 'the second click asks for nothing');
     assert.equal(drawn.includes('the To do list'), false, 'nor does it, or the lookup, take the panel back to the To do list: the Finding line and Close stay drawn');
@@ -678,22 +679,35 @@ test('a second Open next To do item click while the next item is being found sta
     Object.assign(up, { ...DONE_CAR, kind: 'price', why: '', price: 19000, listedPrice: 20000, hasNext: true });
     const priceLookup = handleUpkeepClick('upkeepNext', ctx);
     assert.match(drawn.at(-1), /<p class="hint" id="upkeepFinding">Finding the next To do item…<\/p>\s*<div class="actions"><button type="button" class="\w+" id="upkeepClose">Close<\/button><\/div>/, 'a done price update\'s lookup draws the Finding line and Close alone');
+    const priceSecond = handleUpkeepClick('upkeepNext', ctx);
+    assert.equal(asked, 2, 'a second click on a price update\'s lookup asks for nothing either');
+    assert.equal(await priceSecond, true);
     answer(null);
     assert.equal(await priceLookup, true);
     // and so does one Lot Current saw saved: the note its done banner gave is not drawn under the Finding line either
     Object.assign(up, { ...DONE_CAR, kind: 'price', why: '', price: 19000, listedPrice: 20000, note: 'The listing now shows $19,000.', hasNext: true });
     const seenLookup = handleUpkeepClick('upkeepNext', ctx);
     assert.match(drawn.at(-1), /<p class="hint" id="upkeepFinding">Finding the next To do item…<\/p>\s*<div class="actions"><button type="button" class="\w+" id="upkeepClose">Close<\/button><\/div>/, 'a price update Lot Current saw saved draws the Finding line and Close alone');
+    assert.equal(below(drawn.at(-1)), below(lookupDrawn), 'the same panel as the take-down\'s lookup: no done banner over the Finding line, and the same Close');
     answer(null);
     assert.equal(await seenLookup, true);
-    // and so does one finished by hand after the Price box kept another price: the stuck banner is not drawn over the lookup
-    Object.assign(up, { ...DONE_CAR, kind: 'price', why: '', price: 19000, listedPrice: 20000, stuck: true, boxShows: '$20,000', hasNext: true });
+    assert.match(drawn.at(-1), /<div class="banner good" id="upkeepDone">Done\. The listing now shows \$19,000\.<\/div>/, 'no item came back: the done banner keeps the note Lot Current saw');
+    // and so does one finished by hand after the Price box kept another price, with its tab moved off the listing: neither
+    // the stuck banner nor the done note is drawn over the lookup
+    Object.assign(up, { ...DONE_CAR, kind: 'price', why: '', price: 19000, listedPrice: 20000, stuck: true, boxShows: '$20,000', offTarget: true, hasNext: true });
     const stuckLookup = handleUpkeepClick('upkeepNext', ctx);
     assert.match(drawn.at(-1), /<p class="hint" id="upkeepFinding">Finding the next To do item…<\/p>\s*<div class="actions"><button type="button" class="\w+" id="upkeepClose">Close<\/button><\/div>/, 'a price update finished while its fill was stuck draws the Finding line and Close alone');
+    assert.equal(below(drawn.at(-1)), below(lookupDrawn), 'the same panel as the take-down\'s lookup: no stuck banner over the Finding line, and the same Close');
     answer(null);
     assert.equal(await stuckLookup, true);
     assert.match(drawn.at(-1), /<div class="banner good" id="upkeepDone">Done\. Marked done\.<\/div>/, 'no item came back: the done banner is drawn last, not the stuck banner');
-    Object.assign(up, { stuck: false, boxShows: '' });
+    Object.assign(up, { stuck: false, boxShows: '', offTarget: false });
+    // and so does a take-down Lot Current saw sold: the note its done banner gave is not drawn under the Finding line
+    Object.assign(up, { ...DONE_CAR, note: 'The listing shows it as sold or removed.', hasNext: true });
+    const soldLookup = handleUpkeepClick('upkeepNext', ctx);
+    assert.match(drawn.at(-1), /<p class="hint" id="upkeepFinding">Finding the next To do item…<\/p>\s*<div class="actions"><button type="button" class="\w+" id="upkeepClose">Close<\/button><\/div>/, 'a take-down Lot Current saw sold draws the Finding line and Close alone');
+    answer(null);
+    assert.equal(await soldLookup, true);
   } finally {
     endUpkeep();
   }
@@ -895,6 +909,10 @@ test('when the next To do item cannot be found, the done banner stays and no Nex
     Object.assign(up, { ...DONE_CAR, note: 'The listing shows it as sold or removed.', hasNext: true });
     assert.equal(await handleUpkeepClick('upkeepNext', ctx), true);
     assert.match(drawn.at(-1), /<div class="banner good" id="upkeepDone">Done\. The listing shows it as sold or removed\.<\/div>/, 'after a failed lookup the done banner keeps the note Lot Current saw');
+    // and so is the note of a price update Lot Current saw saved
+    Object.assign(up, { ...DONE_CAR, kind: 'price', why: '', price: 19000, listedPrice: 20000, note: 'The listing now shows $19,000.', hasNext: true });
+    assert.equal(await handleUpkeepClick('upkeepNext', ctx), true);
+    assert.match(drawn.at(-1), /<div class="banner good" id="upkeepDone">Done\. The listing now shows \$19,000\.<\/div>/, 'after a failed lookup a price update\'s done banner keeps the note Lot Current saw');
   } finally {
     endUpkeep();
   }
@@ -965,6 +983,7 @@ test('finishing an item offers Open next To do item only when another item follo
       assert.match(upkeepHtml(), /id="upkeepDone"/, 'the done banner shows');
       assert.match(rig.drawn.at(-1), /<div class="banner good" id="upkeepDone">Done\. The listing now shows \$18,500\.<\/div>/, 'it is the last panel drawn, and says the listing now shows the new price');
       assert.equal(/id="upkeepNext"/.test(upkeepHtml()), offered, `button drawn: ${offered}`);
+      assert.equal(/id="upkeepNext"/.test(rig.drawn.at(-1)), offered, `and in the last panel drawn: ${offered}`);
     } finally {
       endRig();
       await rig.started;
@@ -1035,6 +1054,8 @@ test('a read still in flight when I updated it answers after the tab has closed,
 
 test('a read still in flight when Open next To do item is clicked answers after the tab has closed, during the lookup: no next item starts over it', async () => {
   const r = await raceRig({ origin: 'https://www.example-motors.test', vin: 'aaa', kind: 'takeDown', why: 'gone', name: 'Car A', listingUrl: LISTED_PAGE.url, listedPrice: 20000 });
+  const drawn = []; // the panel each render draws, in order
+  r.ctx.render = () => { drawn.push(upkeepHtml()); };
   try {
     r.holdRead = true;
     await r.tick(); // a poll starts and waits on the listing read
@@ -1043,6 +1064,7 @@ test('a read still in flight when Open next To do item is clicked answers after 
     r.lookups[0](RACE_NEXT); // another item follows
     await done;
     assert.equal(up.hasNext, true);
+    assert.match(drawn.at(-1), /id="upkeepNext"/, 'and the last panel drawn offers it');
     handleUpkeepClick('upkeepNext', r.ctx);
     await r.untilLookups(2);
     r.tabGone = true;
@@ -1133,6 +1155,25 @@ test('a take-down whose listing then shows it sold is done, and the done banner 
     await r.flush();
     assert.equal(up.status, 'done');
     assert.match(upkeepHtml(), /<div class="banner good" id="upkeepDone">Done\. The listing shows it as sold or removed\.<\/div>/);
+  } finally {
+    await endRaceRig(r);
+  }
+});
+
+// the same take-down with another To do item after it: the last panel drawn offers Open next To do item
+test('a take-down whose listing then shows it sold, with another To do item after it, leaves Open next To do item in the last panel drawn', async () => {
+  const r = await raceRig({ origin: 'https://www.example-motors.test', vin: 'aaa', kind: 'takeDown', why: 'gone', name: 'Car A', listingUrl: LISTED_PAGE.url, listedPrice: 20000 });
+  const drawn = []; // the panel each render draws, in order
+  r.ctx.render = () => { drawn.push(upkeepHtml()); };
+  r.ctx.nextItem = async () => RACE_NEXT;
+  try {
+    await r.tick(); // the first read: the listing as it opened, not sold
+    r.holdRead = true;
+    await r.tick(); // the next read waits on the page
+    r.heldRead.answer([{ result: { ...LISTED_PAGE, sold: true } }]); // the person has marked it sold
+    await r.flush();
+    assert.equal(up.status, 'done');
+    assert.match(drawn.at(-1), /<div class="banner good" id="upkeepDone">Done\. The listing shows it as sold or removed\.<\/div>[\s\S]*id="upkeepNext"/, 'and the last panel drawn offers Open next To do item');
   } finally {
     await endRaceRig(r);
   }

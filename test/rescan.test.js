@@ -876,6 +876,31 @@ test('the car just finished is passed over, its take-down and its price update a
   // whatever the website's reason, and whichever price basis the dealer chose: the take-down diffScans keeps beside the price update of a car the website no longer calls pre-owned, and a price item on the price before fees
   assert.deepEqual(ownTakeDown({ why: 'not-pre-owned', text: 'Delete the listing: the car was not sold.' }), ['takeDown', VIN.wagoneer], 'the take-down of a car the website no longer calls pre-owned is passed over with its car');
   assert.deepEqual(ownPrice({ basis: 'beforeFees' }), ['price', 'C'], 'a price update on the price before fees, the other basis a dealer can choose, is passed over once its car is finished');
+  // the car just finished under the VIN its To do row carries (the side panel passes it on as the row gives it): with a space after it, its own row is passed over, and the car whose VIN has no space after it is another car
+  assert.deepEqual(pickNext(next({ diff: { takenAt: at3(2), takeDown: [takeRow(spaced), takeRow(VIN.ram)], priceUpdates: [] }, posted: {} }, spaced)), ['takeDown', VIN.ram], 'a car finished under its VIN with a space after it passes over its own row, and the car whose VIN has no space is still returned');
+  // a price update alike, and a space before the VIN as after it: the finished VIN with more before it is another car's VIN
+  assert.deepEqual(priceAfterRam(` ${VIN.ram}`), ['price', ` ${VIN.ram}`], 'another car\'s price update, its VIN the finished VIN with a space before it, is still returned');
+  // I, O and Q too, which a VIN should not hold but a website can write (the lookalike VINs above): each in lower case matches its capital, on the rows or as the car just finished
+  const offLetters = 'IOQ';
+  assert.equal(pickNext(next({ diff: { takenAt: at3(2), takeDown: [takeRow(offLetters.toLowerCase())], priceUpdates: [priceRow(offLetters.toLowerCase())] }, posted: {} }, offLetters)), null, 'rows carrying I, O and Q in lower case are passed over');
+  assert.equal(pickNext(next({ diff: { takenAt: at3(2), takeDown: [takeRow(offLetters)], priceUpdates: [priceRow(offLetters)] }, posted: {} }, offLetters.toLowerCase())), null, 'a car finished under I, O and Q in lower case passes over its rows');
+  // every row of the car just finished, not only the first of each kind: two take-downs carrying its VIN, one in lower case and one in upper case, are both passed over
+  assert.deepEqual(pickNext(next({ diff: { takenAt: at3(2), takeDown: [takeRow('b'), takeRow('B'), takeRow('C')], priceUpdates: [] }, posted: {} }, 'B')), ['takeDown', 'C'], 'both take-downs carrying the finished VIN are passed over');
+  // nor a VIN one place away in its model year (place 10): K (2019) and B (2011) give the same check digit, so both VINs pass the VIN check
+  const otherYear = `${VIN.ram.slice(0, 9)}B${VIN.ram.slice(10)}`;
+  assert.deepEqual(afterRam(otherYear), ['takeDown', otherYear], 'another car whose VIN differs from the finished VIN in its model year alone is still returned');
+  // a price update alike with a space after its VIN, as the take-down above: the finished VIN with more after it is another car's VIN
+  assert.deepEqual(priceAfterRam(spaced), ['price', spaced], 'another car\'s price update, its VIN the finished VIN with a space after it, is still returned');
+  // the car just finished under its VIN with a space before it, as the one with a space after it above: its own rows are passed over, a take-down or a price update alike
+  const leading = ` ${VIN.ram}`;
+  assert.equal(pickNext(next({ diff: { takenAt: at3(2), takeDown: [takeRow(leading)], priceUpdates: [priceRow(leading)] }, posted: {} }, leading)), null, 'a car finished under its VIN with a space before it passes over its own rows');
+  // upper-cased, never lower-cased: ı, the dotless i a Turkish keyboard types, is a lower-case letter whose capital is I (lower-cased, I is i and ı stays ı), so rows carrying it match the car finished under I
+  assert.equal(pickNext(next({ diff: { takenAt: at3(2), takeDown: [takeRow('\u0131')], priceUpdates: [priceRow('\u0131')] }, posted: {} }, 'I')), null, 'rows carrying ı, whose capital is I, are passed over once the car is finished under I');
+  // nor a VIN with a soft hyphen in it, which a website can put in a long word so it breaks across lines: a character no one sees is still a character of the VIN, though a comparison by collation (localeCompare) ignores it
+  const softHyphen = `${VIN.ram.slice(0, 11)}\u00AD${VIN.ram.slice(11)}`;
+  assert.deepEqual(afterRam(softHyphen), ['takeDown', softHyphen], 'another car whose VIN is the finished VIN with a soft hyphen in it is still returned');
+  // a row of the car just finished that has no button is passed over too, never brought back: its price update waits once Updated gave its listing a new price after the scan began
+  assert.deepEqual(pickNext(next({ diff: { takenAt: at3(2), takeDown: [], priceUpdates: [priceRow('B'), priceRow('C')] }, posted: { B: { name: 'Car B', price: 19000, updatedAt: at3(3) } } }, 'B')), ['price', 'C'], 'the waiting price update of the car just finished is passed over, and the next car\'s is returned');
 });
 
 test('the order is the To do tab\'s: the scan\'s own, or oldest first by each kind\'s open flag, a car with no open flag last', () => {

@@ -82,9 +82,14 @@ test('storeNames: each store once, trimmed, sorted, blanks dropped', () => {
 
 test('tickedStores: the saved stores the list still names, in the list\'s order; a saved store no box shows is not ticked', () => {
   assert.deepEqual(tickedStores(['Route 3 Motors', 'Route 2 Motors'], ['Route 2 Motors', 'Route 3 Motors']), ['Route 2 Motors', 'Route 3 Motors']);
+  assert.deepEqual(tickedStores(['Route 2 Motors', 'Route 3 Motors', 'Oak Lot'], ['Route 3 Motors', 'Oak Lot', 'Route 2 Motors']), ['Route 3 Motors', 'Oak Lot', 'Route 2 Motors'], 'the list\'s order as it comes: not the saved order, that order turned round, or sorted');
   assert.deepEqual(tickedStores(['Route 2 Motors', 'Oak Lot'], ['Route 2 Motors']), ['Route 2 Motors'], 'Oak Lot is saved but no box shows it');
   assert.deepEqual(tickedStores(['Oak Lot'], ['Route 2 Motors']), []);
+  assert.deepEqual(tickedStores(['Route 2 Motors North', 'Oak'], ['Oak Lot', 'Route 2 Motors']), [], 'a saved name ticks only the store of that whole name: Oak does not tick Oak Lot, nor Route 2 Motors North tick Route 2 Motors');
+  assert.deepEqual(tickedStores(['Lot'], ['Oak Lot']), [], 'nor does a saved name that ends a listed name: Lot does not tick Oak Lot');
+  assert.deepEqual(tickedStores(['Route 2 Motors'], ['ROUTE 2 MOTORS', 'Route 2 Motors']), ['Route 2 Motors'], 'names are compared as written: ROUTE 2 MOTORS is another store\'s box, so only Route 2 Motors is ticked');
   assert.deepEqual(tickedStores(['Route 2 Motors'], []), [], 'no list, no ticked store');
+  assert.deepEqual(tickedStores(['Route 2 Motors'], undefined), [], 'a saved store and no list read yet: nothing is ticked');
   assert.deepEqual(tickedStores(undefined, ['Route 2 Motors']), [], 'nothing saved');
   assert.deepEqual(tickedStores(null, undefined), []);
 });
@@ -92,6 +97,10 @@ test('tickedStores: the saved stores the list still names, in the list\'s order;
 test('tickedStores: a name with a space at either end is the same store on both sides, and the ticked name is the trimmed one', () => {
   assert.deepEqual(tickedStores(['Route 2 Motors '], ['Route 2 Motors']), ['Route 2 Motors'], 'a store saved with a space at its end (an earlier Settings Save) is still ticked');
   assert.deepEqual(tickedStores(['Route 2 Motors'], [' Route 2 Motors ']), ['Route 2 Motors'], 'the list is compared trimmed too');
+  assert.deepEqual(tickedStores([' Route 2 Motors'], ['Route 2 Motors']), ['Route 2 Motors'], 'a store saved with a space at its start is still ticked as well');
+  assert.deepEqual(tickedStores(['Route 2 Motors\u00a0'], ['Route 2 Motors']), ['Route 2 Motors'], 'a no-break space at the end (as web pages carry) is a space too');
+  assert.deepEqual(tickedStores(['Oak Lot'], ['Oak  Lot', 'Oak Lot']), ['Oak Lot'], 'only the ends are trimmed: Oak  Lot, with two spaces inside, is another store\'s box');
+  assert.deepEqual(tickedStores(['Route 2 Motors', '  '], ['', 'Route 2 Motors']), ['Route 2 Motors'], 'a blank name on both sides is never ticked');
 });
 
 test('warningStores: a lot with a car that names no store counts no ticked store, so the role or name warning stays; a lot where every car names its store counts them', () => {
@@ -99,9 +108,13 @@ test('warningStores: a lot with a car that names no store counts no ticked store
   assert.deepEqual(warningStores([{ location: 'Route 2 Motors' }, { location: 'Route 3 Motors' }], ticked), ticked, 'every car names its store');
   assert.deepEqual(warningStores([{ location: 'Route 2 Motors' }, { location: '' }], ticked), [], 'a car with no store name');
   assert.deepEqual(warningStores([{ location: 'Route 2 Motors' }, { location: '   ' }], ticked), [], 'a blank store name is no name');
+  assert.deepEqual(warningStores([{ location: 'Route 2 Motors' }, { location: '\u00a0\n' }], ticked), [], 'nor is a name of other white space: a no-break space and a line break');
   assert.deepEqual(warningStores([{ location: 'Route 2 Motors' }, {}], ticked), [], 'a car with no location field');
+  assert.deepEqual(warningStores([{ location: '' }, { location: 'Route 2 Motors' }], ticked), [], 'the car with no store name first in the list');
+  assert.deepEqual(warningStores([{ location: 'Route 2 Motors' }, null], ticked), [], 'a hole in the list names no store either');
   assert.deepEqual(warningStores(undefined, ticked), [], 'no list of cars (a set-up resumed from a read saved before the list was kept): the lot is not known, so the warning stays');
   assert.deepEqual(warningStores(null, ticked), [], 'the same for a null list');
+  assert.deepEqual(warningStores({ VIN1: { location: 'Route 2 Motors' } }, ticked), [], 'the same for cars kept by VIN (a snapshot\'s vehicles), not as a list');
   assert.deepEqual(warningStores([], ticked), ticked);
   assert.deepEqual(warningStores([{ location: '' }], []), [], 'nothing ticked: nothing to count');
 });

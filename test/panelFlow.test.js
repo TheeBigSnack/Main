@@ -2679,6 +2679,8 @@ test('no way of filling the form types a description that does not name the deal
     assert.deepEqual(r.typed, [], `nothing typed with no name: ${JSON.stringify(dealer)}`);
     assert.deepEqual(r.said, [[NO_NAME, 'error']]);
   }
+  // whoever wrote the description (an edit, a Claude draft), no name set gives the same line: add it in Settings
+  for (const descriptionSource of ['edited', 'claude']) assert.equal(new Function('state', ...PASSING_CHECKS_NAMES, `${dealerChecks()}\nreturn fillBlocker;`)({ settings: { dealer: { name: '' } }, descriptionSource }, ...PASSING_CHECKS)('A fine truck. Sales consultant.'), NO_NAME, descriptionSource);
   const stale = await fill({ name: 'Example Motors' }, 'A fine truck. Sales consultant.');
   assert.deepEqual(stale.typed, [], 'a description written before the name was set is not typed');
   assert.match(stale.said[0][0], /^The description doesn't name Example Motors, and every description names the dealership\./);
@@ -2781,6 +2783,8 @@ test('the form is not filled with a description that fails a fact or identity ch
   const refusedNote = { ...state, settings: { ...SETTINGS, priceNote: 'Priced to sell, plus tax, title and registration.' } };
   const lacksRefused = realBlocker(refusedNote)(CLEAN);
   assert.match(lacksRefused, /^The description fails 2 checks that must pass before the form is filled: Doesn't include your dealership's price note: "Priced to sell, plus tax, title and registration\."; Your dealership's price note says "priced to sell"; change the note in Settings\. Fix the description \(or use Reset to template\) first\.$/, lacksRefused);
+  // and so for an edited or Claude-written description: the missing note keeps the description's fix, not Reset to template after a Settings save
+  for (const descriptionSource of ['edited', 'claude']) assert.match(realBlocker({ ...refusedNote, descriptionSource })(CLEAN), /; change the note in Settings\. Fix the description \(or use Reset to template\) first\.$/, descriptionSource);
   // and beside a note refused for its other words (the steer reason): the missing note still stops it, with the description's fix
   assert.match(realBlocker({ ...state, settings: { ...SETTINGS, priceNote: 'Tax, title and fees go to the state, not the dealer. Text me.' } })(CLEAN), /^The description fails 2 checks that must pass before the form is filled: Doesn't include your dealership's price note: "Tax, title and fees go to the state, not the dealer\. Text me\."; Your price note says "not the dealer"[^]+ Change the note in Settings\. Fix the description \(or use Reset to template\) first\.$/);
   // the refused phrase said again in the description's own words is the description's stop, not the note's: the description's fix
@@ -2849,6 +2853,8 @@ test('a number in the role and a price note refused in Settings: the status line
   assert.doesNotMatch(why, /Fix the description/, why);
   // the whole status line: the reasons are joined with "; ", and fillBlocker adds one full stop after them, before the Settings fix
   assert.equal(why, 'The description fails 2 checks that must pass before the form is filled: Your role "2nd shift sales" has a number in it, and every number in a description must match the website\'s data for the car; change it in Settings (Your role), for example to "Second shift sales"; Your dealership\'s price note says "priced to sell"; change the note in Settings. After you save Settings, the template writes the description again; if you edited it, click Reset to template.');
+  // an edited or Claude-written description with both is not written again by a Settings save: Reset to template after it
+  for (const descriptionSource of ['edited', 'claude']) assert.match(realBlocker({ ...state, descriptionSource })(text), /change the note in Settings\. After you save Settings, click Reset to template to write the description again\.$/, descriptionSource);
   // the checks line, as checksHtml writes it (the real esc, so the quotes and apostrophes come out escaped)
   const checksHtml = new Function('ruleProblems', 'noteFor', `${constText('esc')}\n${constText('settingsFix')}\n${fnText('checksHtml')}\nreturn checksHtml;`)(template.ruleProblems, () => '');
   assert.equal(checksHtml(template.runGuardrails(text, { vehicle: CAR, dealer: settings.dealer, salesperson, priceNote, price: 20986 })), '<div class="checks bad" id="checks">Fix before the form can be filled:<ul><li>Your role &quot;2nd shift sales&quot; has a number in it, and every number in a description must match the website&#39;s data for the car; change it in Settings (Your role), for example to &quot;Second shift sales&quot;</li><li>Your dealership&#39;s price note says &quot;priced to sell&quot;; change the note in Settings</li></ul><p>After you save Settings, the template writes the description again; if you edited it, click Reset to template.</p></div>');
@@ -2860,9 +2866,13 @@ test('a number in the role and a price note refused in Settings: the status line
   // a note refused for its other words (the real steer reason, which ends with its own full stop) is fixed in Settings too, and names every word to take out
   const steerNote = 'Tax, title and fees go to the state, not the dealer. Text me.';
   assert.equal(realBlocker({ settings: { ...SETTINGS, priceNote: steerNote }, vehicle: CAR, price: 20986, noteApplies: true })(template.buildTemplateDescription({ vehicle: CAR, dealer: SETTINGS.dealer, salesperson: SETTINGS.salesperson, priceNote: steerNote })), 'The description fails a check that must pass before the form is filled: Your price note says "not the dealer", so it may only say where the fees go and what the price includes; take out "Text" and "me", or take out "not the dealer". Change the note in Settings. After you save Settings, the template writes the description again; if you edited it, click Reset to template.');
+  // the refused note on its own in an edited or Claude-written description: Reset to template after a Settings save
+  for (const descriptionSource of ['edited', 'claude']) assert.match(realBlocker({ settings: { ...SETTINGS, priceNote: steerNote }, vehicle: CAR, price: 20986, noteApplies: true, descriptionSource })(template.buildTemplateDescription({ vehicle: CAR, dealer: SETTINGS.dealer, salesperson: SETTINGS.salesperson, priceNote: steerNote })), /Change the note in Settings\. After you save Settings, click Reset to template to write the description again\.$/, descriptionSource);
   // and the checks line gives a refused note on its own the same Settings sentence
   const steerCtx = { vehicle: CAR, dealer: SETTINGS.dealer, salesperson: SETTINGS.salesperson, priceNote: steerNote, price: 20986 };
   assert.match(checksHtml(template.runGuardrails(template.buildTemplateDescription(steerCtx), steerCtx)), /Change the note in Settings\.<\/li><\/ul><p>After you save Settings, the template writes the description again; if you edited it, click Reset to template\.<\/p><\/div>$/);
+  // and for an edited or Claude-written description, the checks line says to click Reset to template after it
+  for (const source of ['edited', 'claude']) assert.match(checksHtml(template.runGuardrails(template.buildTemplateDescription(steerCtx), steerCtx), source), /Change the note in Settings\.<\/li><\/ul><p>After you save Settings, click Reset to template to write the description again\.<\/p><\/div>$/, source);
 });
 
 // A price note quoting a fee that is not the gap between this car's two prices
@@ -2881,6 +2891,8 @@ test('a price note quoting a fee that is not this car\'s price gap: the status l
   for (const descriptionSource of ['edited', 'claude']) assert.match(realBlocker({ ...state, descriptionSource })(text), /check the note in Settings\. After you save Settings, click Reset to template to write the description again\.$/, descriptionSource);
   const checksHtml = new Function('esc', 'ruleProblems', 'noteFor', `${constText('settingsFix')}\n${fnText('checksHtml')}\nreturn checksHtml;`)((s) => String(s), template.ruleProblems, () => '');
   assert.match(checksHtml(template.runGuardrails(text, c)), /^<div class="checks bad" id="checks">Fix before the form can be filled:<ul><li>The price note says \$500, but the website's two prices for this car differ by \$486; check the note in Settings<\/li><\/ul><p>After you save Settings, the template writes the description again; if you edited it, click Reset to template\.<\/p><\/div>$/);
+  // and the checks line of an edited or Claude-written description says to click Reset to template after it
+  for (const source of ['edited', 'claude']) assert.match(checksHtml(template.runGuardrails(text, c), source), /check the note in Settings<\/li><\/ul><p>After you save Settings, click Reset to template to write the description again\.<\/p><\/div>$/, source);
 });
 
 test('the checks line says which problems stop the form and which only warn', () => {
@@ -2941,6 +2953,8 @@ test('the checks line says the fix is in Settings when only a number in Settings
   const mixed = checksHtml(template.runGuardrails(text.replace('34,567 miles', '12,000 miles'), c));
   assert.match(mixed, /Fix before the form can be filled:<ul><li>Your role "2nd shift sales"/);
   assert.doesNotMatch(mixed, /After you save Settings/);
+  // and so for an edited or rewritten description: a stop of its own gets no Settings sentence either
+  for (const source of ['edited', 'claude']) assert.doesNotMatch(checksHtml(template.runGuardrails(text.replace('34,567 miles', '12,000 miles'), c), source), /After you save Settings/, source);
   // a missing price note beside the same note's refused phrase: the missing note is the description's own stop, so the line ends with the stops, no Settings sentence
   assert.match(checksHtml(template.runGuardrails(CLEAN, { ...c, salesperson: SETTINGS.salesperson, priceNote: 'Priced to sell, plus tax, title and registration.' })), /<li>Doesn't include your dealership's price note: [^<]+<\/li><li>Your dealership's price note says "priced to sell"; change the note in Settings<\/li><\/ul><\/div>$/);
   // a dealership name that is not set is a description's stop too, although its own fix words name Settings: the checks line gives it no Settings sentence
@@ -2948,6 +2962,8 @@ test('the checks line says the fix is in Settings when only a number in Settings
   const unnamed = checksHtml(template.runGuardrails(template.buildTemplateDescription({ ...noName, priceNote: '' }), noName));
   assert.match(unnamed, /<li>No dealership name is set; add it in Settings \(Dealership name\)<\/li>/, unnamed);
   assert.doesNotMatch(unnamed, /After you save Settings/, unnamed);
+  // and so for an edited or Claude-written description: no Reset to template sentence for it either
+  for (const source of ['edited', 'claude']) assert.doesNotMatch(checksHtml(template.runGuardrails(template.buildTemplateDescription({ ...noName, priceNote: '' }), noName), source), /After you save Settings/, source);
   // nor beside a number in Settings: the line ends with the stops
   assert.match(checksHtml(template.runGuardrails(template.buildTemplateDescription({ ...noName, salesperson, priceNote: '' }), { ...noName, salesperson })), /<li>Your role "2nd shift sales" [^<]+<\/li><li>No dealership name is set; add it in Settings \(Dealership name\)<\/li><\/ul><\/div>$/);
   // a dealership name of spaces sets no name either: the same stop, and no Settings sentence
@@ -3109,11 +3125,23 @@ test('a stop only Settings can fix, found by the read before a fill, says to sav
     assert.equal(state.step, 'review');
     assert.deepEqual(r.calls.said.at(-1), [`The website changed this car since it was read. The description no longer matches it: Your role "2nd shift sales" has a number in it, and every number in a description must match the website's data for the car; change it in Settings (Your role), for example to "Second shift sales". After you save Settings, the template writes the description again; if you edited it, click Reset to template. Then ${reopen}.`, 'error'], step);
   }
+  // an edited or Claude-written description is not written again by a Settings save: the line says to click Reset to template after it
+  for (const descriptionSource of ['edited', 'claude']) {
+    const own = staleReader(reviewState({ readAt: '', vehicle: car, settings, description, descriptionSource }), () => ({ ok: true, vehicle: { ...FRESH_CAR(), descriptionRaw: 'Comes with two keys.' } }));
+    await own.run();
+    assert.match(own.calls.said.at(-1)[0], /"Second shift sales"\. After you save Settings, click Reset to template to write the description again\. Then click Open the Marketplace form again\.$/, descriptionSource);
+  }
   // a stop of the description's own beside it: the description needs fixing too
   const state = reviewState({ readAt: '', vehicle: car, settings, description: description.replace(/\d{1,3}(,\d{3})+ miles/, '12,000 miles') });
   const r = staleReader(state, () => ({ ok: true, vehicle: { ...FRESH_CAR(), descriptionRaw: 'Comes with two keys.' } }));
   assert.equal(await r.run(), false);
   assert.match(r.calls.said.at(-1)[0], /^The website changed this car since it was read\. The description no longer matches it: Your role "2nd shift sales" has a number in it, [^]+\. Fix the description, then click Open the Marketplace form again\.$/);
+  // and so for an edited or Claude-written description: a stop of its own gets no Settings sentence
+  for (const descriptionSource of ['edited', 'claude']) {
+    const own = staleReader(reviewState({ readAt: '', vehicle: car, settings, description: description.replace(/\d{1,3}(,\d{3})+ miles/, '12,000 miles'), descriptionSource }), () => ({ ok: true, vehicle: { ...FRESH_CAR(), descriptionRaw: 'Comes with two keys.' } }));
+    await own.run();
+    assert.match(own.calls.said.at(-1)[0], /\. Fix the description, then click Open the Marketplace form again\.$/, descriptionSource);
+  }
   // a warning beside it (length or tone) only warns: the line still gives the Settings fix
   const warned = staleReader(reviewState({ readAt: '', vehicle: car, settings, description: `${description}\nCOME SEE THIS TRUCK TODAY` }), () => ({ ok: true, vehicle: { ...FRESH_CAR(), descriptionRaw: 'Comes with two keys.' } }));
   await warned.run();
@@ -3149,6 +3177,12 @@ test('a price-note stop found by the read before a fill says to save Settings, n
   const alone = staleReader(reviewState({ readAt: '', settings: refusedOwn, description: template.buildTemplateDescription({ vehicle: FRESH_CAR(), dealer: refusedOwn.dealer, salesperson: refusedOwn.salesperson, priceNote: refusedOwn.priceNote }) }), () => ({ ok: true, vehicle: FRESH_CAR() }));
   await alone.run();
   assert.match(alone.calls.said.at(-1)[0], /: Your dealership's price note says "priced to sell"; change the note in Settings\. After you save Settings, the template writes the description again; if you edited it, click Reset to template\. Then click Open the Marketplace form again\.$/);
+  // and on an edited or Claude-written description: Reset to template after a Settings save
+  for (const descriptionSource of ['edited', 'claude']) {
+    const own = staleReader(reviewState({ readAt: '', settings: refusedOwn, description: template.buildTemplateDescription({ vehicle: FRESH_CAR(), dealer: refusedOwn.dealer, salesperson: refusedOwn.salesperson, priceNote: refusedOwn.priceNote }), descriptionSource }), () => ({ ok: true, vehicle: FRESH_CAR() }));
+    await own.run();
+    assert.match(own.calls.said.at(-1)[0], /: Your dealership's price note says "priced to sell"; change the note in Settings\. After you save Settings, click Reset to template to write the description again\. Then click Open the Marketplace form again\.$/, descriptionSource);
+  }
 });
 
 test('a car that sold, went sale-pending, turned new or lost its price since it was read is stopped before the form is filled', async () => {
