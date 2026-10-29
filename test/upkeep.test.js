@@ -634,7 +634,8 @@ test('Open next To do item asks for the next item once, and starts it: its listi
 test('a second Open next To do item click while the next item is being found starts nothing', async () => {
   let asked = 0;
   let answer = null;
-  const ctx = { render: noop, map: () => FORM_MAP, nextItem: () => { asked += 1; return new Promise((resolve) => { answer = resolve; }); }, onClose: noop };
+  const drawn = []; // the HTML each render draws, in order
+  const ctx = { render: () => { drawn.push(upkeepHtml()); }, map: () => FORM_MAP, nextItem: () => { asked += 1; return new Promise((resolve) => { answer = resolve; }); }, onClose: noop };
   try {
     Object.assign(up, { ...DONE_CAR, hasNext: true });
     const first = handleUpkeepClick('upkeepNext', ctx);
@@ -644,6 +645,10 @@ test('a second Open next To do item click while the next item is being found sta
     assert.match(upkeepHtml(), /id="upkeepClose"/, 'Close is the one button drawn while the next item is found');
     assert.doesNotMatch(upkeepHtml(), /upkeepDoneBtn|upkeepCancel/, 'no I took it down or Not now while the next item is found');
     assert.doesNotMatch(upkeepHtml(), /upkeepNote|Marked done\./, 'the done note is not repeated under the finding line');
+    const lookupDrawn = drawn.find((html) => /<p class="hint" id="upkeepFinding">Finding the next To do item…<\/p>/.test(html));
+    assert.ok(lookupDrawn, 'a render drew the lookup line while the lookup is held');
+    assert.match(lookupDrawn, /id="upkeepClose">Close<\/button>/, 'Close is drawn in that render');
+    assert.doesNotMatch(lookupDrawn, /id="upkeepNext"/, 'the Open next To do item button is not drawn in that render');
     assert.equal(await handleUpkeepClick('upkeepNext', ctx), true);
     assert.equal(asked, 1, 'the second click asks for nothing');
     answer(null);

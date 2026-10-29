@@ -2744,6 +2744,17 @@ test('the form is not filled with a description that fails a fact or identity ch
   // the dealer's price note, when it applies to this car, is one of them
   const noted = { ...state, settings: { ...SETTINGS, priceNote: 'Tax and tags extra.' } };
   assert.match(realBlocker(noted)(CLEAN), /Doesn't include your dealership's price note/);
+  // the description's own price-note stop keeps the description's fix: settingsFix reads only the reasons that end "the note in Settings", and this reason does not
+  const noteStatus = realBlocker(noted)(CLEAN);
+  assert.match(noteStatus, /Fix the description \(or use Reset to template\) first\.$/, noteStatus);
+  assert.doesNotMatch(noteStatus, /\bSettings\b/, noteStatus);
+  // a banned phrase that the description joins to the note's own sentence is that description's stop too, and keeps the description's fix
+  const joinedNote = { ...state, settings: { ...SETTINGS, priceNote: 'Tax, title and fees go to the state, not the dealer.' } };
+  const joined = template.buildTemplateDescription({ vehicle: CAR, dealer: SETTINGS.dealer, salesperson: SETTINGS.salesperson, priceNote: joinedNote.settings.priceNote }).replace('Tax, title and fees go to the state, not the dealer.', 'Buy from me and tax, title and fees go to the state, not the dealer.');
+  const joinedStatus = realBlocker(joinedNote)(joined);
+  assert.match(joinedStatus, /Says "not the dealer" with words joined to your price note's sentence/, joinedStatus);
+  assert.match(joinedStatus, /Fix the description \(or use Reset to template\) first\.$/, joinedStatus);
+  assert.doesNotMatch(joinedStatus, /\bSettings\b/, joinedStatus);
   assert.equal(realBlocker({ ...noted, noteApplies: false })(CLEAN), '', 'a note that does not apply to this car is not looked for');
   // length and tone are the salesperson's call
   for (const text of [`${CLEAN}\nCOME SEE THIS TRUCK TODAY`, `${CLEAN}\n🔥🔥🔥🔥`, CLEAN.split('\n').slice(0, 3).join('\n') + `\nI'm Sam, sales consultant at Example Motors.\nVIN ${CAR.vin}.`]) {

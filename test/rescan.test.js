@@ -770,6 +770,13 @@ test('the car just finished is passed over, its take-down and its price update a
   const diff = { takenAt: at3(2), takeDown: [takeRow('A')], priceUpdates: [priceRow('A'), priceRow('C')] };
   assert.deepEqual(pickNext(next({ diff, posted: {} }, 'a')), ['price', 'C']);
   assert.deepEqual(pickNext(next({ diff, posted: {} }, 'C')), ['takeDown', 'A']);
+  // a row whose VIN is in lower case is passed over once its car is finished in upper case, a take-down or a price update alike, and another car's row is still returned
+  const lowerTake = { takenAt: at3(2), takeDown: [takeRow('b')], priceUpdates: [] };
+  assert.equal(pickNext(next({ diff: lowerTake, posted: {} }, 'B')), null, 'the lower-case take-down of the car just finished is passed over');
+  const lowerTakes = { takenAt: at3(2), takeDown: [takeRow('b'), takeRow('C')], priceUpdates: [] };
+  assert.deepEqual(pickNext(next({ diff: lowerTakes, posted: {} }, 'B')), ['takeDown', 'C'], 'a different car\'s take-down is still returned');
+  const lowerPrice = { takenAt: at3(2), takeDown: [], priceUpdates: [priceRow('b'), priceRow('C')] };
+  assert.deepEqual(pickNext(next({ diff: lowerPrice, posted: {} }, 'B')), ['price', 'C'], 'the lower-case price update of the car just finished is passed over too');
 });
 
 test('the order is the To do tab\'s: the scan\'s own, or oldest first by each kind\'s open flag, a car with no open flag last', () => {
