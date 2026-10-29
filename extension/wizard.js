@@ -253,7 +253,7 @@ async function runScan(ctx) {
   // the lot as Settings holds it: the snapshot kept above, which a held-back read keeps from the last scan and which carries the cars a read did not return. Its stores, the stores its cars name (the role and name warnings), the Price step and the ready count all judge these entries, so set-up and Settings agree
   const lot = Object.values(kept.vehicles);
   const stores = storeNames(lot);
-  // a held-back read's line says the last scan's cars are kept (scanLine), so its count is theirs, not this read's
+  // a held-back read's line gives this read's count (cars), then the last scan's kept cars and the stores among them (scanLine)
   const scan = { cars: r.vehicles.length, keptCars: held ? lot.length : null, stores, vehicles: lot.map((v) => ({ location: v && v.location })), siteName: r.site.name, ready: lot.filter((v) => v.decision === 'ready').length, warnings: r.diff.warnings || [], price: priceStepModel(lot) };
   try {
     // under the diff's lock, the key the background rescan writes under, so a rescan in between is not overwritten
