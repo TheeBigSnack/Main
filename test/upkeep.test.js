@@ -641,8 +641,8 @@ test('Open next To do item asks for the next item once, and starts it: its listi
 test('a second Open next To do item click while the next item is being found starts nothing', async () => {
   let asked = 0;
   let answer = null;
-  const drawn = []; // the HTML each render draws, in order
-  const ctx = { render: () => { drawn.push(upkeepHtml()); }, map: () => FORM_MAP, nextItem: () => { asked += 1; return new Promise((resolve) => { answer = resolve; }); }, onClose: noop };
+  const drawn = []; // the HTML each render draws, in order, and the To do list when the panel goes back to it (sidepanel.js onClose)
+  const ctx = { render: () => { drawn.push(upkeepHtml()); }, map: () => FORM_MAP, nextItem: () => { asked += 1; return new Promise((resolve) => { answer = resolve; }); }, onClose: () => { drawn.push('the To do list'); } };
   try {
     Object.assign(up, { ...DONE_CAR, hasNext: true });
     const first = handleUpkeepClick('upkeepNext', ctx);
@@ -657,8 +657,10 @@ test('a second Open next To do item click while the next item is being found sta
     assert.match(lookupDrawn, /id="upkeepClose">Close<\/button>/, 'Close is drawn in that render');
     assert.doesNotMatch(lookupDrawn, /id="upkeepNext"/, 'the Open next To do item button is not drawn in that render');
     assert.match(drawn.at(-1), /<p class="hint" id="upkeepFinding">Finding the next To do item…<\/p>/, 'the last render while the lookup is held is still the lookup line');
-    assert.equal(await handleUpkeepClick('upkeepNext', ctx), true);
+    const second = handleUpkeepClick('upkeepNext', ctx);
     assert.equal(asked, 1, 'the second click asks for nothing');
+    assert.equal(drawn.includes('the To do list'), false, 'nor does it, or the lookup, take the panel back to the To do list: the Finding line and Close stay drawn');
+    assert.equal(await second, true);
     answer(null);
     assert.equal(await first, true);
     assert.equal(up.status, 'done', 'no item came back: the done banner is restored');
@@ -675,6 +677,7 @@ test('a second Open next To do item click while the next item is being found sta
     assert.match(drawn.at(-1), /<p class="hint" id="upkeepFinding">Finding the next To do item…<\/p>\s*<div class="actions"><button type="button" class="\w+" id="upkeepClose">Close<\/button><\/div>/, 'a price update finished while its fill was stuck draws the Finding line and Close alone');
     answer(null);
     assert.equal(await stuckLookup, true);
+    assert.match(drawn.at(-1), /<div class="banner good" id="upkeepDone">Done\. Marked done\.<\/div>/, 'no item came back: the done banner is drawn last, not the stuck banner');
     Object.assign(up, { stuck: false, boxShows: '' });
   } finally {
     endUpkeep();
@@ -744,8 +747,8 @@ test('Close while Lot Current looks for the next item after an item is done: the
 });
 
 test('when no To do item is left, the done banner stays and no Next button is drawn', async () => {
-  const drawn = []; // the HTML each render draws, in order
-  const ctx = { render: () => { drawn.push(upkeepHtml()); }, map: () => FORM_MAP, nextItem: async () => null, onClose: noop };
+  const drawn = []; // the HTML each render draws, in order, and the To do list when the panel goes back to it (sidepanel.js onClose)
+  const ctx = { render: () => { drawn.push(upkeepHtml()); }, map: () => FORM_MAP, nextItem: async () => null, onClose: () => { drawn.push('the To do list'); } };
   try {
     Object.assign(up, { ...DONE_CAR, hasNext: true });
     assert.equal(await handleUpkeepClick('upkeepNext', ctx), true);
@@ -756,13 +759,16 @@ test('when no To do item is left, the done banner stays and no Next button is dr
     assert.doesNotMatch(html, /upkeepNext/);
     assert.match(html, /id="upkeepClose"/);
     assert.match(drawn.at(-1), /<div class="banner good" id="upkeepDone">Done\. Marked done\.<\/div>/, 'the panel is drawn again with the done banner, its note kept');
+    assert.doesNotMatch(drawn.at(-1), /id="upkeepNext"/, 'and that last panel offers no Open next To do item');
+    assert.equal(drawn.includes('the To do list'), false, 'and the panel never went back to the To do list on the way');
   } finally {
     endUpkeep();
   }
 });
 
 test('when the next To do item cannot be found, the done banner stays and no Next button is drawn', async () => {
-  const ctx = { render: noop, map: () => FORM_MAP, nextItem: async () => { throw new Error('storage is unavailable'); }, onClose: noop };
+  const drawn = []; // the HTML each render draws, in order, and the To do list when the panel goes back to it (sidepanel.js onClose)
+  const ctx = { render: () => { drawn.push(upkeepHtml()); }, map: () => FORM_MAP, nextItem: async () => { throw new Error('storage is unavailable'); }, onClose: () => { drawn.push('the To do list'); } };
   try {
     Object.assign(up, { ...DONE_CAR, hasNext: true });
     assert.equal(await handleUpkeepClick('upkeepNext', ctx), true);
@@ -770,6 +776,8 @@ test('when the next To do item cannot be found, the done banner stays and no Nex
     assert.equal(up.hasNext, false);
     assert.match(upkeepHtml(), /id="upkeepDone"/);
     assert.doesNotMatch(upkeepHtml(), /upkeepNext/);
+    assert.match(drawn.at(-1), /<div class="banner good" id="upkeepDone">Done\. Marked done\.<\/div>/, 'the panel is drawn again with the done banner, its note kept');
+    assert.equal(drawn.includes('the To do list'), false, 'and the panel never went back to the To do list on the way');
   } finally {
     endUpkeep();
   }

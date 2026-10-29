@@ -803,6 +803,32 @@ test('the car just finished is passed over, its take-down and its price update a
   const sameEnd = VIN.hellcat.slice(0, 9) + VIN.ram.slice(9);
   const ends = { takenAt: at3(2), takeDown: [takeRow(VIN.ram.toLowerCase()), takeRow(sameEnd)], priceUpdates: [] };
   assert.deepEqual(pickNext(next({ diff: ends, posted: {} }, VIN.ram)), ['takeDown', sameEnd], 'another car sharing the last eight characters of the VIN is still returned');
+  // the case of every place counts, to the last: a VIN with a letter in all 17 places, in lower case on its row or as the car just finished
+  const letters = 'ABCDEFGHJKLMNPRST';
+  assert.equal(pickNext(next({ diff: { takenAt: at3(2), takeDown: [takeRow(letters.toLowerCase())], priceUpdates: [] }, posted: {} }, letters)), null, 'a row carrying the VIN in lower case to its last letter is passed over');
+  assert.equal(pickNext(next({ diff: { takenAt: at3(2), takeDown: [takeRow(letters)], priceUpdates: [] }, posted: {} }, letters.toLowerCase())), null, 'a car finished under its VIN in lower case to its last letter passes over its row');
+  // the whole VIN, never a part of it: a car whose VIN is the start or the end of the finished VIN, or ends with it, is another car
+  const afterRam = (other) => pickNext(next({ diff: { takenAt: at3(2), takeDown: [takeRow(VIN.ram.toLowerCase()), takeRow(other)], priceUpdates: [] }, posted: {} }, VIN.ram));
+  assert.deepEqual(afterRam(VIN.ram.slice(0, 16)), ['takeDown', VIN.ram.slice(0, 16)], 'another car whose VIN is the start of the finished VIN is still returned');
+  assert.deepEqual(afterRam(VIN.ram.slice(1)), ['takeDown', VIN.ram.slice(1)], 'another car whose VIN is the end of the finished VIN is still returned');
+  assert.deepEqual(afterRam(`X${VIN.ram}`), ['takeDown', `X${VIN.ram}`], 'another car whose VIN ends with the finished VIN is still returned');
+  // nor by anything else a row carries: a car whose stock number reads as the finished VIN, or that has the finished car's name, is another car
+  assert.deepEqual(pickNext(next({ diff: { takenAt: at3(2), takeDown: [takeRow('b'), takeRow('C', { stock: 'B' })], priceUpdates: [] }, posted: {} }, 'B')), ['takeDown', 'C'], 'another car whose stock number is the finished VIN is still returned');
+  const twin = { name: '2019 Ram 1500 Classic Express' };
+  assert.deepEqual(pickNext(next({ diff: { takenAt: at3(2), takeDown: [takeRow('b', twin), takeRow('C', twin)], priceUpdates: [] }, posted: {} }, 'B')), ['takeDown', 'C'], 'another car with the same name is still returned');
+  // the finished side in mixed case too, as the rows above: the whole VIN is upper-cased, whatever the case of each letter
+  assert.deepEqual(pickNext(next({ diff: wholeUpper, posted: {} }, mixed)), ['price', VIN.wagoneer], 'a car finished under its VIN in mixed case passes over its rows too');
+  // every letter a VIN can hold, U to Z too, which the letters above leave out
+  const vinLetters = `${letters}UVWXYZ`;
+  assert.equal(pickNext(next({ diff: { takenAt: at3(2), takeDown: [takeRow(vinLetters.toLowerCase())], priceUpdates: [] }, posted: {} }, vinLetters)), null, 'a row carrying every letter a VIN can hold in lower case, U to Z too, is passed over');
+  // a price update alike: in lower case to its last letter, and matched by the whole VIN, not by the first 11 places another car of the same model, year and plant can share
+  assert.equal(pickNext(next({ diff: { takenAt: at3(2), takeDown: [], priceUpdates: [priceRow(letters.toLowerCase())] }, posted: {} }, letters)), null, 'a price update carrying the VIN in lower case to its last letter is passed over');
+  const sibling = `${VIN.ram.slice(0, 11)}000001`;
+  assert.deepEqual(pickNext(next({ diff: { takenAt: at3(2), takeDown: [], priceUpdates: [priceRow(VIN.ram.toLowerCase()), priceRow(sibling)] }, posted: {} }, VIN.ram)), ['price', sibling], 'another car\'s price update, its VIN the same to place 11, is still returned');
+  // the whole finished VIN with more after it is another car's VIN, whatever its length
+  assert.deepEqual(afterRam(`${VIN.ram}X`), ['takeDown', `${VIN.ram}X`], 'another car whose VIN starts with the whole finished VIN is still returned');
+  // nor by a stock number two cars share
+  assert.deepEqual(pickNext(next({ diff: { takenAt: at3(2), takeDown: [takeRow('b', { stock: 'S-1' }), takeRow('C', { stock: 'S-1' })], priceUpdates: [] }, posted: {} }, 'B')), ['takeDown', 'C'], 'another car with the finished car\'s stock number is still returned');
 });
 
 test('the order is the To do tab\'s: the scan\'s own, or oldest first by each kind\'s open flag, a car with no open flag last', () => {
