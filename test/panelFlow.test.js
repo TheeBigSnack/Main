@@ -2745,6 +2745,12 @@ test('the form is not filled with a description that fails a fact or identity ch
     assert.match(why, /Fix the description \(or use Reset to template\) first\.$/, what);
   }
   assert.match(fillBlocker(`${CLEAN}\nComes with a warranty.`), /Says "warranty", but the website says nothing about a warranty or guarantee for this car/);
+  // the website's other price for this car, said as its price, is the description's to fix too, not a Settings stop
+  assert.match(realBlocker({ ...state, vehicle: { ...CAR, priceBeforeFees: 20500 } })(`${CLEAN}\nYours for $20,500.`), /: Says \$20,500, but this listing's price is \$20,986\. Fix the description \(or use Reset to template\) first\.$/);
+  // and so is a mileage, a price change or a Facebook partnership the description says by itself: each alone is the description's to fix
+  assert.match(fillBlocker(CLEAN.replace('34,567 miles', '20,986 miles')), /: Says 20,986 miles, but the website shows 34,567 miles\. Fix the description \(or use Reset to template\) first\.$/);
+  assert.match(fillBlocker(`${CLEAN}\nPrice reduced.`), /: Says "Price reduced"; a description never claims a price change\. Fix the description \(or use Reset to template\) first\.$/);
+  assert.match(fillBlocker(`${CLEAN}\nFacebook partner.`), /: Says a Facebook or Meta partnership, approval or verification, which no listing may claim\. Fix the description \(or use Reset to template\) first\.$/);
   // the dealer's price note, when it applies to this car, is one of them
   const noted = { ...state, settings: { ...SETTINGS, priceNote: 'Tax and tags extra.' } };
   assert.match(realBlocker(noted)(CLEAN), /Doesn't include your dealership's price note/);
@@ -2754,6 +2760,8 @@ test('the form is not filled with a description that fails a fact or identity ch
   assert.doesNotMatch(noteStatus, /\bSettings\b/, noteStatus);
   // only a reason that ends with those words: a missing note that says them itself is quoted, and keeps the description's fix
   assert.match(realBlocker({ ...state, settings: { ...SETTINGS, priceNote: 'Tax and tags extra; see the note in Settings.' } })(CLEAN), /see the note in Settings\."\. Fix the description \(or use Reset to template\) first\.$/);
+  // and so for such a note with no full stop of its own: its closing quote ends the reason
+  assert.match(realBlocker({ ...state, settings: { ...SETTINGS, priceNote: 'Tax and tags extra; see the note in Settings' } })(CLEAN), /see the note in Settings"\. Fix the description \(or use Reset to template\) first\.$/);
   // a banned phrase that the description joins to the note's own sentence is that description's stop too, and keeps the description's fix
   const joinedNote = { ...state, settings: { ...SETTINGS, priceNote: 'Tax, title and fees go to the state, not the dealer.' } };
   const joined = template.buildTemplateDescription({ vehicle: CAR, dealer: SETTINGS.dealer, salesperson: SETTINGS.salesperson, priceNote: joinedNote.settings.priceNote }).replace('Tax, title and fees go to the state, not the dealer.', 'Buy from me and tax, title and fees go to the state, not the dealer.');
@@ -2761,6 +2769,8 @@ test('the form is not filled with a description that fails a fact or identity ch
   assert.match(joinedStatus, /Says "not the dealer" with words joined to your price note's sentence/, joinedStatus);
   assert.match(joinedStatus, /Fix the description \(or use Reset to template\) first\.$/, joinedStatus);
   assert.doesNotMatch(joinedStatus, /\bSettings\b/, joinedStatus);
+  // a banned phrase across the note's edge (the note doesn't say it) is the description's: its own reason, and the description's fix
+  assert.match(realBlocker({ ...state, settings: { ...SETTINGS, priceNote: 'Dealer fees extra.' } })(template.buildTemplateDescription({ vehicle: CAR, dealer: SETTINGS.dealer, salesperson: SETTINGS.salesperson, priceNote: 'Dealer fees extra.' }).replace('Dealer fees extra.', 'Ask for me, not the Dealer fees extra.')), /: Says "not the dealer"\. Fix the description \(or use Reset to template\) first\.$/);
   // an edited or a rewritten description with the same missing note keeps the description's fix too: a Settings save does not write it again
   for (const descriptionSource of ['edited', 'claude']) {
     const ownStatus = realBlocker({ ...noted, descriptionSource })(CLEAN);
@@ -2771,9 +2781,13 @@ test('the form is not filled with a description that fails a fact or identity ch
   const refusedNote = { ...state, settings: { ...SETTINGS, priceNote: 'Priced to sell, plus tax, title and registration.' } };
   const lacksRefused = realBlocker(refusedNote)(CLEAN);
   assert.match(lacksRefused, /^The description fails 2 checks that must pass before the form is filled: Doesn't include your dealership's price note: "Priced to sell, plus tax, title and registration\."; Your dealership's price note says "priced to sell"; change the note in Settings\. Fix the description \(or use Reset to template\) first\.$/, lacksRefused);
+  // and beside a note refused for its other words (the steer reason): the missing note still stops it, with the description's fix
+  assert.match(realBlocker({ ...state, settings: { ...SETTINGS, priceNote: 'Tax, title and fees go to the state, not the dealer. Text me.' } })(CLEAN), /^The description fails 2 checks that must pass before the form is filled: Doesn't include your dealership's price note: "Tax, title and fees go to the state, not the dealer\. Text me\."; Your price note says "not the dealer"[^]+ Change the note in Settings\. Fix the description \(or use Reset to template\) first\.$/);
   // the refused phrase said again in the description's own words is the description's stop, not the note's: the description's fix
   const ownWords = realBlocker({ ...refusedNote, descriptionSource: 'edited' })(`${template.buildTemplateDescription({ vehicle: CAR, dealer: SETTINGS.dealer, salesperson: SETTINGS.salesperson, priceNote: refusedNote.settings.priceNote })}\nPriced to sell today.`);
   assert.match(ownWords, /: Says "priced to sell"\. Fix the description \(or use Reset to template\) first\.$/, ownWords);
+  // and so beside a note refused for its other words (the steer reason): "not the dealer" in the description's own words is its stop, with its fix
+  assert.match(realBlocker({ ...state, settings: { ...SETTINGS, priceNote: 'Tax, title and fees go to the state, not the dealer. Text me.' }, descriptionSource: 'edited' })(`${template.buildTemplateDescription({ vehicle: CAR, dealer: SETTINGS.dealer, salesperson: SETTINGS.salesperson, priceNote: 'Tax, title and fees go to the state, not the dealer. Text me.' })}\nBuy direct, not the dealer.`), /^The description fails a check that must pass before the form is filled: Says "not the dealer"\. Fix the description \(or use Reset to template\) first\.$/);
   assert.equal(realBlocker({ ...noted, noteApplies: false })(CLEAN), '', 'a note that does not apply to this car is not looked for');
   // length and tone are the salesperson's call (the last text is over the word limit)
   for (const text of [`${CLEAN}\nCOME SEE THIS TRUCK TODAY`, `${CLEAN}\n🔥🔥🔥🔥`, CLEAN.split('\n').slice(0, 3).join('\n') + `\nI'm Sam, sales consultant at Example Motors.\nVIN ${CAR.vin}.`, `${CLEAN}\n${'Message me with any question about it. '.repeat(10)}`]) {
@@ -2801,10 +2815,17 @@ test('a role with a number keeps the form shut, and the status line names the ro
   // a dealership name that reads as a mileage is a number in Settings too: the Settings fix
   const mile = { ...SETTINGS, dealer: { ...SETTINGS.dealer, name: '8 Mile Auto' } };
   assert.match(realBlocker({ ...state, settings: mile })(template.buildTemplateDescription({ vehicle: CAR, dealer: mile.dealer, salesperson: SETTINGS.salesperson, priceNote: '' })), /\(Dealership name\), for example to "Eight Mile Auto"\. After you save Settings, the template writes the description again; if you edited it, click Reset to template\.$/);
+  // and so is a number in the salesperson's own name: the Settings fix
+  const numbered = { ...SETTINGS, salesperson: { name: 'Sam 2', title: 'sales consultant' } };
+  assert.match(realBlocker({ ...state, settings: numbered })(template.buildTemplateDescription({ vehicle: CAR, dealer: numbered.dealer, salesperson: numbered.salesperson, priceNote: '' })), /\(Your name\), for example to "Sam"\. After you save Settings, the template writes the description again; if you edited it, click Reset to template\.$/);
   // with a problem of the description's own beside it, the description needs fixing too
   const both = fillBlocker(text.replace('34,567 miles', '12,000 miles'));
   assert.match(both, /^The description fails 3 checks that must pass before the form is filled: Your role "2nd shift sales" has a number in it/);
   assert.match(both, /Fix the description \(or use Reset to template\) first\.$/);
+  // and so for an edited or a rewritten description: with a stop of its own, the line gives the description's fix, not Reset to template after a Settings save
+  for (const descriptionSource of ['edited', 'claude']) assert.match(realBlocker({ ...state, descriptionSource })(text.replace('34,567 miles', '12,000 miles')), /Fix the description \(or use Reset to template\) first\.$/, descriptionSource);
+  // a missing price note beside it is a stop of the description's own too: both are said, with the description's fix
+  assert.match(realBlocker({ ...state, settings: { ...settings, priceNote: 'Tax and tags extra.' } })(text), /^The description fails 2 checks that must pass before the form is filled: Your role "2nd shift sales" [^]+; Doesn't include your dealership's price note: "Tax and tags extra\."\. Fix the description \(or use Reset to template\) first\.$/);
   // the role changed in Settings: the template written again passes
   const fixed = { ...settings, salesperson: { name: 'Sam', title: 'Second shift sales' } };
   const again = template.buildTemplateDescription({ vehicle: CAR, dealer: fixed.dealer, salesperson: fixed.salesperson, priceNote: '' });

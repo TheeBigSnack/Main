@@ -850,6 +850,32 @@ test('the car just finished is passed over, its take-down and its price update a
   const samePage = { url: `${STANDARD_ORIGIN}/used-vehicles/` };
   assert.deepEqual(pickNext(next({ diff: { takenAt: at3(2), takeDown: [takeRow('b', samePage), takeRow('C', samePage)], priceUpdates: [] }, posted: {} }, 'B')), ['takeDown', 'C'], 'another car with the finished car\'s address is still returned');
   assert.deepEqual(pickNext(next({ diff: { takenAt: at3(2), takeDown: [], priceUpdates: [priceRow('b', samePage), priceRow('C', samePage)] }, posted: {} }, 'B')), ['price', 'C'], 'another car\'s price update with the finished car\'s address is still returned');
+  // equal VINs, never a looser reading of them: a VIN one place away, in its check digit (the readers keep a VIN whose check digit is wrong, and the side panel's VIN check only flags it), is another VIN, a take-down or a price update alike
+  const checkTwin = `${VIN.ram.slice(0, 8)}1${VIN.ram.slice(9)}`;
+  assert.deepEqual(afterRam(checkTwin), ['takeDown', checkTwin], 'another car whose VIN differs from the finished VIN in its check digit alone is still returned');
+  assert.deepEqual(priceAfterRam(checkTwin), ['price', checkTwin], 'another car\'s price update, its VIN differing from the finished VIN in its check digit alone, is still returned');
+  // and so is a VIN with a mark in it, or with a letter where the finished VIN has the digit it looks like (adapters/dealerInspireNormalize.js keeps a VIN as the website writes it, only upper-cased)
+  const dashed = `${VIN.ram.slice(0, 11)}-${VIN.ram.slice(11)}`;
+  assert.deepEqual(afterRam(dashed), ['takeDown', dashed], 'another car whose VIN is the finished VIN with a dash in it is still returned');
+  const lookalike = `I${VIN.ram.slice(1)}`;
+  assert.deepEqual(afterRam(lookalike), ['takeDown', lookalike], 'another car whose VIN has an I where the finished VIN has a 1 is still returned');
+  // the car just finished is passed over whatever its row says besides the VIN: the take-down diffScans keeps beside a sale-pending car's price update (finishing the price update leaves it on the list), a take-down with no stock number, a price the website raised, and the basis every price item for your listing names
+  const ownTakeDown = (extra) => pickNext(next({ diff: { takenAt: at3(2), takeDown: [takeRow(VIN.ram, extra), takeRow(VIN.wagoneer)], priceUpdates: [] }, posted: {} }, VIN.ram));
+  assert.deepEqual(ownTakeDown({ why: 'sale-pending', text: 'Sale pending on the website' }), ['takeDown', VIN.wagoneer], 'the sale-pending take-down a finished price update leaves on the list is passed over with its car');
+  assert.deepEqual(ownTakeDown({ stock: '' }), ['takeDown', VIN.wagoneer], 'a take-down of the car just finished with no stock number is passed over too: the stock number never decides it');
+  const ownPrice = (extra) => pickNext(next({ diff: { takenAt: at3(2), takeDown: [], priceUpdates: [priceRow('B', extra), priceRow('C')] }, posted: {} }, 'B'));
+  assert.deepEqual(ownPrice({ from: 19000, to: 20000, change: 1000 }), ['price', 'C'], 'a price the website raised is passed over once its car is finished');
+  assert.deepEqual(ownPrice({ basis: 'website' }), ['price', 'C'], 'a price update naming its basis, as every one for your listing does, is passed over once its car is finished');
+  // a price update alike, as the take-downs above: a VIN with a dash in it, or with an O where the finished VIN has a 0 (here its check digit), is another car's
+  assert.deepEqual(priceAfterRam(dashed), ['price', dashed], 'another car\'s price update, its VIN the finished VIN with a dash in it, is still returned');
+  const oForZero = `${VIN.ram.slice(0, 8)}O${VIN.ram.slice(9)}`;
+  assert.deepEqual(priceAfterRam(oForZero), ['price', oForZero], 'another car\'s price update, its VIN with an O where the finished VIN has a 0, is still returned');
+  // and so is a VIN with a space after it, which the same reader keeps as the website writes it: the finished VIN with more after it
+  const spaced = `${VIN.ram} `;
+  assert.deepEqual(afterRam(spaced), ['takeDown', spaced], 'another car whose VIN is the finished VIN with a space after it is still returned');
+  // whatever the website's reason, and whichever price basis the dealer chose: the take-down diffScans keeps beside the price update of a car the website no longer calls pre-owned, and a price item on the price before fees
+  assert.deepEqual(ownTakeDown({ why: 'not-pre-owned', text: 'Delete the listing: the car was not sold.' }), ['takeDown', VIN.wagoneer], 'the take-down of a car the website no longer calls pre-owned is passed over with its car');
+  assert.deepEqual(ownPrice({ basis: 'beforeFees' }), ['price', 'C'], 'a price update on the price before fees, the other basis a dealer can choose, is passed over once its car is finished');
 });
 
 test('the order is the To do tab\'s: the scan\'s own, or oldest first by each kind\'s open flag, a car with no open flag last', () => {

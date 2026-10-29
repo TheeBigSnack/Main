@@ -720,7 +720,25 @@ test('a price read still in flight when I updated it does not reopen the done it
     await rig.flush();
     assert.equal(up.status, 'done', 'the late answer does not change the done item');
     assert.match(upkeepHtml(), /id="upkeepNext"/, 'Open next To do item is still offered');
+    assert.match(rig.drawn.at(-1), /id="upkeepNext"/, 'and the last panel drawn offers it');
     assert.doesNotMatch(upkeepHtml(), /id="priceFilled"/, 'and the item is not drawn as filled');
+    // a car with no saved link reads the posted list after the page, and that read answering after I updated it sets
+    // nothing either, also on a done item with no next item to offer: the done banner keeps its note
+    rig.ctx.nextItem = async () => null;
+    rig.page = { ...LISTED_PAGE, url: FORM_MAP.yourListingsUrl, matchesId: false }; // the tab opens on Your listings
+    const noLink = startUpkeep({ origin: 'https://www.example-motors.test', vin: 'ccc', kind: 'price', price: WANT_PRICE, listingUrl: '', name: 'Car C', listedPrice: 20000 }, rig.ctx);
+    await rig.flush();
+    await rig.tick(); // the wait before the first poll ends
+    await noLink;
+    const get = chrome.storage.local.get;
+    let answerList = null;
+    chrome.storage.local.get = (keys) => (Array.isArray(keys) ? new Promise((resolve) => { answerList = () => get(keys).then(resolve); }) : get(keys));
+    await rig.tick(); // the poll reads the page, then waits on the posted list
+    assert.equal(typeof answerList, 'function', 'the posted list is being read');
+    assert.equal(await handleUpkeepClick('upkeepDoneBtn', rig.ctx), true);
+    answerList();
+    await rig.flush();
+    assert.match(rig.drawn.at(-1), /<div class="banner good" id="upkeepDone">Done\. Marked done\.<\/div>/, 'the posted list answering after I updated it leaves the done banner and its note');
   } finally {
     endRig();
   }
@@ -749,6 +767,27 @@ test('a price read still in flight while the next To do item is looked for does 
     answer(NEXT);
     await rig.flush();
     assert.equal(up.vin, 'BBB', 'the item the lookup found opens');
+    // a car with no saved link reads the posted list after the page, and that read answering while the next item is
+    // looked for sets nothing either: the done banner an empty lookup brings back keeps its note
+    lookupHeld = false;
+    rig.page = { ...LISTED_PAGE, url: FORM_MAP.yourListingsUrl, matchesId: false }; // the tab opens on Your listings
+    const noLink = startUpkeep({ origin: 'https://www.example-motors.test', vin: 'ccc', kind: 'price', price: WANT_PRICE, listingUrl: '', name: 'Car C', listedPrice: 20000 }, rig.ctx);
+    await rig.flush();
+    await rig.tick(); // the wait before the first poll ends
+    await noLink;
+    const get = chrome.storage.local.get;
+    let answerList = null;
+    chrome.storage.local.get = (keys) => (Array.isArray(keys) ? new Promise((resolve) => { answerList = () => get(keys).then(resolve); }) : get(keys));
+    await rig.tick(); // the poll reads the page, then waits on the posted list
+    assert.equal(typeof answerList, 'function', 'the posted list is being read');
+    assert.equal(await handleUpkeepClick('upkeepDoneBtn', rig.ctx), true);
+    lookupHeld = true;
+    const lookup = handleUpkeepClick('upkeepNext', rig.ctx);
+    answerList();
+    await rig.flush();
+    answer(null);
+    assert.equal(await lookup, true);
+    assert.match(rig.drawn.at(-1), /<div class="banner good" id="upkeepDone">Done\. Marked done\.<\/div>/, 'the posted list answering during the lookup leaves the done banner its note');
   } finally {
     endRig();
   }
@@ -1013,6 +1052,52 @@ test('a read still in flight when Open next To do item is clicked answers after 
     await r.flush();
     assert.equal(up.status, 'gone', 'the late poll moved the item on while the next item was looked up');
     assert.equal(up.vin, 'AAA', 'and the next item did not start');
+    // the same read answering with the tab still open, on a page that now shows the car sold, finishes nothing over
+    // the lookup: the panel keeps the Finding line
+    r.tabGone = false;
+    const third = startUpkeep({ origin: 'https://www.example-motors.test', vin: 'ccc', kind: 'takeDown', why: 'gone', name: 'Car C', listingUrl: LISTED_PAGE.url, listedPrice: 20000 }, r.ctx);
+    await r.flush();
+    await r.tick(); // the wait before the first poll ends
+    await third;
+    await r.tick(); // the first read: the listing as it opened, not sold
+    r.holdRead = true;
+    await r.tick(); // the next read waits on the page
+    const doneC = handleUpkeepClick('upkeepDoneBtn', r.ctx);
+    await r.untilLookups(3);
+    r.lookups[2](RACE_NEXT); // another item follows
+    await doneC;
+    handleUpkeepClick('upkeepNext', r.ctx);
+    await r.untilLookups(4);
+    r.heldRead.answer([{ result: { ...LISTED_PAGE, sold: true } }]); // the person has marked it sold meanwhile
+    await r.flush();
+    assert.match(upkeepHtml(), /<p class="hint" id="upkeepFinding">Finding the next To do item…<\/p>/, 'a take-down read answering during the lookup leaves the Finding line drawn');
+    // a take-down with no saved link reads the posted list after the page, and that read answering during the lookup
+    // sets nothing either: the done banner an empty lookup brings back keeps its note
+    r.lookups[3](null);
+    await r.flush();
+    const fourth = startUpkeep({ origin: 'https://www.example-motors.test', vin: 'ddd', kind: 'takeDown', why: 'gone', name: 'Car D', listingUrl: '', listedPrice: 20000 }, r.ctx);
+    await r.flush();
+    await r.tick(); // the wait before the first poll ends
+    await fourth;
+    r.holdRead = true;
+    await r.tick(); // the poll's read waits on the page
+    const get = chrome.storage.local.get;
+    let answerList = null;
+    chrome.storage.local.get = (keys) => (Array.isArray(keys) ? new Promise((resolve) => { answerList = () => get(keys).then(resolve); }) : get(keys));
+    r.heldRead.answer([{ result: { ...LISTED_PAGE, url: FORM_MAP.yourListingsUrl, matchesId: false } }]); // the tab is on Your listings
+    await r.flush();
+    assert.equal(typeof answerList, 'function', 'the posted list is being read');
+    const doneD = handleUpkeepClick('upkeepDoneBtn', r.ctx);
+    await r.untilLookups(5);
+    r.lookups[4](RACE_NEXT); // another item follows
+    await doneD;
+    const lookupD = handleUpkeepClick('upkeepNext', r.ctx);
+    await r.untilLookups(6);
+    answerList();
+    await r.flush();
+    r.lookups[5](null); // no next item after all
+    assert.equal(await lookupD, true);
+    assert.match(upkeepHtml(), /<div class="banner good" id="upkeepDone">Done\. Marked done\.<\/div>/, 'a take-down\'s posted list answering during the lookup leaves the done banner its note');
   } finally {
     await endRaceRig(r);
   }
