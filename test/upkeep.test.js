@@ -320,6 +320,7 @@ test('a price update reads the car on the website again first and fills the pric
       assert.match(r.note, said, what);
       assert.match(r.html, /id="upkeepStopped">[^<]*Nothing was filled/);
       assert.match(r.html, /id="upkeepClose"/);
+      assert.doesNotMatch(r.html, /id="upkeepNote"/, `${what}: the reason is said once, in the banner`);
       assert.doesNotMatch(r.html, /id="upkeepDoneBtn"/, `${what}: no I updated it, which would record a price`);
     }
     // a take-down reads nothing
@@ -395,6 +396,7 @@ test('a price update recorded from the side panel keeps the basis its price was 
     assert.equal(up.status, 'waiting', 'the listing is open with the price to fill');
     assert.equal(await handleUpkeepClick('upkeepDoneBtn', ctx), true);
     assert.equal(up.status, 'done');
+    assert.equal(up.note, 'Marked done.', 'the done banner says it was marked done by hand, not that Lot Current saw the listing change');
     endUpkeep();
     await started;
     return store[k.posted].AAA;
@@ -424,6 +426,9 @@ test('a price update whose Price box keeps another price after Lot Current\'s fi
   // while the box has not appeared yet, the waiting text stays as it was
   Object.assign(up, { stuck: false, boxShows: '', fills: 0 });
   assert.match(upkeepHtml(), /id="priceWaiting"/);
+  // stuck after fills that went in, each one undone by the form: still the stuck banner, never that the price is in the box
+  Object.assign(up, { status: 'filled', filledShown: '$18,500', stuck: true, boxShows: '$20,000', fills: 4 });
+  assert.match(upkeepHtml(), /id="priceStuck"/);
   endUpkeep();
 });
 
@@ -434,7 +439,7 @@ test('a price update whose Price box keeps another price after Lot Current\'s fi
 const WANT_PRICE = 18500;
 const LISTED_PAGE = { url: at('111'), matchesId: true, sold: false, unavailable: false, matchesVin: false, vinInText: false, matchesName: true, matchesPrice: true, prices: ['20000'], formOnPage: true, hasPriceBox: true, priceBoxValue: '20000' };
 async function priceRig(page, { nextItem } = {}) {
-  const rig = { page: { ...page }, fills: 0 };
+  const rig = { page: { ...page }, fills: 0, drawn: [] }; // drawn: the panel each render draws, in order
   const flush = async () => { for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve)); };
   rig.tick = async () => { mock.timers.tick(1500); await flush(); };
   globalThis.chrome = {
@@ -453,7 +458,7 @@ async function priceRig(page, { nextItem } = {}) {
     },
   };
   mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
-  const ctx = { render: () => {}, map: () => FORM_MAP, priceNow: async () => ({ ok: true, price: WANT_PRICE, basis: 'website' }), nextItem };
+  const ctx = { render: () => { rig.drawn.push(upkeepHtml()); }, map: () => FORM_MAP, priceNow: async () => ({ ok: true, price: WANT_PRICE, basis: 'website' }), nextItem };
   rig.started = startUpkeep({ origin: 'https://www.example-motors.test', vin: 'aaa', kind: 'price', price: WANT_PRICE, listingUrl: LISTED_PAGE.url, name: 'Car A', listedPrice: 20000 }, ctx);
   await flush();
   await rig.tick(); // the wait before the first poll ends
@@ -782,8 +787,9 @@ test('Open next To do item on a price update reads the car on the website before
     const asked = [];
     const readBeforeTab = [];
     const drawn = []; // the status each render draws, in order
+    const panels = []; // and the panel it draws
     const ctx = {
-      render: () => { drawn.push(up.status); },
+      render: () => { drawn.push(up.status); panels.push(upkeepHtml()); },
       map: () => FORM_MAP,
       nextItem: async () => NEXT_PRICE,
       priceNow: async (req) => { asked.push(req.vin); readBeforeTab.push(opened.length); return { ok: true, price: 17500, basis: 'website' }; },
@@ -796,6 +802,7 @@ test('Open next To do item on a price update reads the car on the website before
     assert.deepEqual(opened, [NEXT_PRICE.listingUrl], 'then that listing opens');
     assert.deepEqual([up.vin, up.kind, up.price, up.scanPrice], ['CCC', 'price', 17500, 18000], 'the price filled is the website\'s now, and the scan\'s is kept beside it');
     assert.deepEqual(drawn, ['finding', 'checking', 'opening', 'waiting'], 'the panel goes from the lookup line to the price check, and never draws the next car as done');
+    assert.match(panels[2], /<p>Opening your listing…<\/p>/, 'while its listing opens, the panel says so, before it gives any step on Facebook');
     endUpkeep();
 
     const stopped = [];
@@ -831,6 +838,7 @@ test('finishing an item offers Open next To do item only when another item follo
       await rig.tick();
       assert.equal(up.status, 'done');
       assert.match(upkeepHtml(), /id="upkeepDone"/, 'the done banner shows');
+      assert.match(rig.drawn.at(-1), /<div class="banner good" id="upkeepDone">Done\. The listing now shows \$18,500\.<\/div>/, 'it is the last panel drawn, and says the listing now shows the new price');
       assert.equal(/id="upkeepNext"/.test(upkeepHtml()), offered, `button drawn: ${offered}`);
     } finally {
       endRig();
@@ -919,6 +927,41 @@ test('a read still in flight when Open next To do item is clicked answers after 
     await r.flush();
     assert.equal(up.status, 'gone', 'the late poll moved the item on while the next item was looked up');
     assert.equal(up.vin, 'AAA', 'and the next item did not start');
+  } finally {
+    await endRaceRig(r);
+  }
+});
+
+// The listing tab closed while the item waits, before Lot Current saw the change: the panel asks whether the person
+// finished, and I updated it or Not now answers. The race tests above reach gone only after the item was recorded.
+test('a listing tab closed while the item waits asks whether the person finished, with I updated it and Not now', async () => {
+  const r = await raceRig({ origin: 'https://www.example-motors.test', vin: 'aaa', kind: 'price', price: WANT_PRICE, listingUrl: LISTED_PAGE.url, name: 'Car A', listedPrice: 20000 });
+  try {
+    r.holdRead = true;
+    await r.tick(); // a poll starts and waits on the listing read
+    r.tabGone = true; // the person closes the listing tab
+    r.heldRead.fail(new Error('No tab with id: 9'));
+    await r.flush();
+    assert.equal(up.status, 'gone');
+    assert.match(upkeepHtml(), /<div class="banner warn">The listing tab was closed\. Did you finish\?<\/div>\s*<div class="actions"><button type="button" class="primary" id="upkeepDoneBtn">I updated it<\/button><button type="button" class="plain" id="upkeepCancel">Not now<\/button><\/div>/);
+  } finally {
+    await endRaceRig(r);
+  }
+});
+
+// A take-down Lot Current sees on the listing (the page says sold after its first read) is done by itself, and the done
+// banner says what the page showed.
+test('a take-down whose listing then shows it sold is done, and the done banner says the listing shows it as sold or removed', async () => {
+  const r = await raceRig({ origin: 'https://www.example-motors.test', vin: 'aaa', kind: 'takeDown', why: 'gone', name: 'Car A', listingUrl: LISTED_PAGE.url, listedPrice: 20000 });
+  r.ctx.nextItem = async () => null;
+  try {
+    await r.tick(); // the first read: the listing as it opened, not sold
+    r.holdRead = true;
+    await r.tick(); // the next read waits on the page
+    r.heldRead.answer([{ result: { ...LISTED_PAGE, sold: true } }]); // the person has marked it sold
+    await r.flush();
+    assert.equal(up.status, 'done');
+    assert.match(upkeepHtml(), /<div class="banner good" id="upkeepDone">Done\. The listing shows it as sold or removed\.<\/div>/);
   } finally {
     await endRaceRig(r);
   }

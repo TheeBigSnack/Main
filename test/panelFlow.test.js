@@ -2689,6 +2689,8 @@ test('no way of filling the form types a description that does not name the deal
   const good = await fill({ name: 'Example Motors' }, 'A fine truck. Sales consultant at example motors.');
   assert.deepEqual(good.typed, ['A fine truck. Sales consultant at example motors.'], 'a description that names the dealership is typed');
   assert.deepEqual(good.said, []);
+  // a name stored with spaces or a line break around it (the first scan takes the website's own name tag as it is) is looked for without them
+  assert.deepEqual((await fill({ name: '\n  Example Motors  ' }, 'A fine truck. Sales consultant at Example Motors.')).typed, ['A fine truck. Sales consultant at Example Motors.'], 'the name is looked for trimmed');
   // the fields check view says why and keeps "Fill it in now" off
   assert.match(fnText('viewProbe'), /const blocked = fillBlocker\(state\.listing && state\.listing\.fields && state\.listing\.fields\.description\);/);
   assert.match(fnText('viewProbe'), /id="fillNow" \$\{found\.length && !cap\.reached && !blocked \? '' : 'disabled'\}/);
@@ -2823,6 +2825,9 @@ test('a number in the role and a price note refused in Settings: the status line
   const r = staleReader(reviewState({ readAt: '', settings: { ...reviewState().settings, salesperson, priceNote }, description: freshText }), () => ({ ok: true, vehicle: FRESH_CAR() }));
   assert.equal(await r.run(), false);
   assert.deepEqual(r.calls.said.at(-1), ['The website changed this car since it was read. The description no longer matches it: Your role "2nd shift sales" has a number in it, and every number in a description must match the website\'s data for the car; change it in Settings (Your role), for example to "Second shift sales"; Your dealership\'s price note says "priced to sell"; change the note in Settings. After you save Settings, the template writes the description again; if you edited it, click Reset to template. Then click Open the Marketplace form again.', 'error']);
+  // a note refused for its other words (the real steer reason, which ends with its own full stop) is fixed in Settings too, and names every word to take out
+  const steerNote = 'Tax, title and fees go to the state, not the dealer. Text me.';
+  assert.equal(realBlocker({ settings: { ...SETTINGS, priceNote: steerNote }, vehicle: CAR, price: 20986, noteApplies: true })(template.buildTemplateDescription({ vehicle: CAR, dealer: SETTINGS.dealer, salesperson: SETTINGS.salesperson, priceNote: steerNote })), 'The description fails a check that must pass before the form is filled: Your price note says "not the dealer", so it may only say where the fees go and what the price includes; take out "Text" and "me", or take out "not the dealer". Change the note in Settings. After you save Settings, the template writes the description again; if you edited it, click Reset to template.');
 });
 
 // A price note quoting a fee that is not the gap between this car's two prices
@@ -2853,6 +2858,7 @@ test('the checks line says which problems stop the form and which only warn', ()
   const warnOnly = checksHtml({ ok: false, problems: [warn], words: 50 });
   assert.match(warnOnly, /class="checks warn"/);
   assert.doesNotMatch(warnOnly, /Fix before/);
+  assert.match(checksHtml({ ok: false, problems: [warn, { code: 'all-caps', text: 'Has ALL CAPS shouting' }], words: 50 }), /<ul><li>50 words; needs at least 60<\/li><li>Has ALL CAPS shouting<\/li><\/ul><\/div>$/, 'the warnings in the order the checks give them');
   assert.match(checksHtml({ ok: true, problems: [], words: 80 }), /^<div class="checks ok" id="checks">All checks passed: 80 words/);
   // passing says what was checked, no more: the claim checks go by set words
   const passed = checksHtml({ ok: true, problems: [], words: 80 });
@@ -2860,6 +2866,9 @@ test('the checks line says which problems stop the form and which only warn', ()
   assert.match(passed, /no banned phrases or flagged claims/);
   assert.match(passed, /read it through before you publish/);
   assert.doesNotMatch(passed, /price note included/, 'no price note is set, so none is said to be included');
+  // with a price note set for this car, the passing line says it is included, and claims no more than the checks did
+  const noted = new Function('esc', 'ruleProblems', 'noteFor', `${constText('settingsFix')}\n${fnText('checksHtml')}\nreturn checksHtml;`)((s) => String(s), template.ruleProblems, () => 'Tax and tags extra.');
+  assert.equal(noted({ ok: true, problems: [], words: 80 }), '<div class="checks ok" id="checks">All checks passed: 80 words; every number the checks found is in the website\'s data, price and mileage included; no banned phrases or flagged claims; dealership and your role named; price note included. The checks look for set words and numbers, so read it through before you publish.</div>');
 });
 
 // The review's checks line is what the person sees while a number in

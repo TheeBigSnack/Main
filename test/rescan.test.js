@@ -671,6 +671,7 @@ test('a To do price item from a scan taken before the listing\'s price waits for
   assert.equal(waits(item, { ...listed, postedAt: at(3) }, d), true, 'posted after it too');
   // a listing published from a draft filled before the scan (drafts.js markDraftPosted) counts from the draft
   assert.equal(waits(item, { ...listed, postedAt: at(3), draftSavedAt: at(1) }, d), false);
+  assert.equal(waits(item, { ...listed, draftSavedAt: '2026-09-30T09:00:00.000Z', updatedAt: at(3) }, d), true, 'published from a draft and updated after the scan (Updated keeps the draft\'s time): from the update');
   // unknown times: as scanCar reads them, the item stands
   assert.equal(waits(item, synced, { ...d, takenAt: undefined }), false);
   assert.equal(waits(item, { name: 'Ram', price: 26663 }, d), false);
@@ -719,6 +720,7 @@ test('a To do price item for a car carried over unread is dated from when its de
   assert.equal(rescan.priceItemWaits(item, synced, { ...d, ...began, carriedReadAt: { [VIN.ram]: at(2) } }), true, 'read on the 2nd, before the update: waits');
   assert.equal(rescan.priceItemWaits(item, synced, { ...d, ...began, carriedReadAt: { [VIN.ram]: null } }), true, 'no read time: not priced, so it waits');
   assert.equal(rescan.priceItemWaits(item, synced, { ...d, ...began, carriedReadAt: { [VIN.ram]: '2026-10-03T09:30:00.000Z' } }), false, 'read after the update: the item stands');
+  assert.equal(rescan.priceItemWaits(item, synced, { ...d, ...began, carriedReadAt: { [VIN.ram]: at(3) } }), false, 'read the moment the listing was updated counts as after it, as scanCar reads it');
   assert.equal(rescan.priceItemWaits(item, synced, { ...d, ...began, carriedReadAt: { OTHER: at(2) } }), false, 'a car this scan read is dated from when it began, as before');
 });
 
@@ -812,6 +814,7 @@ test('the order is the To do tab\'s: the scan\'s own, or oldest first by each ki
   assert.deepEqual(pickNext(next({ diff, posted: {}, flags, order: 'oldest' }, '')), ['takeDown', 'OLD'], 'oldest first');
   assert.deepEqual(pickNext(next({ diff, posted: {}, flags, order: 'oldest' }, 'OLD')), ['takeDown', 'NEW'], 'NOFLAG has no open flag, so it comes last');
   assert.deepEqual(pickNext(next({ diff, posted: {}, flags }, '')), ['takeDown', 'NOFLAG'], 'no order given is the scan\'s own');
+  assert.deepEqual(pickNext(next({ diff, posted: {}, order: 'oldest' }, '')), ['takeDown', 'NOFLAG'], 'oldest first with no pilot record (Clear the numbers left none): no row has an open flag, so the scan\'s own');
 });
 
 test('the next item is the first take-down or price row with a button, from the top in the tab\'s order, for each order and each car just finished', () => {
@@ -851,6 +854,9 @@ test('the next item is the first take-down or price row with a button, from the 
   // a button does not depend on a take-down's reason or a price's direction: a car the website no longer calls pre-owned (its listing is deleted) and a price the website raised come next like the others
   assert.deepEqual(pickNext(rescan.nextUpkeepItem({ diff: { takenAt: at3(2), takeDown: [takeRow('DEMO', { why: 'not-pre-owned', text: 'Delete the listing: the car was not sold.' })], priceUpdates: [] }, posted: {} }, '')), ['takeDown', 'DEMO'], 'a take-down of a car not pre-owned');
   assert.deepEqual(pickNext(rescan.nextUpkeepItem({ diff: { takenAt: at3(2), takeDown: [], priceUpdates: [priceRow('UP', { from: 19000, to: 20000, change: 1000 })] }, posted: {} }, '')), ['price', 'UP'], 'a price that went up');
+  assert.deepEqual(pickNext(rescan.nextUpkeepItem({ diff: { takenAt: at3(2), takeDown: [takeRow('PEND', { why: 'sale-pending', text: 'Sale pending on the website' })], priceUpdates: [] }, posted: {} }, '')), ['takeDown', 'PEND'], 'a take-down of a car the website marks sale-pending or sold');
+  // a scan held back as a website hiccup is still saved as the To do list (only its snapshot is not), and the tab draws its buttons
+  assert.deepEqual(pickNext(rescan.nextUpkeepItem({ diff: { takenAt: at3(2), unreliable: true, takeDown: [], priceUpdates: [priceRow('HELD')] }, posted: {} }, '')), ['price', 'HELD'], 'a held-back scan\'s items come next too');
 });
 
 test('the To do order reads a row\'s own kind of flag only, and a row with no flag or an equal flag time keeps the scan\'s order', () => {
@@ -867,6 +873,9 @@ test('the To do order reads a row\'s own kind of flag only, and a row with no fl
   assert.deepEqual(walk([car('T1'), car('T2')], [{ vin: 'T1', kind: 'price', flaggedAt: at3(1) }, { vin: 'T2', kind: 'takeDown', flaggedAt: at3(2) }]), ['T2', 'T1'], 'T1 has a price flag, not a take-down flag, so it comes after T2');
   assert.deepEqual(walk([car('A'), car('B'), car('C')], [{ vin: 'C', kind: 'takeDown', flaggedAt: at3(1) }]), ['C', 'A', 'B'], 'the flagged row first, then the rows with no flag in the scan\'s order');
   assert.deepEqual(walk([car('A'), car('B')], [{ vin: 'A', kind: 'takeDown', flaggedAt: at3(1) }, { vin: 'B', kind: 'takeDown', flaggedAt: at3(1) }]), ['A', 'B'], 'an equal flag time keeps the scan\'s order');
+  // a price row too: P1's take-down flag, still open from before its price moved (a scan with warnings keeps it), is not the age of its price update
+  const priceFlags = [{ vin: 'P1', kind: 'takeDown', flaggedAt: at3(1) }, { vin: 'P2', kind: 'price', flaggedAt: at3(2) }, { vin: 'P1', kind: 'price', flaggedAt: at3(3) }];
+  assert.equal(rescan.nextUpkeepItem({ diff: { takeDown: [], priceUpdates: [car('P1'), car('P2')] }, posted: {}, flags: priceFlags, order: 'oldest' }).item.vin, 'P2', 'P1\'s price flag is the newer one, so P2 comes first');
 });
 
 test('price updates come in the tab\'s order too: the scan\'s own, or oldest first by each one\'s open price flag, and one that waits has no button', () => {
