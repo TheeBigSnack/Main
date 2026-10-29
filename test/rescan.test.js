@@ -808,6 +808,15 @@ test('the next item is the first take-down or price row with a button, from the 
   assert.deepEqual(firstAfter('oldest', 'T3'), ['takeDown', 'T2']);
   assert.deepEqual(firstAfter('oldest', 'T2'), ['takeDown', 'T3']);
   assert.deepEqual(firstAfter('oldest', 'T4'), ['takeDown', 'T3']);
+  // with no take-down left, the first price row with a button in the same order: P1 waits and P3 is not yours
+  const priceAfter = (order, finished) => pickNext(rescan.nextUpkeepItem({ diff: { ...diff, takeDown: [] }, posted, flags, order }, finished));
+  assert.deepEqual(priceAfter('listed', ''), ['price', 'P2'], 'the scan\'s order: P2 is the first price row with a button');
+  assert.deepEqual(priceAfter('listed', 'P2'), ['price', 'P4'], 'the car just finished is passed over, its price update too');
+  assert.deepEqual(priceAfter('listed', 'P4'), ['price', 'P2']);
+  assert.deepEqual(priceAfter('oldest', ''), ['price', 'P4'], 'oldest first: P4 has the earliest open price flag');
+  assert.deepEqual(priceAfter('oldest', 'P4'), ['price', 'P2']);
+  assert.deepEqual(priceAfter('oldest', 'P2'), ['price', 'P4']);
+  assert.deepEqual(priceAfter('oldest', 'P1'), ['price', 'P4'], 'a car finished that has no button changes nothing');
 });
 
 test('the To do order reads a row\'s own kind of flag only, and a row with no flag or an equal flag time keeps the scan\'s order', () => {

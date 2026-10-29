@@ -118,6 +118,15 @@ const commentFree = (line) => {
 const codeText = (src) => src.split('\n').filter((line) => !/^\s*\/\//.test(line)).map(commentFree).join('\n');
 
 test('help.md names the popup and side panel controls as the code labels them', () => {
+  // codeText (commentFree) drops a comment after code on a line, so a label only that comment names is no label; a //
+  // inside a quoted string is kept, and so is one after an escaped quote, which does not close the string
+  const trailing = "  button.textContent = 'Open the Marketplace form'; // Check fields are off meanwhile";
+  assert.equal(codeText(trailing).trim(), "button.textContent = 'Open the Marketplace form';", 'the comment after the code is dropped');
+  assert.equal(codeText(trailing).includes('Check fields'), false, 'a label that only a trailing comment names is no label the code draws');
+  const url = "  const url = 'https://example.test/marketplace';";
+  assert.equal(codeText(url), url, 'a // inside a quoted string is kept');
+  const escaped = "  const note = 'it\\'s the price // not a comment';";
+  assert.equal(codeText(escaped), escaped, 'an escaped quote does not close the string, so the // after it is inside the string and is kept');
   const ui = ['../extension/popup.js', '../extension/sidepanel.js', '../extension/upkeep.js'].map((f) => codeText(read(f))).join('\n').replace(/&amp;/g, '&');
   const help = doc('help.md');
   for (const label of LABELS) {

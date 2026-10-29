@@ -2777,7 +2777,7 @@ test('a role with a number keeps the form shut, and the status line names the ro
 // A number in the role and a price note the checks refuse are both fixed in
 // Settings (a Settings save writes the template again), so the status line
 // gives the Settings fix, not the description's.
-test('a number in the role and a price note refused in Settings: the status line gives the Settings fix, not the description\'s', () => {
+test('a number in the role and a price note refused in Settings: the status line gives the Settings fix, not the description\'s', async () => {
   const salesperson = { name: 'Sam', title: '2nd shift sales' };
   const priceNote = 'Priced to sell, plus tax, title and registration.';
   const settings = { ...SETTINGS, salesperson, priceNote };
@@ -2789,6 +2789,16 @@ test('a number in the role and a price note refused in Settings: the status line
   assert.match(why, /Your dealership's price note says "priced to sell"; change the note in Settings/, why);
   assert.match(why, /After you save Settings, the template writes the description again; if you edited it, click Reset to template\.$/, why);
   assert.doesNotMatch(why, /Fix the description/, why);
+  // the whole status line: the reasons are joined with "; ", and fillBlocker adds one full stop after them, before the Settings fix
+  assert.equal(why, 'The description fails 2 checks that must pass before the form is filled: Your role "2nd shift sales" has a number in it, and every number in a description must match the website\'s data for the car; change it in Settings (Your role), for example to "Second shift sales"; Your dealership\'s price note says "priced to sell"; change the note in Settings. After you save Settings, the template writes the description again; if you edited it, click Reset to template.');
+  // the checks line, as checksHtml writes it (the real esc, so the quotes and apostrophes come out escaped)
+  const checksHtml = new Function('ruleProblems', 'noteFor', `${constText('esc')}\n${constText('settingsFix')}\n${fnText('checksHtml')}\nreturn checksHtml;`)(template.ruleProblems, () => '');
+  assert.equal(checksHtml(template.runGuardrails(text, { vehicle: CAR, dealer: settings.dealer, salesperson, priceNote, price: 20986 })), '<div class="checks bad" id="checks">Fix before the form can be filled:<ul><li>Your role &quot;2nd shift sales&quot; has a number in it, and every number in a description must match the website&#39;s data for the car; change it in Settings (Your role), for example to &quot;Second shift sales&quot;</li><li>Your dealership&#39;s price note says &quot;priced to sell&quot;; change the note in Settings</li></ul><p>After you save Settings, the template writes the description again; if you edited it, click Reset to template.</p></div>');
+  // the website-changed line (carStillCurrent): the website's read of this car (FRESH_CAR) changes no field, so the line has no "(...)" part
+  const freshText = template.buildTemplateDescription({ vehicle: FRESH_CAR(), dealer: settings.dealer, salesperson, priceNote });
+  const r = staleReader(reviewState({ readAt: '', settings: { ...reviewState().settings, salesperson, priceNote }, description: freshText }), () => ({ ok: true, vehicle: FRESH_CAR() }));
+  assert.equal(await r.run(), false);
+  assert.deepEqual(r.calls.said.at(-1), ['The website changed this car since it was read. The description no longer matches it: Your role "2nd shift sales" has a number in it, and every number in a description must match the website\'s data for the car; change it in Settings (Your role), for example to "Second shift sales"; Your dealership\'s price note says "priced to sell"; change the note in Settings. After you save Settings, the template writes the description again; if you edited it, click Reset to template. Then click Open the Marketplace form again.', 'error']);
 });
 
 // A price note quoting a fee that is not the gap between this car's two prices
