@@ -1200,3 +1200,40 @@ test('a tab lookup that answers after another To do item started writes no note 
     await endRaceRig(r);
   }
 });
+
+// A take-down recorded without its name makes namesakesNow read the last scan for the names (its second storage read),
+// and that read can be in flight when another To do item starts. The read was made for car A, so car B keeps none
+// (up.names stays null) and its state is the one startUpkeep gave it.
+test('a last-scan read still in flight when another To do item starts writes no names onto that item', async () => {
+  const origin = 'https://www.example-motors.test';
+  const k = siteKeys(origin);
+  const T = (h) => new Date(Date.UTC(2026, 9, 5, h)).toISOString();
+  const store = {
+    [k.takenDown]: noteTakenDown(null, { vin: 'AAA', postedAt: T(1) }, T(2), T(2)), // car A's take-down, recorded without its name
+    [k.snapshot]: { vehicles: { AAA: { name: 'Car A' }, BBB: { name: 'Car B' } } },
+  };
+  const r = await raceRig({ origin, vin: 'aaa', kind: 'takeDown', why: 'gone', name: 'Car A', listingUrl: '', listedPrice: 20000 }, store);
+  // the last scan is read for car A's namesakes, and that read is held until the test answers it
+  const get = chrome.storage.local.get;
+  let answerScan = null;
+  chrome.storage.local.get = (keys) => {
+    if (![keys].flat().includes(k.snapshot)) return get(keys);
+    return new Promise((resolve) => { answerScan = () => get(keys).then(resolve); });
+  };
+  try {
+    await r.tick(); // car A's first poll: no listing id, so its namesakes are read, and the last scan read is held
+    assert.ok(answerScan, 'the last-scan read is in flight');
+    // another item starts while that read is in flight
+    const next = startUpkeep({ origin, vin: 'bbb', kind: 'takeDown', why: 'gone', name: 'Car B', listingUrl: at('222'), listedPrice: 21000 }, r.ctx);
+    await r.flush();
+    await r.tick();
+    await next;
+    assert.equal(up.vin, 'BBB');
+    answerScan(); // the last scan answers now, after car B has started
+    await r.flush();
+    assert.equal(up.names, null, 'car A\'s read writes no names onto car B');
+    assert.deepEqual([up.vin, up.status], ['BBB', 'waiting'], 'car B keeps the state startUpkeep gave it');
+  } finally {
+    await endRaceRig(r);
+  }
+});

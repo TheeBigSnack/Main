@@ -176,14 +176,21 @@ export function namesakesOf(posted, vin, name, { takenDown = null, names = null 
 // (onListing then asks for the VIN, as if there were one). The last scan is
 // read only for a take-down recorded before names were kept, once per item.
 export async function namesakesNow() {
+  // The answer and its names belong to the car shown when this read started. Its fields and the run are read here,
+  // before the first await, because another To do item may start while the reads below wait.
+  const run = starts;
+  const { vin, name, origin, names: known } = up;
   try {
-    const k = siteKeys(up.origin);
+    const k = siteKeys(origin);
     const got = await chrome.storage.local.get([k.posted, k.takenDown]);
-    if (!up.names && takenDownList(got[k.takenDown]).some((t) => !t.name)) {
+    let names = known;
+    if (!known && takenDownList(got[k.takenDown]).some((t) => !t.name)) {
       const snap = (await chrome.storage.local.get(k.snapshot))[k.snapshot];
-      up.names = (snap && snap.vehicles) || {};
+      names = (snap && snap.vehicles) || {};
+      // a read for an item the panel has moved on from keeps its names to itself
+      if (run === starts) up.names = names;
     }
-    return namesakesOf(got[k.posted], up.vin, up.name, { takenDown: got[k.takenDown], names: up.names });
+    return namesakesOf(got[k.posted], vin, name, { takenDown: got[k.takenDown], names });
   } catch (e) {
     return null;
   }
