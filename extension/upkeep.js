@@ -325,15 +325,19 @@ async function poll(ctx) {
 
 // The diff without this car's items in the given lists; undefined when no
 // diff is stored, so nothing is written.
-function dropFromDiff(diff, lists) {
+function dropFromDiff(diff, lists, vin) {
   if (!diff || typeof diff !== 'object') return undefined;
   const next = { ...diff };
-  for (const list of lists) if (Array.isArray(next[list])) next[list] = next[list].filter((x) => x.vin !== up.vin);
+  for (const list of lists) if (Array.isArray(next[list])) next[list] = next[list].filter((x) => x.vin !== vin);
   return next;
 }
 
 async function finish(ctx, how) {
   stopPolling();
+  // A To do item started while the writes below wait must not change which car they write: the run and the car's
+  // fields are read here, before the first await.
+  const run = starts;
+  const { vin, origin, kind, basis, price: amount } = up;
   // The posted list, the item's flag in the pilot numbers and the diff are
   // changed from what is stored now, each under its key's lock
   // (src/storage.js): the popup and the worker write them too. A write that
@@ -344,8 +348,8 @@ async function finish(ctx, how) {
   // item for an open flag the listing already shows, and mergeFlags drops
   // that flag, src/sync.js), so the item would be in neither the numbers nor
   // the manager view.
-  const k = siteKeys(up.origin);
-  const price = up.kind === 'price';
+  const k = siteKeys(origin);
+  const price = kind === 'price';
   try {
     // a post taken down is kept in the take-down record first
     // (src/takenDown.js; the daily cap counts it from the day's log, or from
@@ -353,28 +357,34 @@ async function finish(ctx, how) {
     // scan (sold, gone or sale pending), so the website no longer listed the
     // car as ready
     if (!price) {
-      const entry = ((await chrome.storage.local.get(k.posted))[k.posted] || {})[up.vin];
-      if (entry && entry.mine !== false) await updateKey(k.takenDown, (log) => noteTakenDown(log, { vin: up.vin, postedAt: entry.postedAt, stillListed: false, listedBefore: entry.listedBefore === true, name: entry.name }));
+      const entry = ((await chrome.storage.local.get(k.posted))[k.posted] || {})[vin];
+      if (entry && entry.mine !== false) await updateKey(k.takenDown, (log) => noteTakenDown(log, { vin, postedAt: entry.postedAt, stillListed: false, listedBefore: entry.listedBefore === true, name: entry.name }));
     }
-    await updateKey(k.posted, (posted) => (price ? markPriceUpdated(posted || {}, up.vin, up.price, undefined, up.basis) : markTakenDown(posted || {}, up.vin)));
+    await updateKey(k.posted, (posted) => (price ? markPriceUpdated(posted || {}, vin, amount, undefined, basis) : markTakenDown(posted || {}, vin)));
     // pilot numbers: how long the item stayed open, and whether Lot Current
     // saw the change itself; a take-down closes the car's price item too, as
     // it leaves the diff with it (the popup's Taken down does the same), so
     // no price item stays open for a car that is down
-    await updatePilot(up.origin, (p) => resolveFlag(p, up.vin, price ? 'price' : null, { how }));
-    await updateKey(k.diff, (diff) => dropFromDiff(diff, price ? ['priceUpdates'] : ['takeDown', 'priceUpdates', 'needsALook']));
+    await updatePilot(origin, (p) => resolveFlag(p, vin, price ? 'price' : null, { how }));
+    await updateKey(k.diff, (diff) => dropFromDiff(diff, price ? ['priceUpdates'] : ['takeDown', 'priceUpdates', 'needsALook'], vin));
   } catch (e) {
-    up.error = storageErrorText(e);
-    ctx.render();
+    // the error is written and drawn only while the panel still shows this car
+    if (run === starts) {
+      up.error = storageErrorText(e);
+      ctx.render();
+    }
     return;
   }
-  up.error = '';
+  // The record is written. The badge and the sync below are about it, so they go out whichever item the panel shows by
+  // now; the panel itself is written only while it still shows this car.
+  if (run === starts) up.error = '';
   chrome.runtime.sendMessage({ type: 'updateBadge' }).catch(() => {});
   // signed in: the worker syncs the change, so the manager view and colleagues see it now (fire and forget; Settings shows how it went)
-  if (accountsConfigured() && (await loadSession(chrome.storage.local))) chrome.runtime.sendMessage({ type: 'syncNow', origin: up.origin }).catch(() => {});
+  if (accountsConfigured() && (await loadSession(chrome.storage.local))) chrome.runtime.sendMessage({ type: 'syncNow', origin }).catch(() => {});
+  // closed, or another To do item started, meanwhile: the record is written and the view is left alone
+  if (run !== starts || !up.active) return;
   up.status = 'done';
-  up.note = how === 'detected' ? (up.kind === 'price' ? `The listing now shows ${money(up.price)}.` : 'The listing shows it as sold or removed.') : 'Marked done.';
-  const run = starts;
+  up.note = how === 'detected' ? (price ? `The listing now shows ${money(amount)}.` : 'The listing shows it as sold or removed.') : 'Marked done.';
   ctx.render();
   // whether another To do item follows: the done banner is drawn already, and the button comes with the answer
   const more = await hasNextItem(ctx);

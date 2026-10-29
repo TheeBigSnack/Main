@@ -17,7 +17,7 @@ import { readListingInPage, fillPriceInPage } from '../extension/facebook/fillFo
 import { LISTING_SIGNS } from '../extension/facebook/listingSigns.js';
 import { FORM_MAP } from '../extension/facebook/formMap.js';
 import { onListing, listingIdFrom, startUpkeep, endUpkeep, up, namesakesOf, namesakesNow, offTargetNote, unreadTabNote, upkeepHtml, handleUpkeepClick } from '../extension/upkeep.js';
-import { noteTakenDown } from '../extension/src/takenDown.js';
+import { noteTakenDown, takenDownList } from '../extension/src/takenDown.js';
 import { siteKeys } from '../extension/src/storageKeys.js';
 import { fakeChrome } from './helpers.js';
 
@@ -816,15 +816,19 @@ test('finishing an item offers Open next To do item only when another item follo
 // The poll that reads the listing, on the side panel's 1.5 s interval. A read
 // can be held: the poll then waits in flight, as it does on a slow page, until
 // the test answers it. stopPolling stops the interval, not a poll already in
-// flight, so such a poll still writes the status when its read answers.
-async function raceRig(item) {
-  const r = { tabGone: false, holdRead: false, heldRead: null, lookups: [] };
+// flight. finish's stopPolling leaves such a poll to write the status when its
+// read answers, since it is still the same item's. startUpkeep and endUpkeep
+// change `starts` (endUpkeep clears `active` too), so a poll still in flight
+// when another To do item starts, or Not now is pressed, writes no status,
+// note or listing for the item then shown.
+async function raceRig(item, store = {}) {
+  const r = { tabGone: false, tabUrl: LISTED_PAGE.url, holdRead: false, heldRead: null, lookups: [] };
   r.flush = async () => { for (let i = 0; i < 40; i++) await new Promise((resolve) => setImmediate(resolve)); };
   r.tick = async () => { mock.timers.tick(1500); await r.flush(); };
   r.untilLookups = async (n) => { for (let i = 0; i < 200 && r.lookups.length < n; i++) await new Promise((resolve) => setImmediate(resolve)); };
   globalThis.chrome = {
-    ...fakeChrome({}, {}),
-    tabs: { create: async () => ({ id: 9 }), get: async (id) => { if (r.tabGone) throw new Error('No tab with id: 9'); return { id, url: LISTED_PAGE.url }; } },
+    ...fakeChrome({}, store),
+    tabs: { create: async () => ({ id: 9 }), get: async (id) => { if (r.tabGone) throw new Error('No tab with id: 9'); return { id, url: r.tabUrl }; } },
     runtime: { sendMessage: async () => ({}) },
     scripting: {
       executeScript: async ({ func }) => {
@@ -924,7 +928,7 @@ test('a next-item lookup that answers after its item was ended opens no listing,
   try {
     Object.assign(up, { ...DONE_CAR, hasNext: true });
     const first = handleUpkeepClick('upkeepNext', ctx); // car A's next item is looked up
-    endUpkeep(); // Not now: that lookup belongs to a run that has ended
+    endUpkeep(); // Close, the one button drawn while the next item is looked up: that run has ended
     Object.assign(up, { ...DONE_CAR, active: true, vin: 'CCC', name: 'Car C', hasNext: true }); // car C is done, with one more item to find
     const second = handleUpkeepClick('upkeepNext', ctx);
     assert.equal(up.status, 'finding', 'car C\'s own lookup is under way');
@@ -952,7 +956,8 @@ test('an item\'s next-item question answered after another item replaced it sets
     Object.assign(up, { ...DONE_CAR, status: 'waiting', hasNext: false });
     const done = handleUpkeepClick('upkeepDoneBtn', ctx); // car A is finished: whether another item follows is asked
     for (let i = 0; i < 50 && !answer; i++) await new Promise((resolve) => setTimeout(resolve, 0));
-    endUpkeep(); // Not now; car C is shown next, done, with nothing after it
+    // Close: the done banner's one button while car A's next item is looked up.
+    endUpkeep(); // car C is shown next, done, with nothing after it
     Object.assign(up, { ...DONE_CAR, vin: 'CCC', name: 'Car C', hasNext: false });
     answer(NEXT); // car A's answer comes late: another item follows car A
     assert.equal(await done, true);
@@ -988,6 +993,210 @@ test('a read of the posted list still in flight when another To do item starts a
     assert.equal(up.listingId, '', 'car A\'s listing id is not saved for car B');
     assert.equal(up.baseline, null, 'nor is car A\'s page the baseline of car B');
   } finally {
+    await endRaceRig(r);
+  }
+});
+
+// finish (upkeep.js) reads the car's fields and run before its first await:
+// car A's record is written even when the panel has moved on to car B, and car
+// B's state, note, next-item button and list entries are left as they were.
+test('a take-down finished while its posted-list read waits writes only its own car, when another To do item starts meanwhile', async () => {
+  const origin = 'https://www.example-motors.test';
+  const k = siteKeys(origin);
+  const store = {
+    [k.posted]: { AAA: { price: 20000, postedAt: 1, mine: true, name: 'Car A' }, BBB: { price: 21000, postedAt: 1, mine: true, name: 'Car B' } },
+    [k.diff]: { takeDown: [{ vin: 'AAA' }, { vin: 'BBB' }] },
+  };
+  const r = await raceRig({ origin, vin: 'aaa', kind: 'takeDown', why: 'gone', name: 'Car A', listingUrl: at('111'), listedPrice: 20000 }, store);
+  r.ctx.nextItem = async () => null; // car A's next-item question is not what this test is about
+  // the first read of the posted list that finish makes is held until the test answers it
+  const get = chrome.storage.local.get;
+  let holding = false;
+  let answerList = null;
+  chrome.storage.local.get = (keys) => {
+    if (!holding || ![keys].flat().includes(k.posted)) return get(keys);
+    holding = false;
+    return new Promise((resolve) => { answerList = () => get(keys).then(resolve); });
+  };
+  try {
+    holding = true;
+    const done = handleUpkeepClick('upkeepDoneBtn', r.ctx); // car A: I took it down
+    await r.flush();
+    assert.ok(answerList, 'finish is reading the posted list');
+    // the person clicks car B's To do button: car A's item ends, and car B starts
+    endUpkeep();
+    const next = startUpkeep({ origin, vin: 'bbb', kind: 'takeDown', why: 'gone', name: 'Car B', listingUrl: at('222'), listedPrice: 21000 }, r.ctx);
+    await r.flush();
+    await r.tick();
+    await next;
+    assert.deepEqual([up.vin, up.status, up.note], ['BBB', 'waiting', '']);
+    answerList(); // car A's read answers now, and finish goes on
+    assert.equal(await done, true);
+    await r.flush();
+    // car B keeps its own state: no done banner, no note, no Open next To do item
+    assert.deepEqual([up.vin, up.status, up.note, up.hasNext, up.error], ['BBB', 'waiting', '', false, '']);
+    assert.match(upkeepHtml(), /id="takeDownWaiting"/);
+    assert.doesNotMatch(upkeepHtml(), /id="upkeepDone"|id="upkeepNext"/);
+    // car A's record is written (off the posted list, in the take-down record, out of the diff); car B's entries stay
+    assert.equal(store[k.posted].AAA, undefined, 'car A is off the posted list');
+    assert.ok(store[k.posted].BBB, 'car B is still on the posted list');
+    assert.deepEqual(takenDownList(store[k.takenDown]).map((t) => t.vin), ['AAA'], 'car A\'s take-down is recorded');
+    assert.deepEqual(store[k.diff].takeDown.map((x) => x.vin), ['BBB'], 'car B\'s take-down stays in the diff');
+  } finally {
+    await endRaceRig(r);
+  }
+});
+
+// A listing read answering after another To do item started is none of that item's. With the new item saving no link,
+// the answer would look the posted list up for the new item's name, so it must read nothing from storage.
+test('a listing read still in flight when another To do item starts reads nothing from storage once it answers', async () => {
+  const origin = 'https://www.example-motors.test';
+  const r = await raceRig({ origin, vin: 'aaa', kind: 'takeDown', why: 'gone', name: 'Car A', listingUrl: at('111'), listedPrice: 20000 });
+  const get = chrome.storage.local.get;
+  const reads = [];
+  chrome.storage.local.get = (keys) => { reads.push(keys); return get(keys); };
+  try {
+    r.holdRead = true;
+    await r.tick(); // a poll starts and waits on the listing read
+    assert.ok(r.heldRead, 'the read is in flight');
+    const next = startUpkeep({ origin, vin: 'bbb', kind: 'takeDown', why: 'gone', name: 'Car B', listingUrl: '', listedPrice: 20000 }, r.ctx);
+    await r.flush();
+    await r.tick();
+    await next;
+    assert.equal(up.vin, 'BBB');
+    reads.length = 0;
+    r.heldRead.answer([{ result: { ...LISTED_PAGE } }]); // car A's read answers now
+    await r.flush();
+    assert.deepEqual(reads, [], 'and that answer reads nothing from storage');
+  } finally {
+    await endRaceRig(r);
+  }
+});
+
+// The price fill (poll) is held while another To do item starts: the fill's result is none of the new item's, so the
+// new item stays waiting, with nothing filled and no fill count.
+test('a price fill still in flight when another To do item starts writes nothing on that item', async () => {
+  const flush = async () => { for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve)); };
+  const rig = await priceRig(LISTED_PAGE);
+  const executeScript = chrome.scripting.executeScript;
+  let answerFill = null;
+  chrome.scripting.executeScript = (args) => (args.func === fillPriceInPage ? new Promise((resolve) => { answerFill = resolve; }) : executeScript(args));
+  const ctx = { render: noop, map: () => FORM_MAP, priceNow: async () => ({ ok: true, price: 30000, basis: 'website' }), nextItem: async () => null, onClose: noop };
+  try {
+    await rig.tick(); // car A's first poll: its Price box shows the listed price, so the fill goes in and is held
+    assert.ok(answerFill, 'car A\'s fill is in flight');
+    const next = startUpkeep({ origin: 'https://www.example-motors.test', vin: 'bbb', kind: 'price', price: 30000, listingUrl: at('222'), name: 'Car B', listedPrice: 31000 }, ctx);
+    await flush();
+    mock.timers.tick(1500); // car B's wait ends
+    await flush();
+    await next;
+    assert.deepEqual([up.vin, up.status, up.fills], ['BBB', 'waiting', 0]);
+    answerFill([{ result: { ok: true, shown: '$18,500' } }]); // car A's fill answers now, with the price in the box
+    await flush();
+    assert.deepEqual([up.vin, up.status, up.filledShown, up.fills], ['BBB', 'waiting', '', 0], 'car A\'s fill result is not written on car B');
+    assert.doesNotMatch(upkeepHtml(), /id="priceFilled"/, 'car B does not say its price is in the box');
+  } finally {
+    endRig();
+    await rig.started;
+  }
+});
+
+// A listing read that fails after another To do item started is about the old item's tab, so it writes nothing on
+// the new item and looks at no tab for it. Here the new item is still checking its price, so it has no tab yet.
+test('a listing read that fails after another To do item started writes nothing on that item, and looks at no tab for it', async () => {
+  const origin = 'https://www.example-motors.test';
+  const r = await raceRig({ origin, vin: 'aaa', kind: 'takeDown', why: 'gone', name: 'Car A', listingUrl: at('111'), listedPrice: 20000 });
+  const tabsGet = chrome.tabs.get;
+  const looked = [];
+  chrome.tabs.get = (id) => { looked.push(id); return tabsGet(id); };
+  let answerPrice = null;
+  r.ctx.priceNow = () => new Promise((resolve) => { answerPrice = resolve; }); // car B's price read is held
+  try {
+    r.holdRead = true;
+    await r.tick(); // a poll starts and waits on the listing read
+    assert.ok(r.heldRead, 'the read is in flight');
+    const next = startUpkeep({ origin, vin: 'bbb', kind: 'price', price: 30000, listingUrl: at('222'), name: 'Car B', listedPrice: 31000 }, r.ctx);
+    await r.flush();
+    assert.deepEqual([up.vin, up.status, up.tabId], ['BBB', 'checking', null], 'car B is checking its price, with no tab yet');
+    const looksBefore = looked.length;
+    r.tabGone = true; // car A's tab has closed
+    r.heldRead.fail(new Error('No tab with id: 9'));
+    await r.flush();
+    assert.deepEqual([up.vin, up.status, up.note, up.offTarget], ['BBB', 'checking', '', false], 'car A\'s failed read writes nothing on car B');
+    assert.deepEqual(looked.slice(looksBefore), [], 'and looks at no tab for car B');
+    answerPrice({ ok: true, price: 30000, basis: 'website' });
+    await r.flush();
+    await r.tick();
+    await next;
+    assert.equal(up.status, 'waiting');
+  } finally {
+    chrome.tabs.get = tabsGet;
+    await endRaceRig(r);
+  }
+});
+
+// The tab lookup a failed read makes (poll) is held while another To do item starts: a failure that answers after that
+// writes nothing on the new item, which is checking its price and has no tab yet.
+test('a tab lookup that fails after another To do item started writes nothing on that item', async () => {
+  const origin = 'https://www.example-motors.test';
+  const r = await raceRig({ origin, vin: 'aaa', kind: 'takeDown', why: 'gone', name: 'Car A', listingUrl: at('111'), listedPrice: 20000 });
+  const tabsGet = chrome.tabs.get;
+  let holdLookup = false;
+  let heldLookup = null;
+  chrome.tabs.get = (id) => { if (!holdLookup) return tabsGet(id); holdLookup = false; return new Promise((resolve, reject) => { heldLookup = { resolve, reject }; }); };
+  let answerPrice = null;
+  r.ctx.priceNow = () => new Promise((resolve) => { answerPrice = resolve; }); // car B's price read is held
+  try {
+    r.holdRead = true;
+    await r.tick(); // a poll starts and waits on the listing read
+    assert.ok(r.heldRead, 'the read is in flight');
+    holdLookup = true;
+    r.heldRead.fail(new Error('Cannot access contents of the page')); // the read fails: the poll looks car A's tab up
+    await r.flush();
+    assert.ok(heldLookup, 'the tab lookup is in flight');
+    const next = startUpkeep({ origin, vin: 'bbb', kind: 'price', price: 30000, listingUrl: at('222'), name: 'Car B', listedPrice: 31000 }, r.ctx);
+    await r.flush();
+    assert.deepEqual([up.vin, up.status, up.tabId], ['BBB', 'checking', null], 'car B is checking its price, with no tab yet');
+    heldLookup.reject(new Error('No tab with id: 9')); // car A's tab has closed
+    await r.flush();
+    assert.deepEqual([up.vin, up.status, up.note, up.offTarget], ['BBB', 'checking', '', false], 'car A\'s failed lookup writes nothing on car B');
+    answerPrice({ ok: true, price: 30000, basis: 'website' });
+    await r.flush();
+    await r.tick();
+    await next;
+    assert.equal(up.status, 'waiting');
+  } finally {
+    chrome.tabs.get = tabsGet;
+    await endRaceRig(r);
+  }
+});
+
+// The same lookup answering once car B has its tab, on another page: the answer writes no note on car B.
+test('a tab lookup that answers after another To do item started writes no note on that item, even when its tab is on another page', async () => {
+  const origin = 'https://www.example-motors.test';
+  const r = await raceRig({ origin, vin: 'aaa', kind: 'takeDown', why: 'gone', name: 'Car A', listingUrl: at('111'), listedPrice: 20000 });
+  const tabsGet = chrome.tabs.get;
+  let holdLookup = false;
+  let heldLookup = null;
+  chrome.tabs.get = (id) => { if (!holdLookup) return tabsGet(id); holdLookup = false; return new Promise((resolve) => { heldLookup = resolve; }); };
+  try {
+    r.holdRead = true;
+    await r.tick(); // a poll starts and waits on the listing read
+    assert.ok(r.heldRead, 'the read is in flight');
+    holdLookup = true;
+    r.heldRead.fail(new Error('Cannot access contents of the page')); // the read fails: the poll looks car A's tab up
+    await r.flush();
+    assert.ok(heldLookup, 'the tab lookup is in flight');
+    const next = startUpkeep({ origin, vin: 'bbb', kind: 'takeDown', why: 'gone', name: 'Car B', listingUrl: at('222'), listedPrice: 21000 }, r.ctx);
+    await r.flush();
+    await r.tick();
+    await next;
+    assert.deepEqual([up.vin, up.status, up.tabId], ['BBB', 'waiting', 9], 'car B has its tab');
+    heldLookup({ id: 9, url: 'https://www.facebook.com/home' }); // car A's tab answers: on another page
+    await r.flush();
+    assert.deepEqual([up.vin, up.status, up.note, up.offTarget], ['BBB', 'waiting', '', false], 'car A\'s lookup writes no note on car B');
+  } finally {
+    chrome.tabs.get = tabsGet;
     await endRaceRig(r);
   }
 });

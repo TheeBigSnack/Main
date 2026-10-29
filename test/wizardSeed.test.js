@@ -209,6 +209,8 @@ test('on a website with no settings and no profile, set-up still starts from the
   assert.equal(s.basis, 'website');
   assert.equal(s.autoRescan, false);
   assert.equal(s.salesperson.name, '');
+  assert.equal(wiz.scan.keptCars, null, 'an ordinary read is not held back, so it keeps no earlier scan\'s cars');
+  assert.match(unesc(html), /<div class="banner good">6 used cars read from Example Motors\. 3 stores found\.<\/div>/, 'the scan step shows the read\'s cars and stores in the good line');
   await handleWizardClick('wizQuit', ctx);
 });
 
@@ -421,14 +423,14 @@ test('set-up\'s store step draws the boxes of the lot Settings reads: a read hel
   assert.deepEqual(wiz.settings.myStores, ['Route 2 Motors'], 'Next keeps the store');
 });
 
-test('a held-back read\'s scan line says the last scan\'s cars are kept, with that lot\'s count and its stores, not this read\'s count', async () => {
+test('a held-back read\'s scan line gives this read\'s count and the kept lot\'s count and stores', async () => {
   const settings = { ...structuredClone(STORED), myStores: ['Route 2 Motors'] };
   const lot = Array.from({ length: 12 }, (_, i) => ['usedNormal', { vin: `LOT${i}`, extra_fields: { meta_location: 'Route 2 Motors', location_rt: 'Route 2 Motors' } }]);
   const one = RECORDS.slice(0, 1).map((r) => ({ ...structuredClone(r), extra_fields: { ...r.extra_fields, meta_location: 'Other Store', location_rt: 'Other Store' } }));
   browser({ local: { [k.settings]: settings, [k.snapshot]: snapshot(lot, settings) }, records: one });
   await start();
   await nextUntil('scan');
-  await handleWizardClick('wizScan', ctx); // the read: wiz.step stays on the scan step
+  await handleWizardClick('wizScan', ctx); // Read the website again (Next ran the first read): wiz.step stays on the scan step
   assert.equal(wiz.step, 'scan');
   assert.match(unesc(html), /1 used car read from Example Motors this time, but held back, so the last scan's 12 used cars are kept\. 1 store found among them\./);
 });
