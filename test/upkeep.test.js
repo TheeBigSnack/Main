@@ -441,6 +441,7 @@ const LISTED_PAGE = { url: at('111'), matchesId: true, sold: false, unavailable:
 async function priceRig(page, { nextItem } = {}) {
   const rig = { page: { ...page }, fills: 0, drawn: [] }; // drawn: the panel each render draws, in order
   const flush = async () => { for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve)); };
+  rig.flush = flush;
   rig.tick = async () => { mock.timers.tick(1500); await flush(); };
   globalThis.chrome = {
     ...fakeChrome({}, {}),
@@ -448,7 +449,14 @@ async function priceRig(page, { nextItem } = {}) {
     runtime: { sendMessage: async () => ({}) },
     scripting: {
       executeScript: async ({ func }) => {
-        if (func === readListingInPage) return [{ result: { ...rig.page } }];
+        if (func === readListingInPage) {
+          const answer = { ...rig.page }; // the page as the read finds it, whenever the answer is delivered
+          if (rig.holdNextRead) {
+            rig.holdNextRead = false;
+            await new Promise((resolve) => { rig.release = resolve; });
+          }
+          return [{ result: answer }];
+        }
         if (func === fillPriceInPage) {
           rig.fills += 1;
           return [{ result: { ok: false, reason: 'The Price box did not take the price.' } }];
@@ -459,6 +467,7 @@ async function priceRig(page, { nextItem } = {}) {
   };
   mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
   const ctx = { render: () => { rig.drawn.push(upkeepHtml()); }, map: () => FORM_MAP, priceNow: async () => ({ ok: true, price: WANT_PRICE, basis: 'website' }), nextItem };
+  rig.ctx = ctx;
   rig.started = startUpkeep({ origin: 'https://www.example-motors.test', vin: 'aaa', kind: 'price', price: WANT_PRICE, listingUrl: LISTED_PAGE.url, name: 'Car A', listedPrice: 20000 }, ctx);
   await flush();
   await rig.tick(); // the wait before the first poll ends
@@ -681,6 +690,61 @@ test('a second Open next To do item click while the next item is being found sta
     Object.assign(up, { stuck: false, boxShows: '' });
   } finally {
     endUpkeep();
+  }
+});
+
+// A read that answers after the item is finished, or while the next To do item is looked for, sets nothing on the
+// panel: a done item stays done, and the lookup's answer is not dropped. (A read that fails because the tab closed
+// is a different case, pinned by the race tests above.)
+test('a price read still in flight when I updated it does not reopen the done item as filled', async () => {
+  const NEXT = { origin: 'https://www.example-motors.test', vin: 'bbb', kind: 'price', price: 15000, listingUrl: at('222'), name: 'Car B', listedPrice: 15500 };
+  const rig = await priceRig(LISTED_PAGE, { nextItem: async () => NEXT });
+  try {
+    for (let i = 0; i < 6; i += 1) await rig.tick(); // four fills the form refuses, then the box is stuck
+    assert.equal(up.stuck, true, 'the Price box keeps the listed price, so the item is stuck');
+    // the person types the new price, and the next read is in flight with it in its answer
+    rig.page.priceBoxValue = String(WANT_PRICE);
+    rig.holdNextRead = true;
+    await rig.tick();
+    assert.equal(typeof rig.release, 'function', 'the read is in flight');
+    assert.equal(await handleUpkeepClick('upkeepDoneBtn', rig.ctx), true);
+    assert.equal(up.status, 'done');
+    assert.equal(up.hasNext, true);
+    rig.release();
+    await rig.flush();
+    assert.equal(up.status, 'done', 'the late answer does not change the done item');
+    assert.match(upkeepHtml(), /id="upkeepNext"/, 'Open next To do item is still offered');
+    assert.doesNotMatch(upkeepHtml(), /id="priceFilled"/, 'and the item is not drawn as filled');
+  } finally {
+    endRig();
+  }
+});
+
+test('a price read still in flight while the next To do item is looked for does not drop the lookup: the item it finds opens', async () => {
+  const NEXT = { origin: 'https://www.example-motors.test', vin: 'bbb', kind: 'price', price: 15000, listingUrl: at('222'), name: 'Car B', listedPrice: 15500 };
+  let answer = null;
+  let lookupHeld = false;
+  const rig = await priceRig(LISTED_PAGE, { nextItem: () => (lookupHeld ? new Promise((resolve) => { answer = resolve; }) : Promise.resolve(NEXT)) });
+  try {
+    for (let i = 0; i < 6; i += 1) await rig.tick();
+    assert.equal(up.stuck, true, 'the Price box keeps the listed price, so the item is stuck');
+    rig.page.priceBoxValue = String(WANT_PRICE);
+    rig.holdNextRead = true;
+    await rig.tick();
+    assert.equal(await handleUpkeepClick('upkeepDoneBtn', rig.ctx), true);
+    assert.equal(up.status, 'done');
+    lookupHeld = true;
+    // not awaited: the item the lookup opens waits on its own 1.5 s timer, which these fake timers run only on a tick
+    handleUpkeepClick('upkeepNext', rig.ctx);
+    assert.equal(up.status, 'finding', 'the next item is being looked for');
+    rig.release();
+    await rig.flush();
+    assert.equal(up.status, 'finding', 'the late answer does not change the lookup');
+    answer(NEXT);
+    await rig.flush();
+    assert.equal(up.vin, 'BBB', 'the item the lookup found opens');
+  } finally {
+    endRig();
   }
 });
 

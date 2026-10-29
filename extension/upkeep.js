@@ -245,6 +245,8 @@ async function poll(ctx) {
   // an item started, or Not now pressed, while this read is in flight: what it answers is not the current item's
   const run = starts;
   const stale = () => run !== starts || !up.active;
+  // the item is done, or the next To do item is being looked for: a read answered now sets nothing on the panel
+  const over = () => up.status === 'done' || up.status === 'finding';
   try {
     const map = ctx.map();
     let seen;
@@ -265,10 +267,10 @@ async function poll(ctx) {
       }
       return;
     }
-    if (stale() || !seen) return;
+    if (stale() || !seen || over()) return;
     const id = knownId(map);
     const namesakes = id ? 0 : await namesakesNow();
-    if (stale()) return; // an item started while the posted list was read: this read is not its
+    if (stale() || over()) return; // an item started, or finished, while the posted list was read: this read is not its
     up.seen = seen;
     const onTarget = onListing(seen, { id, yourListingsUrl: map.yourListingsUrl, namesakes });
     // the car's own listing page, found by its name and price: its id is what counts from now on
