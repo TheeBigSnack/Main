@@ -680,6 +680,12 @@ test('a second Open next To do item click while the next item is being found sta
     assert.match(drawn.at(-1), /<p class="hint" id="upkeepFinding">Finding the next To do item…<\/p>\s*<div class="actions"><button type="button" class="\w+" id="upkeepClose">Close<\/button><\/div>/, 'a done price update\'s lookup draws the Finding line and Close alone');
     answer(null);
     assert.equal(await priceLookup, true);
+    // and so does one Lot Current saw saved: the note its done banner gave is not drawn under the Finding line either
+    Object.assign(up, { ...DONE_CAR, kind: 'price', why: '', price: 19000, listedPrice: 20000, note: 'The listing now shows $19,000.', hasNext: true });
+    const seenLookup = handleUpkeepClick('upkeepNext', ctx);
+    assert.match(drawn.at(-1), /<p class="hint" id="upkeepFinding">Finding the next To do item…<\/p>\s*<div class="actions"><button type="button" class="\w+" id="upkeepClose">Close<\/button><\/div>/, 'a price update Lot Current saw saved draws the Finding line and Close alone');
+    answer(null);
+    assert.equal(await seenLookup, true);
     // and so does one finished by hand after the Price box kept another price: the stuck banner is not drawn over the lookup
     Object.assign(up, { ...DONE_CAR, kind: 'price', why: '', price: 19000, listedPrice: 20000, stuck: true, boxShows: '$20,000', hasNext: true });
     const stuckLookup = handleUpkeepClick('upkeepNext', ctx);
@@ -825,6 +831,10 @@ test('when no To do item is left, the done banner stays and no Next button is dr
     assert.match(drawn.at(-1), /<div class="banner good" id="upkeepDone">Done\. Marked done\.<\/div>/, 'the panel is drawn again with the done banner, its note kept');
     assert.doesNotMatch(drawn.at(-1), /id="upkeepNext"/, 'and that last panel offers no Open next To do item');
     assert.equal(drawn.includes('the To do list'), false, 'and the panel never went back to the To do list on the way');
+    // a note Lot Current saw on the listing is kept the same way, not put back as Marked done.
+    Object.assign(up, { ...DONE_CAR, note: 'The listing shows it as sold or removed.', hasNext: true });
+    assert.equal(await handleUpkeepClick('upkeepNext', ctx), true);
+    assert.match(drawn.at(-1), /<div class="banner good" id="upkeepDone">Done\. The listing shows it as sold or removed\.<\/div>/, 'the done banner keeps the note Lot Current saw');
   } finally {
     endUpkeep();
   }
@@ -842,6 +852,10 @@ test('when the next To do item cannot be found, the done banner stays and no Nex
     assert.doesNotMatch(upkeepHtml(), /upkeepNext/);
     assert.match(drawn.at(-1), /<div class="banner good" id="upkeepDone">Done\. Marked done\.<\/div>/, 'the panel is drawn again with the done banner, its note kept');
     assert.equal(drawn.includes('the To do list'), false, 'and the panel never went back to the To do list on the way');
+    // a note Lot Current saw on the listing is kept the same way when the lookup fails, not put back as Marked done.
+    Object.assign(up, { ...DONE_CAR, note: 'The listing shows it as sold or removed.', hasNext: true });
+    assert.equal(await handleUpkeepClick('upkeepNext', ctx), true);
+    assert.match(drawn.at(-1), /<div class="banner good" id="upkeepDone">Done\. The listing shows it as sold or removed\.<\/div>/, 'after a failed lookup the done banner keeps the note Lot Current saw');
   } finally {
     endUpkeep();
   }
@@ -1080,6 +1094,28 @@ test('a next-item lookup that answers after its item was ended opens no listing,
     lookups[1](null);
     assert.equal(await second, true);
     assert.equal(up.status, 'done', 'car C\'s lookup found nothing: its done banner is back');
+    // an ended item's lookup that finds nothing draws no done banner over the lookup that replaced it either
+    Object.assign(up, { ...DONE_CAR, hasNext: true });
+    const third = handleUpkeepClick('upkeepNext', ctx); // car A's next item is looked up again, and Close ends that run
+    endUpkeep();
+    Object.assign(up, { ...DONE_CAR, active: true, vin: 'CCC', name: 'Car C', hasNext: true });
+    const fourth = handleUpkeepClick('upkeepNext', ctx);
+    lookups[2](null); // car A's lookup answers now, with nothing
+    assert.equal(await third, true);
+    assert.deepEqual([up.vin, up.status], ['CCC', 'finding'], 'car C is still looking up: no done banner is drawn over its Finding line');
+    lookups[3](null);
+    assert.equal(await fourth, true);
+    // nor does one that fails: a failure reads as no next item, and is dropped the same way
+    Object.assign(up, { ...DONE_CAR, hasNext: true });
+    const fifth = handleUpkeepClick('upkeepNext', ctx); // car A's next item is looked up again, and Close ends that run
+    endUpkeep();
+    Object.assign(up, { ...DONE_CAR, active: true, vin: 'CCC', name: 'Car C', hasNext: true });
+    const sixth = handleUpkeepClick('upkeepNext', ctx);
+    lookups[4](Promise.reject(new Error('storage is unavailable'))); // car A's lookup fails now
+    assert.equal(await fifth, true);
+    assert.deepEqual([up.vin, up.status], ['CCC', 'finding'], 'car C is still looking up: a failed lookup draws no done banner over its Finding line');
+    lookups[5](null);
+    assert.equal(await sixth, true);
   } finally {
     endUpkeep();
     delete globalThis.chrome;

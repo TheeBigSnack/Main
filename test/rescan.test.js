@@ -829,6 +829,27 @@ test('the car just finished is passed over, its take-down and its price update a
   assert.deepEqual(afterRam(`${VIN.ram}X`), ['takeDown', `${VIN.ram}X`], 'another car whose VIN starts with the whole finished VIN is still returned');
   // nor by a stock number two cars share
   assert.deepEqual(pickNext(next({ diff: { takenAt: at3(2), takeDown: [takeRow('b', { stock: 'S-1' }), takeRow('C', { stock: 'S-1' })], priceUpdates: [] }, posted: {} }, 'B')), ['takeDown', 'C'], 'another car with the finished car\'s stock number is still returned');
+  // the car just finished in lower case to U to Z, which the letters above leave out on that side
+  assert.equal(pickNext(next({ diff: { takenAt: at3(2), takeDown: [takeRow(vinLetters)], priceUpdates: [] }, posted: {} }, vinLetters.toLowerCase())), null, 'a car finished under every letter a VIN can hold in lower case, U to Z too, passes over its row');
+  // a price update alike, as the take-downs above: in lower case to U to Z, matched by the whole VIN, never a start or an end of it or more around it, and never by its stock number
+  assert.equal(pickNext(next({ diff: { takenAt: at3(2), takeDown: [], priceUpdates: [priceRow(vinLetters.toLowerCase())] }, posted: {} }, vinLetters)), null, 'a price update carrying every letter a VIN can hold in lower case, U to Z too, is passed over');
+  const priceAfterRam = (other) => pickNext(next({ diff: { takenAt: at3(2), takeDown: [], priceUpdates: [priceRow(VIN.ram.toLowerCase()), priceRow(other)] }, posted: {} }, VIN.ram));
+  assert.deepEqual(priceAfterRam(VIN.ram.slice(0, 16)), ['price', VIN.ram.slice(0, 16)], 'another car\'s price update, its VIN the start of the finished VIN, is still returned');
+  assert.deepEqual(priceAfterRam(VIN.ram.slice(1)), ['price', VIN.ram.slice(1)], 'another car\'s price update, its VIN the end of the finished VIN, is still returned');
+  assert.deepEqual(priceAfterRam(`${VIN.ram}X`), ['price', `${VIN.ram}X`], 'another car\'s price update, its VIN the whole finished VIN with more after it, is still returned');
+  assert.deepEqual(priceAfterRam(`X${VIN.ram}`), ['price', `X${VIN.ram}`], 'another car\'s price update, its VIN ending with the finished VIN, is still returned');
+  assert.deepEqual(pickNext(next({ diff: { takenAt: at3(2), takeDown: [], priceUpdates: [priceRow('b'), priceRow('C', { stock: 'B' })] }, posted: {} }, 'B')), ['price', 'C'], 'another car\'s price update whose stock number is the finished VIN is still returned');
+  assert.deepEqual(pickNext(next({ diff: { takenAt: at3(2), takeDown: [], priceUpdates: [priceRow('b', { stock: 'S-1' }), priceRow('C', { stock: 'S-1' })] }, posted: {} }, 'B')), ['price', 'C'], 'another car\'s price update with the finished car\'s stock number is still returned');
+  // a price update alike once the car is finished in lower case, as the take-downs above: to its last letter, and U to Z too
+  assert.equal(pickNext(next({ diff: { takenAt: at3(2), takeDown: [], priceUpdates: [priceRow(letters)] }, posted: {} }, letters.toLowerCase())), null, 'a car finished under its VIN in lower case to its last letter passes over its price update');
+  assert.equal(pickNext(next({ diff: { takenAt: at3(2), takeDown: [], priceUpdates: [priceRow(vinLetters)] }, posted: {} }, vinLetters.toLowerCase())), null, 'a car finished under every letter a VIN can hold in lower case, U to Z too, passes over its price update');
+  // both sides are upper-cased: the same lower-case VIN on the rows and on the car just finished matches too
+  assert.deepEqual(pickNext(next({ diff: wholeLower, posted: {} }, VIN.ram.toLowerCase())), ['price', VIN.wagoneer], 'rows carrying a whole VIN in lower case are passed over once the car is finished under that same lower-case VIN');
+  // nor by the name another car's price update shares, as the take-downs above, nor by the website address a row carries, which another car can share
+  assert.deepEqual(pickNext(next({ diff: { takenAt: at3(2), takeDown: [], priceUpdates: [priceRow('b', twin), priceRow('C', twin)] }, posted: {} }, 'B')), ['price', 'C'], 'another car\'s price update with the same name is still returned');
+  const samePage = { url: `${STANDARD_ORIGIN}/used-vehicles/` };
+  assert.deepEqual(pickNext(next({ diff: { takenAt: at3(2), takeDown: [takeRow('b', samePage), takeRow('C', samePage)], priceUpdates: [] }, posted: {} }, 'B')), ['takeDown', 'C'], 'another car with the finished car\'s address is still returned');
+  assert.deepEqual(pickNext(next({ diff: { takenAt: at3(2), takeDown: [], priceUpdates: [priceRow('b', samePage), priceRow('C', samePage)] }, posted: {} }, 'B')), ['price', 'C'], 'another car\'s price update with the finished car\'s address is still returned');
 });
 
 test('the order is the To do tab\'s: the scan\'s own, or oldest first by each kind\'s open flag, a car with no open flag last', () => {
