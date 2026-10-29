@@ -475,6 +475,7 @@ test("when the price goes down, the filled price says Facebook can let people wh
     await rig.tick();
     assert.equal(up.status, 'filled');
     const html = upkeepHtml();
+    assert.match(html, /id="priceFilled">New price \$18,500 is in the Price box \(it shows "18500"\)\. Now click <b>Update<\/b> on Facebook\./, 'it names the price filled, and the box as it shows it');
     assert.match(html, /Facebook can let people who saved this car know about the new price; Lot Current doesn't\./);
     assert.doesNotMatch(html, /Lot Current (tells|notifies|will tell|will notify) (anyone|people|them)/);
   } finally {
@@ -603,6 +604,7 @@ test('the Open next To do item button is drawn only when the item is done and an
   try {
     assert.match(upkeepHtml(), /<button type="button" class="primary" id="upkeepNext">Open next To do item<\/button>/);
     assert.match(upkeepHtml(), /<button type="button" class="plain" id="upkeepClose">Close<\/button>/, 'Close is kept beside it');
+    assert.match(upkeepHtml(), /<div class="actions"><button type="button" class="primary" id="upkeepNext">Open next To do item<\/button><button type="button" class="plain" id="upkeepClose">Close<\/button><\/div>/, 'Open next To do item leads the row, and Close follows it');
     up.hasNext = false;
     assert.doesNotMatch(upkeepHtml(), /upkeepNext/, 'no next item, no button');
     Object.assign(up, { hasNext: true, status: 'waiting' });
@@ -662,6 +664,13 @@ test('a second Open next To do item click while the next item is being found sta
     assert.match(drawn.at(-1), /<p class="hint" id="upkeepFinding">Finding the next To do item…<\/p>\s*<div class="actions"><button type="button" class="\w+" id="upkeepClose">Close<\/button><\/div>/, 'a done price update\'s lookup draws the Finding line and Close alone');
     answer(null);
     assert.equal(await priceLookup, true);
+    // and so does one finished by hand after the Price box kept another price: the stuck banner is not drawn over the lookup
+    Object.assign(up, { ...DONE_CAR, kind: 'price', why: '', price: 19000, listedPrice: 20000, stuck: true, boxShows: '$20,000', hasNext: true });
+    const stuckLookup = handleUpkeepClick('upkeepNext', ctx);
+    assert.match(drawn.at(-1), /<p class="hint" id="upkeepFinding">Finding the next To do item…<\/p>\s*<div class="actions"><button type="button" class="\w+" id="upkeepClose">Close<\/button><\/div>/, 'a price update finished while its fill was stuck draws the Finding line and Close alone');
+    answer(null);
+    assert.equal(await stuckLookup, true);
+    Object.assign(up, { stuck: false, boxShows: '' });
   } finally {
     endUpkeep();
   }
@@ -730,7 +739,8 @@ test('Close while Lot Current looks for the next item after an item is done: the
 });
 
 test('when no To do item is left, the done banner stays and no Next button is drawn', async () => {
-  const ctx = { render: noop, map: () => FORM_MAP, nextItem: async () => null, onClose: noop };
+  const drawn = []; // the HTML each render draws, in order
+  const ctx = { render: () => { drawn.push(upkeepHtml()); }, map: () => FORM_MAP, nextItem: async () => null, onClose: noop };
   try {
     Object.assign(up, { ...DONE_CAR, hasNext: true });
     assert.equal(await handleUpkeepClick('upkeepNext', ctx), true);
@@ -740,6 +750,7 @@ test('when no To do item is left, the done banner stays and no Next button is dr
     assert.match(html, /id="upkeepDone"/);
     assert.doesNotMatch(html, /upkeepNext/);
     assert.match(html, /id="upkeepClose"/);
+    assert.match(drawn.at(-1), /<div class="banner good" id="upkeepDone">Done\. Marked done\.<\/div>/, 'the panel is drawn again with the done banner, its note kept');
   } finally {
     endUpkeep();
   }
@@ -770,8 +781,9 @@ test('Open next To do item on a price update reads the car on the website before
   try {
     const asked = [];
     const readBeforeTab = [];
+    const drawn = []; // the status each render draws, in order
     const ctx = {
-      render: noop,
+      render: () => { drawn.push(up.status); },
       map: () => FORM_MAP,
       nextItem: async () => NEXT_PRICE,
       priceNow: async (req) => { asked.push(req.vin); readBeforeTab.push(opened.length); return { ok: true, price: 17500, basis: 'website' }; },
@@ -783,6 +795,7 @@ test('Open next To do item on a price update reads the car on the website before
     assert.deepEqual(readBeforeTab, [0], 'the read comes before the listing tab is created');
     assert.deepEqual(opened, [NEXT_PRICE.listingUrl], 'then that listing opens');
     assert.deepEqual([up.vin, up.kind, up.price, up.scanPrice], ['CCC', 'price', 17500, 18000], 'the price filled is the website\'s now, and the scan\'s is kept beside it');
+    assert.deepEqual(drawn, ['finding', 'checking', 'opening', 'waiting'], 'the panel goes from the lookup line to the price check, and never draws the next car as done');
     endUpkeep();
 
     const stopped = [];

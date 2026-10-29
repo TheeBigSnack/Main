@@ -2682,6 +2682,7 @@ test('no way of filling the form types a description that does not name the deal
   const stale = await fill({ name: 'Example Motors' }, 'A fine truck. Sales consultant.');
   assert.deepEqual(stale.typed, [], 'a description written before the name was set is not typed');
   assert.match(stale.said[0][0], /^The description doesn't name Example Motors, and every description names the dealership\./);
+  assert.match(stale.said[0][0], / Add it to the description \(or use Reset to template\) before the form is filled\.$/, 'the fix is in the description');
   assert.equal(stale.said[0][1], 'error');
   assert.equal(stale.step, 'probe', 'the fields check stays on screen');
   assert.equal((await fill({ name: 'Example Motors' }, 'A fine truck.', 'filling')).step, 'review', 'a blocked fill never leaves the panel on "Filling in the form"');
@@ -2766,8 +2767,8 @@ test('the form is not filled with a description that fails a fact or identity ch
   const lacksRefused = realBlocker(refusedNote)(CLEAN);
   assert.match(lacksRefused, /^The description fails 2 checks that must pass before the form is filled: Doesn't include your dealership's price note: "Priced to sell, plus tax, title and registration\."; Your dealership's price note says "priced to sell"; change the note in Settings\. Fix the description \(or use Reset to template\) first\.$/, lacksRefused);
   assert.equal(realBlocker({ ...noted, noteApplies: false })(CLEAN), '', 'a note that does not apply to this car is not looked for');
-  // length and tone are the salesperson's call
-  for (const text of [`${CLEAN}\nCOME SEE THIS TRUCK TODAY`, `${CLEAN}\n🔥🔥🔥🔥`, CLEAN.split('\n').slice(0, 3).join('\n') + `\nI'm Sam, sales consultant at Example Motors.\nVIN ${CAR.vin}.`]) {
+  // length and tone are the salesperson's call (the last text is over the word limit)
+  for (const text of [`${CLEAN}\nCOME SEE THIS TRUCK TODAY`, `${CLEAN}\n🔥🔥🔥🔥`, CLEAN.split('\n').slice(0, 3).join('\n') + `\nI'm Sam, sales consultant at Example Motors.\nVIN ${CAR.vin}.`, `${CLEAN}\n${'Message me with any question about it. '.repeat(10)}`]) {
     const g = template.runGuardrails(text, { vehicle: CAR, dealer: SETTINGS.dealer, salesperson: SETTINGS.salesperson, price: 20986 });
     assert.equal(g.ok, false, text);
     assert.equal(fillBlocker(text), '', text);
@@ -2785,6 +2786,8 @@ test('a role with a number keeps the form shut, and the status line names the ro
   const text = template.buildTemplateDescription({ vehicle: CAR, dealer: settings.dealer, salesperson, priceNote: '' });
   const fillBlocker = realBlocker(state);
   assert.equal(fillBlocker(text), 'The description fails a check that must pass before the form is filled: Your role "2nd shift sales" has a number in it, and every number in a description must match the website\'s data for the car; change it in Settings (Your role), for example to "Second shift sales". After you save Settings, the template writes the description again; if you edited it, click Reset to template.');
+  // an edited or a rewritten description is not written again by a Settings save: the status line says to click Reset to template after it
+  for (const descriptionSource of ['edited', 'claude']) assert.match(realBlocker({ ...state, descriptionSource })(text), /"Second shift sales"\. After you save Settings, click Reset to template to write the description again\.$/, descriptionSource);
   // with a problem of the description's own beside it, the description needs fixing too
   const both = fillBlocker(text.replace('34,567 miles', '12,000 miles'));
   assert.match(both, /^The description fails 3 checks that must pass before the form is filled: Your role "2nd shift sales" has a number in it/);
@@ -2846,6 +2849,7 @@ test('the checks line says which problems stop the form and which only warn', ()
   assert.match(both, /class="checks bad"/);
   assert.match(both, /Fix before the form can be filled:<ul><li>"12000" isn't in the website's data for this car<\/li><\/ul>/);
   assert.match(both, /Worth fixing \(the form can still be filled\):<ul><li>50 words; needs at least 60<\/li><\/ul>/);
+  assert.match(both, /^<div class="checks bad" id="checks">Fix before the form can be filled:<ul><li>[^<]+<\/li><\/ul>Worth fixing/, 'the stops first, then the warnings');
   const warnOnly = checksHtml({ ok: false, problems: [warn], words: 50 });
   assert.match(warnOnly, /class="checks warn"/);
   assert.doesNotMatch(warnOnly, /Fix before/);
@@ -2855,6 +2859,7 @@ test('the checks line says which problems stop the form and which only warn', ()
   assert.doesNotMatch(passed, /claim matches the website/);
   assert.match(passed, /no banned phrases or flagged claims/);
   assert.match(passed, /read it through before you publish/);
+  assert.doesNotMatch(passed, /price note included/, 'no price note is set, so none is said to be included');
 });
 
 // The review's checks line is what the person sees while a number in
@@ -2869,6 +2874,8 @@ test('the checks line says the fix is in Settings when only a number in Settings
   assert.match(checksHtml(template.runGuardrails(text, c)), /^<div class="checks bad" id="checks">Fix before the form can be filled:<ul><li>Your role "2nd shift sales" has a number in it[^<]+<\/li><\/ul><p>After you save Settings, the template writes the description again; if you edited it, click Reset to template\.<\/p><\/div>$/);
   // an edited or rewritten description is only checked again after a Settings save: Reset to template writes it again
   for (const source of ['edited', 'claude']) assert.match(checksHtml(template.runGuardrails(text, c), source), /<p>After you save Settings, click Reset to template to write the description again\.<\/p><\/div>$/, source);
+  // a warning beside it (length or tone) only warns: the line still gives the Settings fix, then the warning
+  assert.match(checksHtml(template.runGuardrails(`${text}\nCOME SEE THIS SEDAN TODAY`, c)), /<p>After you save Settings, the template writes the description again; if you edited it, click Reset to template\.<\/p>Worth fixing \(the form can still be filled\):<ul><li>Has ALL CAPS shouting<\/li><\/ul><\/div>$/);
   // a stop of the description's own beside it: no such line, the description needs fixing too
   const mixed = checksHtml(template.runGuardrails(text.replace('34,567 miles', '12,000 miles'), c));
   assert.match(mixed, /Fix before the form can be filled:<ul><li>Your role "2nd shift sales"/);

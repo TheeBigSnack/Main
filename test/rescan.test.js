@@ -745,6 +745,8 @@ test('a take-down is the next item before any price update, whichever list the s
   const diff = { takenAt: at3(2), priceUpdates: [priceRow('PRICE')], takeDown: [takeRow('TAKE')] };
   assert.deepEqual(pickNext(next({ diff, posted: {} }, '')), ['takeDown', 'TAKE'], 'the tab draws Take down first');
   assert.deepEqual(pickNext(next({ diff, posted: {} }, 'TAKE')), ['price', 'PRICE'], 'then the price update');
+  // the row itself, with what the side panel reads off it (sidepanel.js nextUpkeepRequest): a take-down's reason, a price update's new price
+  assert.deepEqual([next({ diff, posted: {} }, ''), next({ diff, posted: {} }, 'TAKE')], [{ kind: 'takeDown', item: diff.takeDown[0] }, { kind: 'price', item: diff.priceUpdates[0] }], 'the next item is the row itself');
 });
 
 test('a row that is not yours has no button, so the next item skips it', () => {
@@ -763,6 +765,13 @@ test('a price update that waits for the next scan has no button, so the next ite
   assert.equal(rescan.priceItemWaits(diff.priceUpdates[1], posted.NOW, diff), false, 'NOW stands');
   assert.deepEqual(pickNext(next({ diff, posted }, '')), ['price', 'NOW']);
   assert.equal(pickNext(next({ diff: { takenAt: at3(2), priceUpdates: [priceRow('WAIT')] }, posted }, '')), null, 'with nothing else, the waiting one is not offered');
+  // only a price update waits: the take-down of a car whose listing got its price after the scan began keeps its button, as the tab draws it
+  assert.deepEqual(pickNext(next({ diff: { takenAt: at3(2), takeDown: [takeRow('WAIT')], priceUpdates: [priceRow('WAIT')] }, posted }, '')), ['takeDown', 'WAIT'], 'a take-down does not wait');
+  // the wait is the tab's (priceItemWaits on the saved diff): dated from when the scan began, and for a car the scan carried over unread, from when its details were read
+  const began = { startedAt: '2026-10-03T08:59:00.000Z', takenAt: '2026-10-03T09:05:00.000Z', priceUpdates: [priceRow('WAIT'), priceRow('NOW')] };
+  assert.deepEqual(pickNext(next({ diff: began, posted }, '')), ['price', 'NOW'], 'a scan that began before WAIT\'s update waits, though it finished after');
+  const carried = { startedAt: '2026-10-03T09:01:00.000Z', takenAt: '2026-10-03T09:05:00.000Z', carriedReadAt: { WAIT: at3(2) }, priceUpdates: [priceRow('WAIT'), priceRow('NOW')] };
+  assert.deepEqual(pickNext(next({ diff: carried, posted }, '')), ['price', 'NOW'], 'WAIT carried over unread, read before its update: it waits, though the scan began after');
 });
 
 test('the car just finished is passed over, its take-down and its price update alike, whatever the case of its whole VIN, and matched by its VIN alone', () => {
@@ -839,6 +848,9 @@ test('the next item is the first take-down or price row with a button, from the 
   assert.deepEqual(priceAfter('oldest', 'P4'), ['price', 'P2']);
   assert.deepEqual(priceAfter('oldest', 'P2'), ['price', 'P4']);
   assert.deepEqual(priceAfter('oldest', 'P1'), ['price', 'P4'], 'a car finished that has no button changes nothing');
+  // a button does not depend on a take-down's reason or a price's direction: a car the website no longer calls pre-owned (its listing is deleted) and a price the website raised come next like the others
+  assert.deepEqual(pickNext(rescan.nextUpkeepItem({ diff: { takenAt: at3(2), takeDown: [takeRow('DEMO', { why: 'not-pre-owned', text: 'Delete the listing: the car was not sold.' })], priceUpdates: [] }, posted: {} }, '')), ['takeDown', 'DEMO'], 'a take-down of a car not pre-owned');
+  assert.deepEqual(pickNext(rescan.nextUpkeepItem({ diff: { takenAt: at3(2), takeDown: [], priceUpdates: [priceRow('UP', { from: 19000, to: 20000, change: 1000 })] }, posted: {} }, '')), ['price', 'UP'], 'a price that went up');
 });
 
 test('the To do order reads a row\'s own kind of flag only, and a row with no flag or an equal flag time keeps the scan\'s order', () => {
