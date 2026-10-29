@@ -235,6 +235,9 @@ async function poll(ctx) {
   if (!up.active || !up.tabId) return stopPolling();
   if (polling) return;
   polling = true;
+  // an item started, or Not now pressed, while this read is in flight: what it answers is not the current item's
+  const run = starts;
+  const stale = () => run !== starts || !up.active;
   try {
     const map = ctx.map();
     let seen;
@@ -242,9 +245,11 @@ async function poll(ctx) {
       const [inj] = await chrome.scripting.executeScript({ target: { tabId: up.tabId }, func: readListingInPage, args: [map, LISTING_SIGNS, expectFor(map)] });
       seen = inj && inj.result;
     } catch (e) {
+      if (stale()) return;
       // the tab closed, or is on a page Lot Current may not read (outside /marketplace/)
       let tab = null;
-      try { tab = await chrome.tabs.get(up.tabId); } catch (gone) { up.status = 'gone'; stopPolling(); ctx.render(); return; }
+      try { tab = await chrome.tabs.get(up.tabId); } catch (gone) { if (stale()) return; up.status = 'gone'; stopPolling(); ctx.render(); return; }
+      if (stale()) return;
       const note = unreadTabNote(tab && tab.url, up.name);
       if (note && (!up.offTarget || up.note !== note)) {
         up.offTarget = true;
@@ -253,10 +258,11 @@ async function poll(ctx) {
       }
       return;
     }
-    if (!seen) return;
-    up.seen = seen;
+    if (stale() || !seen) return;
     const id = knownId(map);
     const namesakes = id ? 0 : await namesakesNow();
+    if (stale()) return; // an item started while the posted list was read: this read is not its
+    up.seen = seen;
     const onTarget = onListing(seen, { id, yourListingsUrl: map.yourListingsUrl, namesakes });
     // the car's own listing page, found by its name and price: its id is what counts from now on
     if (onTarget && !id) up.listingId = listingIdFrom(seen.url, map.listingUrlPattern);
@@ -286,6 +292,7 @@ async function poll(ctx) {
       if (seen.hasPriceBox && !boxHasIt && up.fills < MAX_FILLS && (up.status === 'waiting' || up.status === 'filled')) {
         up.fills += 1;
         const [inj] = await chrome.scripting.executeScript({ target: { tabId: up.tabId }, func: fillPriceInPage, args: [map, up.price] });
+        if (stale()) return; // an item started during the fill: this result is not written on the item shown now
         const r = inj && inj.result;
         if (r && r.ok) {
           up.status = 'filled';

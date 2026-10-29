@@ -831,7 +831,7 @@ async function raceRig(item) {
         if (func !== readListingInPage) throw new Error('an unexpected in-page script');
         if (!r.holdRead) return [{ result: { ...LISTED_PAGE } }];
         r.holdRead = false;
-        return new Promise((resolve, reject) => { r.heldRead = { fail: reject }; });
+        return new Promise((resolve, reject) => { r.heldRead = { fail: reject, answer: resolve }; });
       },
     },
   };
@@ -889,6 +889,104 @@ test('a read still in flight when Open next To do item is clicked answers after 
     await r.flush();
     assert.equal(up.status, 'gone', 'the late poll moved the item on while the next item was looked up');
     assert.equal(up.vin, 'AAA', 'and the next item did not start');
+  } finally {
+    await endRaceRig(r);
+  }
+});
+
+test('a read still in flight when another To do item starts answers after it has started: its answer is none of the new item\'s, so the new item keeps its own listing id and page', async () => {
+  const origin = 'https://www.example-motors.test';
+  const r = await raceRig({ origin, vin: 'aaa', kind: 'takeDown', why: 'gone', name: 'Car A', listingUrl: LISTED_PAGE.url, listedPrice: 20000 });
+  try {
+    r.holdRead = true;
+    await r.tick(); // a poll starts and waits on the listing read
+    assert.ok(r.heldRead, 'the read is in flight');
+    // the next item saves no listing link, so its listing is found by its name and price
+    const next = startUpkeep({ origin, vin: 'bbb', kind: 'takeDown', why: 'gone', name: 'Car B', listingUrl: '', listedPrice: 20000 }, r.ctx);
+    await r.flush(); // the new item's tab is open and its wait begins
+    await r.tick();
+    await next;
+    assert.equal(up.vin, 'BBB');
+    r.heldRead.answer([{ result: { ...LISTED_PAGE } }]); // car A's read answers now, on car A's listing page
+    await r.flush();
+    assert.equal(up.listingId, '', 'car A\'s listing id is not saved for car B');
+    assert.equal(up.baseline, null, 'nor is car A\'s page the baseline of car B');
+  } finally {
+    await endRaceRig(r);
+  }
+});
+
+test('a next-item lookup that answers after its item was ended opens no listing, even while the item that replaced it is looking up its own next item', async () => {
+  const opened = [];
+  const lookups = [];
+  globalThis.chrome = { tabs: { create: async ({ url }) => { opened.push(url); return { id: 34 }; } } };
+  const ctx = { render: noop, map: () => FORM_MAP, nextItem: () => new Promise((resolve) => { lookups.push(resolve); }), onClose: noop };
+  try {
+    Object.assign(up, { ...DONE_CAR, hasNext: true });
+    const first = handleUpkeepClick('upkeepNext', ctx); // car A's next item is looked up
+    endUpkeep(); // Not now: that lookup belongs to a run that has ended
+    Object.assign(up, { ...DONE_CAR, active: true, vin: 'CCC', name: 'Car C', hasNext: true }); // car C is done, with one more item to find
+    const second = handleUpkeepClick('upkeepNext', ctx);
+    assert.equal(up.status, 'finding', 'car C\'s own lookup is under way');
+    lookups[0](NEXT); // car A's lookup answers now
+    assert.equal(await first, true);
+    assert.deepEqual(opened, [], 'no listing opens over car C');
+    assert.deepEqual([up.vin, up.status], ['CCC', 'finding'], 'car C is still the item shown, and still looking up');
+    lookups[1](null);
+    assert.equal(await second, true);
+    assert.equal(up.status, 'done', 'car C\'s lookup found nothing: its done banner is back');
+  } finally {
+    endUpkeep();
+    delete globalThis.chrome;
+  }
+});
+
+test('an item\'s next-item question answered after another item replaced it sets no Open next To do item on that item', async () => {
+  const origin = 'https://www.example-motors.test';
+  const k = siteKeys(origin);
+  const store = { [k.posted]: { AAA: { price: 20000, postedAt: 1, mine: true, name: 'Car A' } } };
+  let answer = null;
+  globalThis.chrome = { ...fakeChrome({}, store), tabs: { create: async () => ({ id: 35 }) }, runtime: { sendMessage: async () => ({}) } };
+  const ctx = { render: noop, map: () => FORM_MAP, nextItem: () => new Promise((resolve) => { answer = resolve; }), onClose: noop };
+  try {
+    Object.assign(up, { ...DONE_CAR, status: 'waiting', hasNext: false });
+    const done = handleUpkeepClick('upkeepDoneBtn', ctx); // car A is finished: whether another item follows is asked
+    for (let i = 0; i < 50 && !answer; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+    endUpkeep(); // Not now; car C is shown next, done, with nothing after it
+    Object.assign(up, { ...DONE_CAR, vin: 'CCC', name: 'Car C', hasNext: false });
+    answer(NEXT); // car A's answer comes late: another item follows car A
+    assert.equal(await done, true);
+    assert.equal(up.vin, 'CCC');
+    assert.equal(up.hasNext, false, 'the late answer offers no Open next To do item on car C');
+  } finally {
+    endUpkeep();
+    delete globalThis.chrome;
+  }
+});
+
+test('a read of the posted list still in flight when another To do item starts answers after it has started: the read is not the new item\'s, so the new item keeps its own listing id and page', async () => {
+  const origin = 'https://www.example-motors.test';
+  const r = await raceRig({ origin, vin: 'aaa', kind: 'takeDown', why: 'gone', name: 'Car A', listingUrl: '', listedPrice: 20000 });
+  // car A has no saved link, so its listing is found by its name and price, which reads the posted list first; that read is held until the test answers it
+  const get = chrome.storage.local.get;
+  let answerList = null;
+  chrome.storage.local.get = (keys) => new Promise((resolve) => { answerList = () => get(keys).then(resolve); });
+  try {
+    r.holdRead = true;
+    await r.tick(); // a poll starts and waits on the listing read
+    r.heldRead.answer([{ result: { ...LISTED_PAGE } }]); // car A's listing page answers: the posted list is read next
+    await r.flush();
+    assert.ok(answerList, 'the posted list is being read');
+    // another item starts while that read is in flight; the next item saves no listing link
+    const next = startUpkeep({ origin, vin: 'bbb', kind: 'takeDown', why: 'gone', name: 'Car B', listingUrl: '', listedPrice: 20000 }, r.ctx);
+    await r.flush(); // the new item's tab is open and its wait begins
+    await r.tick();
+    await next;
+    answerList(); // the posted list answers now, after car B has started
+    await r.flush();
+    assert.equal(up.vin, 'BBB');
+    assert.equal(up.listingId, '', 'car A\'s listing id is not saved for car B');
+    assert.equal(up.baseline, null, 'nor is car A\'s page the baseline of car B');
   } finally {
     await endRaceRig(r);
   }

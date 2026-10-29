@@ -247,12 +247,14 @@ async function runScan(ctx) {
   // lot at once is a website hiccup, so the last good snapshot is kept, and
   // the read is held back with the diff (src/rescan.js withWithheld) for the
   // popup's To do to offer once scans agree.
-  const kept = r.diff.unreliable && data[k.snapshot] ? data[k.snapshot] : r.snapshot;
+  const held = Boolean(r.diff.unreliable && data[k.snapshot]);
+  const kept = held ? data[k.snapshot] : r.snapshot;
   const diff = withWithheld(r.diff, r.snapshot, data[k.diff]);
   // the lot as Settings holds it: the snapshot kept above, which a held-back read keeps from the last scan and which carries the cars a read did not return. Its stores, the stores its cars name (the role and name warnings), the Price step and the ready count all judge these entries, so set-up and Settings agree
   const lot = Object.values(kept.vehicles);
   const stores = storeNames(lot);
-  const scan = { cars: r.vehicles.length, stores, vehicles: lot.map((v) => ({ location: v && v.location })), siteName: r.site.name, ready: lot.filter((v) => v.decision === 'ready').length, warnings: r.diff.warnings || [], price: priceStepModel(lot) };
+  // a held-back read's line says the last scan's cars are kept (scanLine), so its count is theirs, not this read's
+  const scan = { cars: r.vehicles.length, keptCars: held ? lot.length : null, stores, vehicles: lot.map((v) => ({ location: v && v.location })), siteName: r.site.name, ready: lot.filter((v) => v.decision === 'ready').length, warnings: r.diff.warnings || [], price: priceStepModel(lot) };
   try {
     // under the diff's lock, the key the background rescan writes under, so a rescan in between is not overwritten
     await withLock(k.diff, () => chrome.storage.local.set({ [k.snapshot]: kept, [k.diff]: diff, [k.boilerplate]: r.boilerplate, [k.settings]: r.settings }));

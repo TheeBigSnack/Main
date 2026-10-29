@@ -68,10 +68,18 @@ export function readyLine(ready) {
 // The scan step's line under the Read button (wizard.js): the cars and stores the read found, in a good banner; or,
 // when the website's used inventory gave no car at all, a warning in its place. Set-up can go on from there, but no
 // car is ready to post until a scan reads some, so the step must not show zero cars as a result.
-export function scanLine({ cars = 0, siteName = '', stores = [] } = {}) {
+// keptCars: the cars the last scan kept when this read was held back as a likely website hiccup (wizard.js runScan),
+// else null; the line then says what set-up keeps, not this read's count
+export function scanLine({ cars = 0, siteName = '', stores = [], keptCars = null } = {}) {
   const name = siteName || 'the website';
+  const storesText = `${stores.length} store${stores.length === 1 ? '' : 's'} found`;
+  if (keptCars !== null) {
+    const read = cars > 0 ? `${cars} used car${cars === 1 ? '' : 's'}` : 'No used cars';
+    const kept = `${keptCars} used car${keptCars === 1 ? '' : 's'}`;
+    return { tone: 'warn', text: `${read} read from ${name} this time, but held back, so the last scan's ${kept} ${keptCars === 1 ? 'is' : 'are'} kept. ${storesText} among them.` };
+  }
   if (!(cars > 0)) return { tone: 'warn', text: `No used cars were read from ${name}. Set-up can go on, but no car can be posted until a scan reads some.` };
-  return { tone: 'good', text: `${cars} used cars read from ${name}. ${stores.length} store${stores.length === 1 ? '' : 's'} found.` };
+  return { tone: 'good', text: `${cars} used car${cars === 1 ? '' : 's'} read from ${name}. ${storesText}.` };
 }
 // The control that gets the keyboard focus back when the set-up step is drawn
 // again (sidepanel.js refocusWizard): the one that had it, when the step still

@@ -470,6 +470,20 @@ test('set-up\'s You step reads the ticked stores too: the warning goes with a ti
   wiz.scan = null;
 });
 
+test('set-up\'s You step with no car list in its scan keeps the role\'s warning: no car is known to name a store, so the ticked store does not count', () => {
+  const role = { name: 'Sam', title: 'Team 2' };
+  const dealer = { name: 'Example Motors', city: 'Springfield', state: 'OH', zip: '43215' };
+  const plain = settingNumberWarning('role', 'Team 2', dealer);
+  assert.equal(settingNumberWarning('role', 'Team 2', dealer, ['Route 2 Motors']), '', 'the ticked store holds the 2');
+  wiz.active = true;
+  wiz.step = 'you';
+  wiz.scan = { stores: ['Route 2 Motors'] }; // a set-up resumed from a read saved before the cars were kept
+  wiz.settings = withDefaults({ salesperson: role, dealer, myStores: ['Route 2 Motors'] });
+  assert.equal(region(wizardHtml(), 'wizTitleWarn'), plain, 'the warning stays while no car is known to name the store');
+  wiz.active = false;
+  wiz.scan = null;
+});
+
 // the whole sentence the address step says when the dealership typed there no longer has the number in the role or the name
 const TYPED_WARNING = (setting, value) => `The dealership's name, city and ZIP typed here no longer have the number in your ${setting}. ${settingNumberWarning(setting, value, { name: 'Example Motors', city: 'Springfield', state: 'OH', zip: '43215' })} Your ${setting} is on the You step.`;
 

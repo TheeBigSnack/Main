@@ -405,3 +405,30 @@ test('set-up\'s first read drops a saved store the website no longer lists, so n
   assert.equal(wiz.settings.myStores.includes('Gone Motors'), false, 'the store the website does not list is not kept');
   assert.ok(wiz.scan.ready > 0, 'the cars the website lists as ready are still ready, with no store filter');
 });
+
+test('set-up\'s store step draws the boxes of the lot Settings reads: a read held back keeps the last scan\'s stores, so the store ticked there stays ticked through Next', async () => {
+  const settings = { ...structuredClone(STORED), myStores: ['Route 2 Motors'] };
+  // twelve cars on the last scan, all at the ticked store
+  const lot = Array.from({ length: 12 }, (_, i) => ['usedNormal', { vin: `LOT${i}`, extra_fields: { meta_location: 'Route 2 Motors', location_rt: 'Route 2 Motors' } }]);
+  // this read finds one car, at another store: most of the lot is missing, so the read is held back
+  const one = RECORDS.slice(0, 1).map((r) => ({ ...structuredClone(r), extra_fields: { ...r.extra_fields, meta_location: 'Other Store', location_rt: 'Other Store' } }));
+  browser({ local: { [k.settings]: settings, [k.snapshot]: snapshot(lot, settings) }, records: one });
+  await start();
+  await nextUntil('store');
+  assert.equal(storeBox('Route 2 Motors')?.checked, true, 'the box of the store the lot is at is drawn, and ticked');
+  assert.equal(storeBox('Other Store'), undefined, 'the store only this read names has no box');
+  await nextUntil('you');
+  assert.deepEqual(wiz.settings.myStores, ['Route 2 Motors'], 'Next keeps the store');
+});
+
+test('a held-back read\'s scan line says the last scan\'s cars are kept, with that lot\'s count and its stores, not this read\'s count', async () => {
+  const settings = { ...structuredClone(STORED), myStores: ['Route 2 Motors'] };
+  const lot = Array.from({ length: 12 }, (_, i) => ['usedNormal', { vin: `LOT${i}`, extra_fields: { meta_location: 'Route 2 Motors', location_rt: 'Route 2 Motors' } }]);
+  const one = RECORDS.slice(0, 1).map((r) => ({ ...structuredClone(r), extra_fields: { ...r.extra_fields, meta_location: 'Other Store', location_rt: 'Other Store' } }));
+  browser({ local: { [k.settings]: settings, [k.snapshot]: snapshot(lot, settings) }, records: one });
+  await start();
+  await nextUntil('scan');
+  await handleWizardClick('wizScan', ctx); // the read: wiz.step stays on the scan step
+  assert.equal(wiz.step, 'scan');
+  assert.match(unesc(html), /1 used car read from Example Motors this time, but held back, so the last scan's 12 used cars are kept\. 1 store found among them\./);
+});
