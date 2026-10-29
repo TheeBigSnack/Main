@@ -649,12 +649,19 @@ test('a second Open next To do item click while the next item is being found sta
     assert.ok(lookupDrawn, 'a render drew the lookup line while the lookup is held');
     assert.match(lookupDrawn, /id="upkeepClose">Close<\/button>/, 'Close is drawn in that render');
     assert.doesNotMatch(lookupDrawn, /id="upkeepNext"/, 'the Open next To do item button is not drawn in that render');
+    assert.match(drawn.at(-1), /<p class="hint" id="upkeepFinding">Finding the next To do item…<\/p>/, 'the last render while the lookup is held is still the lookup line');
     assert.equal(await handleUpkeepClick('upkeepNext', ctx), true);
     assert.equal(asked, 1, 'the second click asks for nothing');
     answer(null);
     assert.equal(await first, true);
     assert.equal(up.status, 'done', 'no item came back: the done banner is restored');
     assert.equal(up.hasNext, false);
+    // a done price update's lookup draws the same panel: the Finding line and Close alone, in the last render while it is held
+    Object.assign(up, { ...DONE_CAR, kind: 'price', why: '', price: 19000, listedPrice: 20000, hasNext: true });
+    const priceLookup = handleUpkeepClick('upkeepNext', ctx);
+    assert.match(drawn.at(-1), /<p class="hint" id="upkeepFinding">Finding the next To do item…<\/p>\s*<div class="actions"><button type="button" class="\w+" id="upkeepClose">Close<\/button><\/div>/, 'a done price update\'s lookup draws the Finding line and Close alone');
+    answer(null);
+    assert.equal(await priceLookup, true);
   } finally {
     endUpkeep();
   }

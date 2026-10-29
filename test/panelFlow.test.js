@@ -2755,6 +2755,16 @@ test('the form is not filled with a description that fails a fact or identity ch
   assert.match(joinedStatus, /Says "not the dealer" with words joined to your price note's sentence/, joinedStatus);
   assert.match(joinedStatus, /Fix the description \(or use Reset to template\) first\.$/, joinedStatus);
   assert.doesNotMatch(joinedStatus, /\bSettings\b/, joinedStatus);
+  // an edited or a rewritten description with the same missing note keeps the description's fix too: a Settings save does not write it again
+  for (const descriptionSource of ['edited', 'claude']) {
+    const ownStatus = realBlocker({ ...noted, descriptionSource })(CLEAN);
+    assert.match(ownStatus, /Fix the description \(or use Reset to template\) first\.$/, ownStatus);
+    assert.doesNotMatch(ownStatus, /\bSettings\b/, ownStatus);
+  }
+  // a missing note beside the same note's banned phrase: the missing note is the description's own stop, so the whole status line keeps the description's fix
+  const refusedNote = { ...state, settings: { ...SETTINGS, priceNote: 'Priced to sell, plus tax, title and registration.' } };
+  const lacksRefused = realBlocker(refusedNote)(CLEAN);
+  assert.match(lacksRefused, /^The description fails 2 checks that must pass before the form is filled: Doesn't include your dealership's price note: "Priced to sell, plus tax, title and registration\."; Your dealership's price note says "priced to sell"; change the note in Settings\. Fix the description \(or use Reset to template\) first\.$/, lacksRefused);
   assert.equal(realBlocker({ ...noted, noteApplies: false })(CLEAN), '', 'a note that does not apply to this car is not looked for');
   // length and tone are the salesperson's call
   for (const text of [`${CLEAN}\nCOME SEE THIS TRUCK TODAY`, `${CLEAN}\n🔥🔥🔥🔥`, CLEAN.split('\n').slice(0, 3).join('\n') + `\nI'm Sam, sales consultant at Example Motors.\nVIN ${CAR.vin}.`]) {
@@ -2863,6 +2873,11 @@ test('the checks line says the fix is in Settings when only a number in Settings
   const mixed = checksHtml(template.runGuardrails(text.replace('34,567 miles', '12,000 miles'), c));
   assert.match(mixed, /Fix before the form can be filled:<ul><li>Your role "2nd shift sales"/);
   assert.doesNotMatch(mixed, /After you save Settings/);
+  // a dealership name that is not set is a description's stop too, although its own fix words name Settings: the checks line gives it no Settings sentence
+  const noName = { ...c, salesperson: SETTINGS.salesperson, dealer: { ...SETTINGS.dealer, name: '' } };
+  const unnamed = checksHtml(template.runGuardrails(template.buildTemplateDescription({ ...noName, priceNote: '' }), noName));
+  assert.match(unnamed, /<li>No dealership name is set; add it in Settings \(Dealership name\)<\/li>/, unnamed);
+  assert.doesNotMatch(unnamed, /After you save Settings/, unnamed);
 });
 
 test('Open the Marketplace form, Fill it in now and Fill again all refuse a description with a claim the website does not make', async () => {

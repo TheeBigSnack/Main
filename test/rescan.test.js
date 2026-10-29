@@ -765,7 +765,7 @@ test('a price update that waits for the next scan has no button, so the next ite
   assert.equal(pickNext(next({ diff: { takenAt: at3(2), priceUpdates: [priceRow('WAIT')] }, posted }, '')), null, 'with nothing else, the waiting one is not offered');
 });
 
-test('the car just finished is passed over, its take-down and its price update alike, whatever the case of the VIN', () => {
+test('the car just finished is passed over, its take-down and its price update alike, whatever the case of its whole VIN, and matched by its VIN alone', () => {
   const next = rescan.nextUpkeepItem;
   const diff = { takenAt: at3(2), takeDown: [takeRow('A')], priceUpdates: [priceRow('A'), priceRow('C')] };
   assert.deepEqual(pickNext(next({ diff, posted: {} }, 'a')), ['price', 'C']);
@@ -777,6 +777,21 @@ test('the car just finished is passed over, its take-down and its price update a
   assert.deepEqual(pickNext(next({ diff: lowerTakes, posted: {} }, 'B')), ['takeDown', 'C'], 'a different car\'s take-down is still returned');
   const lowerPrice = { takenAt: at3(2), takeDown: [], priceUpdates: [priceRow('b'), priceRow('C')] };
   assert.deepEqual(pickNext(next({ diff: lowerPrice, posted: {} }, 'B')), ['price', 'C'], 'the lower-case price update of the car just finished is passed over too');
+  // every letter of a VIN counts, in lower case or mixed case, and a row is matched by its VIN alone: not by the stock number a real row carries, nor by another car whose VIN starts or ends with the same characters
+  const wholeLower = { takenAt: at3(2), takeDown: [takeRow(VIN.ram.toLowerCase())], priceUpdates: [priceRow(VIN.ram.toLowerCase()), priceRow(VIN.wagoneer)] };
+  assert.deepEqual(pickNext(next({ diff: wholeLower, posted: {} }, VIN.ram)), ['price', VIN.wagoneer], 'rows carrying a whole VIN in lower case are passed over, every letter of it');
+  const mixed = VIN.ram.slice(0, 9).toLowerCase() + VIN.ram.slice(9);
+  const mixedRows = { takenAt: at3(2), takeDown: [takeRow(mixed)], priceUpdates: [priceRow(mixed), priceRow(VIN.wagoneer)] };
+  assert.deepEqual(pickNext(next({ diff: mixedRows, posted: {} }, VIN.ram)), ['price', VIN.wagoneer], 'rows carrying the VIN in mixed case are passed over too');
+  const wholeUpper = { takenAt: at3(2), takeDown: [takeRow(VIN.ram)], priceUpdates: [priceRow(VIN.ram), priceRow(VIN.wagoneer)] };
+  assert.deepEqual(pickNext(next({ diff: wholeUpper, posted: {} }, VIN.ram.toLowerCase())), ['price', VIN.wagoneer], 'a car finished under its whole VIN in lower case passes over its rows, every letter of it');
+  const stocked = { takenAt: at3(2), takeDown: [takeRow('b', { stock: 'S-B' })], priceUpdates: [priceRow('b', { stock: 'S-B' }), priceRow('C', { stock: 'S-C' })] };
+  assert.deepEqual(pickNext(next({ diff: stocked, posted: {} }, 'B')), ['price', 'C'], 'the car just finished is matched by its VIN, not by the stock number its rows carry');
+  const longer = { takenAt: at3(2), takeDown: [takeRow('b'), takeRow('BC')], priceUpdates: [] };
+  assert.deepEqual(pickNext(next({ diff: longer, posted: {} }, 'B')), ['takeDown', 'BC'], 'another car whose VIN starts with the finished VIN is still returned');
+  const sameEnd = VIN.hellcat.slice(0, 9) + VIN.ram.slice(9);
+  const ends = { takenAt: at3(2), takeDown: [takeRow(VIN.ram.toLowerCase()), takeRow(sameEnd)], priceUpdates: [] };
+  assert.deepEqual(pickNext(next({ diff: ends, posted: {} }, VIN.ram)), ['takeDown', sameEnd], 'another car sharing the last eight characters of the VIN is still returned');
 });
 
 test('the order is the To do tab\'s: the scan\'s own, or oldest first by each kind\'s open flag, a car with no open flag last', () => {
