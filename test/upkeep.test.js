@@ -19,6 +19,7 @@ import { FORM_MAP } from '../extension/facebook/formMap.js';
 import { onListing, listingIdFrom, startUpkeep, endUpkeep, up, namesakesOf, namesakesNow, offTargetNote, unreadTabNote, upkeepHtml, handleUpkeepClick } from '../extension/upkeep.js';
 import { noteTakenDown, takenDownList } from '../extension/src/takenDown.js';
 import { siteKeys } from '../extension/src/storageKeys.js';
+import { STORAGE_FULL } from '../extension/src/storage.js';
 import { fakeChrome } from './helpers.js';
 
 // A page as the reader walks it: text nodes, each inside a plain block or a
@@ -1043,6 +1044,198 @@ test('a take-down finished while its posted-list read waits writes only its own 
     assert.deepEqual(takenDownList(store[k.takenDown]).map((t) => t.vin), ['AAA'], 'car A\'s take-down is recorded');
     assert.deepEqual(store[k.diff].takeDown.map((x) => x.vin), ['BBB'], 'car B\'s take-down stays in the diff');
   } finally {
+    await endRaceRig(r);
+  }
+});
+
+// finish reads the car's fields before its first await: a price update writes the price and basis it was updated to,
+// not those of the To do item the panel has moved to while the posted list is read.
+test('a price update that finishes while another To do item starts saves its own price and basis', async () => {
+  const origin = 'https://www.example-motors.test';
+  const k = siteKeys(origin);
+  const store = {
+    [k.posted]: {
+      AAA: { price: 20000, postedAt: 1, mine: true, name: 'Car A' },
+      BBB: { price: 31000, postedAt: 1, mine: true, name: 'Car B' },
+    },
+    [k.diff]: { priceUpdates: [{ vin: 'AAA' }, { vin: 'BBB' }] },
+  };
+  const r = await raceRig({
+    origin, vin: 'aaa', kind: 'price', price: WANT_PRICE, listedPrice: 20000, name: 'Car A',
+    listingUrl: LISTED_PAGE.url,
+  }, store);
+  // the first read of the posted list that finish makes is held until the test answers it
+  const get = chrome.storage.local.get;
+  let holding = true;
+  let answerList = null;
+  chrome.storage.local.get = (keys) => {
+    if (!holding || ![keys].flat().includes(k.posted)) return get(keys);
+    holding = false;
+    return new Promise((resolve) => { answerList = () => get(keys).then(resolve); });
+  };
+  try {
+    const done = handleUpkeepClick('upkeepDoneBtn', r.ctx); // car A: I updated it, at the price read on the website
+    await r.flush();
+    assert.ok(answerList, 'finish is reading the posted list');
+    // the person clicks car B's To do button: car A's item ends, and car B starts at another price
+    endUpkeep();
+    r.ctx.priceNow = async () => ({ ok: true, price: 30000, basis: 'beforeFees' });
+    const next = startUpkeep({
+      origin, vin: 'bbb', kind: 'price', price: 30000, listingUrl: at('222'), name: 'Car B', listedPrice: 31000,
+    }, r.ctx);
+    await r.flush();
+    await r.tick();
+    await next;
+    assert.deepEqual([up.vin, up.status, up.price, up.basis], ['BBB', 'waiting', 30000, 'beforeFees']);
+    answerList(); // car A's read answers now, and finish writes car A's price and basis
+    assert.equal(await done, true);
+    await r.flush();
+    const aaa = store[k.posted].AAA;
+    assert.deepEqual([aaa.price, aaa.basis], [WANT_PRICE, 'website'], 'the price and basis car A was updated at');
+    assert.equal(store[k.posted].BBB.price, 31000, 'car B is untouched');
+    assert.deepEqual(store[k.diff].priceUpdates.map((x) => x.vin), ['BBB'], 'car B\'s price update stays in the diff');
+  } finally {
+    await endRaceRig(r);
+  }
+});
+
+test('a take-down finished while another To do item starts keeps its own car\'s name and post time', async () => {
+  const origin = 'https://www.example-motors.test';
+  const k = siteKeys(origin);
+  const store = {
+    [k.posted]: {
+      AAA: { price: 20000, postedAt: '2026-10-01T10:00:00.000Z', mine: true, name: 'Car A' },
+      BBB: { price: 21000, postedAt: '2026-10-20T10:00:00.000Z', mine: true, name: 'Car B', listedBefore: true },
+    },
+    [k.diff]: { takeDown: [{ vin: 'AAA' }, { vin: 'BBB' }] },
+  };
+  const r = await raceRig({
+    origin, vin: 'aaa', kind: 'takeDown', why: 'gone', name: 'Car A', listingUrl: at('111'), listedPrice: 20000,
+  }, store);
+  // the posted-list read that finish makes for car A's take-down is held until the test answers it
+  const get = chrome.storage.local.get;
+  let holding = true;
+  let answerList = null;
+  chrome.storage.local.get = (keys) => {
+    if (!holding || ![keys].flat().includes(k.posted)) return get(keys);
+    holding = false;
+    return new Promise((resolve) => { answerList = () => get(keys).then(resolve); });
+  };
+  try {
+    const done = handleUpkeepClick('upkeepDoneBtn', r.ctx); // car A: I took it down
+    await r.flush();
+    assert.ok(answerList, 'finish is reading the posted list');
+    endUpkeep();
+    const next = startUpkeep({
+      origin, vin: 'bbb', kind: 'takeDown', why: 'gone', name: 'Car B', listingUrl: at('222'), listedPrice: 21000,
+    }, r.ctx);
+    await r.flush();
+    await r.tick();
+    await next;
+    assert.equal(up.vin, 'BBB');
+    answerList(); // car A's read answers now, and finish records car A's take-down
+    assert.equal(await done, true);
+    await r.flush();
+    // the take-down record names car A, with car A's post time and flag, not car B's
+    const record = takenDownList(store[k.takenDown]).map((t) => [t.vin, t.name, t.postedAt, t.listedBefore === true]);
+    assert.deepEqual(record, [['AAA', 'Car A', '2026-10-01T10:00:00.000Z', false]]);
+  } finally {
+    await endRaceRig(r);
+  }
+});
+
+// finish draws a failed write's error, and clears the error on success, only while the panel still shows the car it was
+// run for. The first step is the control: the car the panel shows draws its own failed write. Then the panel moves to
+// car B, and car A's failed write is not drawn there.
+test('a storage error on a finished car does not show on the car the panel moved to', async () => {
+  const origin = 'https://www.example-motors.test';
+  const k = siteKeys(origin);
+  const store = {
+    [k.posted]: {
+      AAA: { price: 20000, postedAt: 1, mine: true, name: 'Car A' },
+      BBB: { price: 21000, postedAt: 1, mine: true, name: 'Car B' },
+    },
+    [k.diff]: { takeDown: [{ vin: 'AAA' }, { vin: 'BBB' }] },
+  };
+  const r = await raceRig({
+    origin, vin: 'aaa', kind: 'takeDown', why: 'gone', name: 'Car A', listingUrl: at('111'), listedPrice: 20000,
+  }, store);
+  const get = chrome.storage.local.get;
+  let holding = false;
+  let answerList = null;
+  chrome.storage.local.get = (keys) => {
+    if (!holding || ![keys].flat().includes(k.posted)) return get(keys);
+    holding = false;
+    return new Promise((resolve) => { answerList = () => get(keys).then(resolve); });
+  };
+  chrome.storage.local.set = async () => { throw new Error('QUOTA_BYTES quota exceeded'); }; // Chrome's storage is full
+  try {
+    // the control: car A is the car the panel shows, so its failed write is drawn there
+    assert.equal(await handleUpkeepClick('upkeepDoneBtn', r.ctx), true); // car A: I took it down
+    assert.equal(up.error, STORAGE_FULL);
+    assert.match(upkeepHtml(), /class="banner bad">Couldn&#39;t save: Chrome&#39;s storage for Lot Current is full\./);
+    holding = true;
+    const done = handleUpkeepClick('upkeepDoneBtn', r.ctx); // car A again, while the posted list is read
+    await r.flush();
+    assert.ok(answerList, 'finish is reading the posted list');
+    endUpkeep();
+    const next = startUpkeep({
+      origin, vin: 'bbb', kind: 'takeDown', why: 'gone', name: 'Car B', listingUrl: at('222'), listedPrice: 21000,
+    }, r.ctx);
+    await r.flush();
+    await r.tick();
+    await next;
+    answerList(); // car A's write fails now, after car B has started
+    assert.equal(await done, true);
+    await r.flush();
+    assert.deepEqual([up.vin, up.error], ['BBB', ''], 'car A\'s storage error is not drawn on car B');
+    assert.doesNotMatch(upkeepHtml(), /banner bad/, 'and car B\'s panel shows no error');
+  } finally {
+    await endRaceRig(r);
+  }
+});
+
+test('a finished car\'s success does not clear the error of the car the panel moved to', async () => {
+  const origin = 'https://www.example-motors.test';
+  const k = siteKeys(origin);
+  const store = {
+    [k.posted]: {
+      AAA: { price: 20000, postedAt: 1, mine: true, name: 'Car A' },
+      BBB: { price: 21000, postedAt: 1, mine: true, name: 'Car B' },
+    },
+    [k.diff]: { takeDown: [{ vin: 'AAA' }, { vin: 'BBB' }] },
+  };
+  const r = await raceRig({
+    origin, vin: 'aaa', kind: 'takeDown', why: 'gone', name: 'Car A', listingUrl: at('111'), listedPrice: 20000,
+  }, store);
+  const get = chrome.storage.local.get;
+  const create = chrome.tabs.create;
+  let holding = true;
+  let answerList = null;
+  chrome.storage.local.get = (keys) => {
+    if (!holding || ![keys].flat().includes(k.posted)) return get(keys);
+    holding = false;
+    return new Promise((resolve) => { answerList = () => get(keys).then(resolve); });
+  };
+  try {
+    const done = handleUpkeepClick('upkeepDoneBtn', r.ctx); // car A: I took it down, and its write succeeds
+    await r.flush();
+    assert.ok(answerList, 'finish is reading the posted list');
+    endUpkeep();
+    chrome.tabs.create = async () => { throw new Error('no window to open it in'); }; // car B's listing tab cannot open
+    await startUpkeep({
+      origin, vin: 'bbb', kind: 'takeDown', why: 'gone', name: 'Car B', listingUrl: at('222'), listedPrice: 21000,
+    }, r.ctx);
+    assert.deepEqual([up.vin, up.status], ['BBB', 'open-failed']);
+    answerList(); // car A's write succeeds now, and finish completes
+    assert.equal(await done, true);
+    await r.flush();
+    assert.equal(store[k.posted].AAA, undefined, 'car A is off the posted list');
+    assert.deepEqual([up.vin, up.status], ['BBB', 'open-failed']);
+    assert.equal(up.error, 'Couldn\'t open the listing: no window to open it in', 'car B\'s error is kept');
+    assert.match(upkeepHtml(), /Couldn&#39;t open the listing: no window to open it in/);
+  } finally {
+    chrome.tabs.create = create;
     await endRaceRig(r);
   }
 });

@@ -66,7 +66,7 @@ What is blocked: the `database` step (0009 to 0016), the `functions` step and th
 - The pilot ask to his manager by 19 October, in person. Claude contacts no one.
 
 ### F. Test commands (run from the repo root, after `npm install` once)
-- `npm test`: unit tests, node:test, no dependencies. 2112 pass on round 13 (README line 109 states the count; `test/docs.test.js` checks it).
+- `npm test`: unit tests, node:test, no dependencies. 2116 pass on round 13 (README line 109 states the count; `test/docs.test.js` checks it).
 - `npm run test:e2e`: all ten browser flows against the mock sites (or `npm run test:e2e:popup`, `:post`, `:queue`, `:wizard`, `:upkeep`, `:standard`, `:platforms`, `:panel`, `:branding`, `:manager` for one).
 - `npm run test:demo`, `npm run test:a11y`, `npm run test:site`.
 - `npm run store-check`, `node scripts/legal-pages.mjs --check`, `node scripts/site-pages.mjs --check`.
