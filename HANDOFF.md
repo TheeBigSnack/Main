@@ -1710,6 +1710,8 @@ These were open in section 30.5 and are in the code now (the commits are on the 
 - Refuted: none.
 - The probe: `scripts/mutate-upkeep.mjs` now runs three base copies and 21 mutants, the new one being `SP1-request-posted-empty`. At the working tree before the commit, all 24 lines came back `ok` (`scratchpad/probe-full-sp20.jsonl`): the base copies pass with 65, 94 and 88 tests, and all 21 mutants exit 1 with no cancelled test.
 - Counts: `npm test` gives 2140 pass and 0 fail, and README line 109 says 2140. The side-panel pin is the one new test; the wizard assertions add none.
+- Browser flows at the final code head: `LOTSYNC_E2E_CHANNEL=chromium node scripts/e2e-all.mjs`, run alone at `8c04a69`. All ten flows (popup, post, queue, wizard, upkeep, standard, platforms, panel, branding and manager) passed in 291.0 s, exit 0 (log `scratchpad/e2e-final-8c04a69.log`). Nothing under `extension/` changed after `7b24493`, the app code of the 34.19 run, and `8c04a69` changes none of it either, so this run covers the round's code head. The records commit that adds this text changes no file the flows load.
+- Proof 21 runs on the records commit that adds this text. Its result goes in the next records commit, as the earlier proofs' did.
 
 ## 11. Quick reference
 ```
