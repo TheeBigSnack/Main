@@ -491,7 +491,7 @@ test("when the price goes down, the filled price says Facebook can let people wh
     await rig.tick();
     assert.equal(up.status, 'filled');
     const html = upkeepHtml();
-    assert.match(html, /id="priceFilled">New price \$18,500 is in the Price box \(it shows "18500"\)\. Now click <b>Update<\/b> on Facebook\./, 'it names the price filled, and the box as it shows it');
+    assert.match(html, /id="priceFilled">New price \$18,500 is in the Price box \(it shows "18500"\)\. Now click <b>Update<\/b> on Facebook\. Lot Current will notice when the listing shows the new price\./, 'it names the price filled, the box as it shows it, and that Lot Current will notice the new price');
     assert.match(html, /Facebook can let people who saved this car know about the new price; Lot Current doesn't\./);
     assert.doesNotMatch(html, /Lot Current (tells|notifies|will tell|will notify) (anyone|people|them)/);
   } finally {
@@ -1443,6 +1443,89 @@ test('an Open next To do item clicked while a second finish still writes opens t
     assert.equal(await second, true);
   } finally {
     if (releaseSecond) releaseSecond(); // a write left held would keep the record's lock for the tests after this one
+    await endRaceRig(r);
+  }
+});
+
+// The first finish saved the record, so a repeat finish whose own write then fails draws no error: the done panel stays, and
+// nothing on it says that the storage is full.
+test('a repeat finish whose write fails draws no error on the done panel, since the first finish saved the record', async () => {
+  const origin = 'https://www.example-motors.test';
+  const k = siteKeys(origin);
+  const r = await raceRig({ origin, vin: 'aaa', kind: 'price', price: WANT_PRICE, listingUrl: LISTED_PAGE.url, name: 'Car A', listedPrice: 20000 }, {
+    [k.diff]: { priceUpdates: [{ vin: 'AAA', name: 'Car A', yours: true }] },
+  });
+  // the repeat finish's diff write is the second one: it waits until the test fails it, as Chrome does when the storage is full
+  const set = chrome.storage.local.set;
+  let diffWrites = 0;
+  let refuseRepeat = null;
+  chrome.storage.local.set = (obj) => {
+    if (!(k.diff in obj)) return set(obj);
+    diffWrites += 1;
+    if (diffWrites === 1) return set(obj);
+    return new Promise((resolve, reject) => { refuseRepeat = reject; });
+  };
+  try {
+    const first = handleUpkeepClick('upkeepDoneBtn', r.ctx); // I updated it
+    const repeat = handleUpkeepClick('upkeepDoneBtn', r.ctx); // I updated it again, before the first has finished
+    await r.untilLookups(1);
+    await r.flush();
+    assert.equal(up.status, 'done', 'the first finish is done while the repeat is still writing');
+    assert.equal(typeof refuseRepeat, 'function', 'the repeat finish reached its diff write');
+    refuseRepeat(new Error('QUOTA_BYTES quota exceeded'));
+    assert.equal(await repeat, true);
+    assert.equal(up.error, '', 'the repeat draws no error, since the first finish saved the record');
+    assert.doesNotMatch(upkeepHtml(), /banner bad/);
+    assert.match(upkeepHtml(), /<div class="banner good" id="upkeepDone">Done\. Marked done\.<\/div>/);
+    r.lookups[0](null); // no next item
+    assert.equal(await first, true);
+  } finally {
+    chrome.storage.local.set = set;
+    if (refuseRepeat) refuseRepeat(new Error('released')); // a write left held would keep the record's lock for the tests after this one
+    await endRaceRig(r);
+  }
+});
+
+// The repeat finish's write fails while Open next To do item looks up the next item: the Finding line is drawn, and the repeat's
+// failed write draws no error over it.
+test('a repeat finish whose write fails while Open next To do item looks up the next item draws no error over the Finding line', async () => {
+  const origin = 'https://www.example-motors.test';
+  const k = siteKeys(origin);
+  const r = await raceRig({ origin, vin: 'aaa', kind: 'price', price: WANT_PRICE, listingUrl: LISTED_PAGE.url, name: 'Car A', listedPrice: 20000 }, {
+    [k.diff]: { priceUpdates: [{ vin: 'AAA', name: 'Car A', yours: true }] },
+  });
+  const set = chrome.storage.local.set;
+  let diffWrites = 0;
+  let refuseRepeat = null;
+  chrome.storage.local.set = (obj) => {
+    if (!(k.diff in obj)) return set(obj);
+    diffWrites += 1;
+    if (diffWrites === 1) return set(obj);
+    return new Promise((resolve, reject) => { refuseRepeat = reject; });
+  };
+  try {
+    const first = handleUpkeepClick('upkeepDoneBtn', r.ctx); // I updated it
+    const repeat = handleUpkeepClick('upkeepDoneBtn', r.ctx); // I updated it again, before the first has finished
+    await r.untilLookups(1);
+    await r.flush();
+    r.lookups[0](RACE_NEXT); // the first finish: another item follows, so its button is drawn
+    assert.equal(await first, true);
+    assert.deepEqual([up.status, up.hasNext], ['done', true]);
+    const next = handleUpkeepClick('upkeepNext', r.ctx); // Open next To do item, while the repeat's write still waits
+    await r.untilLookups(2);
+    assert.equal(up.status, 'finding');
+    assert.equal(typeof refuseRepeat, 'function', 'the repeat finish reached its diff write');
+    refuseRepeat(new Error('QUOTA_BYTES quota exceeded'));
+    assert.equal(await repeat, true);
+    assert.equal(up.error, '', 'the repeat draws no error over the Finding line');
+    assert.doesNotMatch(upkeepHtml(), /banner bad/);
+    assert.match(upkeepHtml(), /id="upkeepFinding"/);
+    r.lookups[1](null); // the next item's lookup finds nothing
+    assert.equal(await next, true);
+    assert.equal(up.status, 'done');
+  } finally {
+    chrome.storage.local.set = set;
+    if (refuseRepeat) refuseRepeat(new Error('released')); // a write left held would keep the record's lock for the tests after this one
     await endRaceRig(r);
   }
 });

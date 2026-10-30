@@ -43,6 +43,7 @@ const mutants = [
   // the finish tail during the next-item lookup (proof 16): no guard at all, and the over() guard that would also drop the second finish's own done
   { id: 'B1-no-finding-guard', ...UPKEEP, find: "if (run !== starts || !up.active || up.status === 'finding') return;", replace: 'if (run !== starts || !up.active) return;' },
   { id: 'B2-over-guard', ...UPKEEP, find: "if (run !== starts || !up.active || up.status === 'finding') return;", replace: 'if (run !== starts || !up.active || over()) return;' },
+  { id: 'C1-catch-over', ...UPKEEP, find: 'if (run === starts && !over()) {', replace: 'if (run === starts) {' },
   // the poll's first read after the listing page (proof 17): a finished item reads nothing from the posted list
   { id: 'P1-poll-first-over', ...UPKEEP, find: 'if (stale() || !seen || over()) return;', replace: 'if (stale() || !seen) return;' },
   // a To do list entry that is not an object (proof 17): skipped, never read

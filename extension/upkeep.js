@@ -381,8 +381,9 @@ async function finish(ctx, how) {
     await updatePilot(origin, (p) => resolveFlag(p, vin, price ? 'price' : null, { how }));
     await updateKey(k.diff, (diff) => dropFromDiff(diff, price ? ['priceUpdates'] : ['takeDown', 'priceUpdates', 'needsALook'], vin));
   } catch (e) {
-    // the error is written and drawn only while the panel still shows this car
-    if (run === starts) {
+    // the error is written and drawn only while the panel still shows this car, and not once the item is done or its next
+    // item is being looked up: an earlier finish saved the record, and a repeat finish writes the same values
+    if (run === starts && !over()) {
       up.error = storageErrorText(e);
       ctx.render();
     }
