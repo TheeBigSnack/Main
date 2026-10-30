@@ -4154,3 +4154,27 @@ test('the Open next To do item request follows the To do order and the pilot fla
   assert.equal(await nextVin({ todoOrder: 'listed' }), 'TKA', 'the scan\'s own order gives the first row');
   assert.equal(await nextVin({ todoOrder: 'oldest' }), 'TKB', 'oldest first gives the row flagged first');
 });
+
+// A price row whose listing got its price after the scan began waits for the next scan (priceItemWaits, the rule the
+// To do tab uses too, popup.js): the request passes it over, so it never offers a car the tab draws no button for.
+test('the Open next To do item request offers no price row that waits for the next scan', async () => {
+  const ORIGIN = 'https://www.example-motors.test';
+  const k = siteKeys(ORIGIN);
+  const stored = {
+    [k.diff]: {
+      takenAt: '2026-10-28T09:00:00.000Z',
+      takeDown: [],
+      priceUpdates: [
+        { vin: 'WAIT', name: 'Car W from the scan', yours: true, from: 21000, to: 19500, change: -1500 },
+        { vin: 'READY', name: 'Car R from the scan', yours: true, from: 18000, to: 17500, change: -500 },
+      ],
+    },
+    [k.posted]: {
+      WAIT: { price: 19500, postedAt: '2026-10-20T10:00:00.000Z', updatedAt: '2026-10-29T08:00:00.000Z', name: 'Car W', listingUrl: 'https://www.facebook.com/marketplace/item/555/' },
+      READY: { price: 18000, postedAt: '2026-10-20T10:00:00.000Z', name: 'Car R', listingUrl: 'https://www.facebook.com/marketplace/item/666/' },
+    },
+  };
+  const request = (vin) => compile('nextUpkeepRequest', { up: { origin: ORIGIN, vin }, siteKeys, nextUpkeepItem, state: { settings: {}, dealerTabId: 4 }, panelWindowId: 2, chrome: { storage: { local: { get: async (keys) => Object.fromEntries(keys.map((key) => [key, stored[key]])) } } } })();
+  assert.equal((await request('OTHER')).vin, 'READY', 'WAIT is passed over: its listing got the price after the scan, so the To do tab draws no button for it');
+  assert.equal(await request('READY'), null, 'with READY finished, only the waiting WAIT is left, and nothing is offered');
+});

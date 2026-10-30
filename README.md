@@ -35,8 +35,8 @@ Which version do I have? `chrome://extensions` shows it under the name, and **Se
 7. Click **Rescan website** any time (or let the automatic rescans do it). **To do** shows what to take down (sold, or gone sale-pending), what to reprice (with your listing price next to the website's), and what's new.
    - **Open & update price** opens your listing in a new tab. Click **Edit listing** on Facebook; the side panel reads the car on the website again just before it opens the listing (it stops and says why if the car is gone, sold or sale-pending, no longer passes the pre-owned check, or has no new price), puts the price the website shows then in the Price box the moment it appears and tells you what the box shows. Click **Update** yourself. The panel notices the new price on the listing and ticks the item off.
    - **Open listing** on a sold car opens your listing. Click **Mark as sold** (or **Delete**) yourself; the panel notices and ticks the item off.
-   - **Updated** and **Taken down** tick an item off by hand if you did it another way.
-   - Once a To do item is done, the panel offers **Open next To do item** when another To do item has a button to open it (**Open listing** or **Open & update price**); it opens that item's listing, and you take the same steps there.
+   - After you finish an item you opened from the side panel, the panel offers **Open next To do item** when another To do item has a button to open it (**Open listing** or **Open & update price**); it opens that item's listing, and you take the same steps there.
+   - **Updated** and **Taken down** in the popup tick an item off by hand if you did it another way.
 
 Already listed a car by hand? Use **Mark posted** so rescans watch it too.
 
@@ -106,7 +106,7 @@ To pass, at least two of them must say pre-owned, or one must and the car's page
 ## For development
 
 ```
-npm test              # 2139 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
+npm test              # 2140 unit tests, many on real records from the site (Node 22 or newer, no dependencies)
 npm install           # Playwright, for the end-to-end tests
 npx playwright install chromium
 npm run test:e2e      # ten e2e flows against mock sites: popup/rescan, post, queue, wizard + background rescan, upkeep, standard vehicle data, DealerOn + Dealer.com, posting from the side panel, dealer-branding crop, and the manager view's sample page and CSV

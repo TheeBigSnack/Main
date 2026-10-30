@@ -1,13 +1,15 @@
-// Mutation probe for the To do upkeep guards (extension/upkeep.js) and the To do list reader (extension/src/rescan.js).
+// Mutation probe for the To do upkeep guards (extension/upkeep.js), the To do list reader (extension/src/rescan.js) and the
+// side panel's request for the next To do item (extension/sidepanel.js, nextUpkeepRequest).
 //
 // Each mutant is one exact FIND/REPLACE in a fresh copy of the repo, and the test file that pins it runs in that copy. A
-// mutant is killed when that run exits non-zero. A mutant whose FIND does not occur exactly once is an error, not a kill.
-// The base copies, with no change, must pass. The repo itself is not changed.
+// mutant is killed when that run exits non-zero and its summary reports no cancelled test. Any other result is a survivor:
+// a run that timed out has no summary, so it survives too. A FIND that does not occur exactly once is an error, not a
+// kill. The base copies, with no change, must pass. The repo itself is not changed.
 //
 //   node scripts/mutate-upkeep.mjs <outDir> [mutant ids...]     (outDir: a new folder outside the repo)
 //
-// Prints one JSON line per mutant. Exits 1 if a base copy fails, a mutant survives, or a FIND does not match.
-// Plain Node, no dependencies.
+// Prints one JSON line per mutant, with the names of its failing tests. Exits 1 if a base copy fails, a mutant is not
+// killed, or a FIND does not match. Plain Node, no dependencies.
 
 import { cpSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { spawn } from 'node:child_process';
@@ -17,10 +19,12 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const UPKEEP = { file: 'extension/upkeep.js', test: 'test/upkeep.test.js' };
 const RESCAN = { file: 'extension/src/rescan.js', test: 'test/rescan.test.js' };
+const SIDE = { file: 'extension/sidepanel.js', test: 'test/panelFlow.test.js' };
 
 const mutants = [
   { id: 'base', ...UPKEEP, find: null },
   { id: 'base-rescan', ...RESCAN, find: null },
+  { id: 'base-side', ...SIDE, find: null },
   // the second finish of an item: the stale answer is reset, and an answer to an earlier finish is not written
   { id: 'S1-no-reset', ...UPKEEP, find: '  up.hasNext = false; // an answer an earlier finish of this item drew is not kept: the question below asks again\n', replace: '' },
   { id: 'S2-no-token', ...UPKEEP, find: 'if (ask !== finishes || run !== starts', replace: 'if (run !== starts' },
@@ -48,6 +52,8 @@ const mutants = [
   { id: 'P1-poll-first-over', ...UPKEEP, find: 'if (stale() || !seen || over()) return;', replace: 'if (stale() || !seen) return;' },
   // a To do list entry that is not an object (proof 17): skipped, never read
   { id: 'R1-todo-object-filter', ...RESCAN, find: 'const list = Array.isArray(items) ? items.filter((x) => x && typeof x === \'object\') : [];', replace: 'const list = Array.isArray(items) ? items : [];' },
+  // the side panel's Open next To do item request (proof 20): with no posted list, a price row that waits for the next scan is offered
+  { id: 'SP1-request-posted-empty', ...SIDE, find: 'nextUpkeepItem({ diff: got[k.diff], posted, flags: got[k.pilot]?.flags', replace: 'nextUpkeepItem({ diff: got[k.diff], posted: {}, flags: got[k.pilot]?.flags' },
 ];
 
 function run(dir, test) {
