@@ -1681,7 +1681,8 @@ These were open in section 30.5 and are in the code now (the commits are on the 
   - Docs (nit): 34.16's count of the pilot's names in test files (about 241 lines in about 35 files) could not be reproduced. The search is a case-insensitive match, in `test/` outside `test/fixtures/`, for the pilot's town name and the dealer's name with and without the space: 146 lines in 36 files at `7b24493`. 34.4 and 34.16 now give that count.
   - Docs (nit): the PR draft's After paragraph said that a read or fill still in flight writes nothing on the panel after the item is finished or while the next item is looked up, but a read that finds the tab closed keeps its "gone" answer. The draft is corrected; it is not committed.
 - Counts: `npm test` gives 2139 pass and 0 fail, and README line 109 says 2139. `7b24493` adds two race tests, and the mutant probe runs 20 mutants (19 before `7b24493`).
-- Proof 19 runs on the head that carries this section. Its results, and the browser flows at the final code head, go in the next records commit.
+- Browser flows at the final code head, `7b24493` (the records commits after it change no code): `LOTSYNC_E2E_CHANNEL=chromium node scripts/e2e-all.mjs`, run alone, about 300 s. All ten flows passed: popup, post, queue, wizard, upkeep, standard, platforms, panel, branding and manager. The log is `scratchpad/e2e-final-7b24493.log`, session scratch and not committed.
+- Proof 19 runs on the head `9b49666`. Its result is recorded in the next records commit.
 
 ## 11. Quick reference
 ```
