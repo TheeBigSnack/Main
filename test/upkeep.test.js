@@ -429,6 +429,7 @@ test('a price update whose Price box keeps another price after Lot Current\'s fi
   // stuck after fills that went in, each one undone by the form: still the stuck banner, never that the price is in the box
   Object.assign(up, { status: 'filled', filledShown: '$18,500', stuck: true, boxShows: '$20,000', fills: 4 });
   assert.match(upkeepHtml(), /id="priceStuck"/);
+  assert.doesNotMatch(upkeepHtml(), /id="priceFilled"/, 'the panel never claims the price is in the box');
   endUpkeep();
 });
 
@@ -1590,6 +1591,84 @@ test('a price fill still in flight when another To do item starts writes nothing
     await flush();
     assert.deepEqual([up.vin, up.status, up.filledShown, up.fills], ['BBB', 'waiting', '', 0], 'car A\'s fill result is not written on car B');
     assert.doesNotMatch(upkeepHtml(), /id="priceFilled"/, 'car B does not say its price is in the box');
+  } finally {
+    endRig();
+    await rig.started;
+  }
+});
+
+// The price fill answers after I updated the item: its result is not written on the finished item, which stays done with
+// nothing filled, and the panel does not offer the fill's price as in the box.
+test('a price fill still in flight when I updated it does not set the done item back to filled', async () => {
+  const rig = await priceRig(LISTED_PAGE, { nextItem: async () => null });
+  const executeScript = chrome.scripting.executeScript;
+  let answerFill = null;
+  chrome.scripting.executeScript = (args) => (args.func === fillPriceInPage ? new Promise((resolve) => { answerFill = resolve; }) : executeScript(args));
+  try {
+    await rig.tick(); // the Price box shows the listed price, so the fill goes in and is held
+    assert.ok(answerFill, 'the fill is in flight');
+    assert.equal(await handleUpkeepClick('upkeepDoneBtn', rig.ctx), true);
+    assert.equal(up.status, 'done');
+    answerFill([{ result: { ok: true, shown: '$18,500' } }]); // the fill answers now, with the price in the box
+    await rig.flush();
+    assert.equal(up.status, 'done', 'the late fill does not change the done item');
+    assert.equal(up.filledShown, '', 'and no shown price is written on it');
+    assert.doesNotMatch(upkeepHtml(), /id="priceFilled"/, 'the item is not drawn as filled');
+    assert.match(upkeepHtml(), /id="upkeepDone"/, 'the done banner stays');
+  } finally {
+    endRig();
+    await rig.started;
+  }
+});
+
+// The same fill answering while the next To do item is looked for: the lookup is not dropped, and the item it finds opens.
+test('a price fill still in flight while the next To do item is looked for does not drop the lookup: the item it finds opens', async () => {
+  let answer = null;
+  let lookupHeld = false;
+  const rig = await priceRig(LISTED_PAGE, { nextItem: () => (lookupHeld ? new Promise((resolve) => { answer = resolve; }) : Promise.resolve(NEXT)) });
+  const executeScript = chrome.scripting.executeScript;
+  let answerFill = null;
+  chrome.scripting.executeScript = (args) => (args.func === fillPriceInPage ? new Promise((resolve) => { answerFill = resolve; }) : executeScript(args));
+  try {
+    await rig.tick(); // the Price box shows the listed price, so the fill goes in and is held
+    assert.ok(answerFill, 'the fill is in flight');
+    assert.equal(await handleUpkeepClick('upkeepDoneBtn', rig.ctx), true);
+    assert.equal(up.status, 'done');
+    lookupHeld = true;
+    // not awaited: the item the lookup opens waits on its own 1.5 s timer, which these fake timers run only on a tick
+    handleUpkeepClick('upkeepNext', rig.ctx);
+    assert.equal(up.status, 'finding', 'the next item is being looked for');
+    answerFill([{ result: { ok: true, shown: '$18,500' } }]); // the fill answers while the lookup is held
+    await rig.flush();
+    assert.equal(up.status, 'finding', 'the late fill does not change the lookup');
+    answer(NEXT);
+    await rig.flush();
+    assert.equal(up.vin, 'BBB', 'the item the lookup found opens');
+  } finally {
+    endRig();
+    await rig.started;
+  }
+});
+
+// A listing read still in flight when I updated the item fails after it: the tab is still open but moved off Marketplace,
+// and the failure sets no note on the finished item, whose done banner is drawn as it was.
+test('a listing read that fails after I updated it, with the tab moved off Marketplace, does not rewrite the done banner', async () => {
+  const rig = await priceRig({ ...LISTED_PAGE, hasPriceBox: false }, { nextItem: async () => null });
+  const executeScript = chrome.scripting.executeScript;
+  let failRead = null;
+  chrome.scripting.executeScript = (args) => (args.func === readListingInPage ? new Promise((resolve, reject) => { failRead = reject; }) : executeScript(args));
+  rig.page = { ...rig.page, url: 'https://www.facebook.com/home' }; // the tab is still open, on a Facebook page that is not Marketplace
+  try {
+    await rig.tick(); // the poll's read goes out and is held in flight
+    assert.ok(failRead, 'the read is in flight');
+    assert.equal(await handleUpkeepClick('upkeepDoneBtn', rig.ctx), true);
+    assert.equal(up.status, 'done');
+    const drawn = upkeepHtml();
+    failRead(new Error('the tab cannot be read')); // the read fails after I updated the item
+    await rig.flush();
+    assert.equal(up.status, 'done');
+    assert.ok(!up.offTarget, 'the finished item is not marked as off its listing');
+    assert.equal(upkeepHtml(), drawn, 'the done banner is drawn as it was');
   } finally {
     endRig();
     await rig.started;

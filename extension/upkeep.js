@@ -258,7 +258,8 @@ async function poll(ctx) {
       // the tab closed, or is on a page Lot Current may not read (outside /marketplace/)
       let tab = null;
       try { tab = await chrome.tabs.get(up.tabId); } catch (gone) { if (stale()) return; up.status = 'gone'; stopPolling(); ctx.render(); return; }
-      if (stale()) return;
+      // a finished item, or one whose next item is being looked for, keeps its panel: an unreadable tab is not written on it
+      if (stale() || over()) return;
       const note = unreadTabNote(tab && tab.url, up.name);
       if (note && (!up.offTarget || up.note !== note)) {
         up.offTarget = true;
@@ -301,7 +302,7 @@ async function poll(ctx) {
       if (seen.hasPriceBox && !boxHasIt && up.fills < MAX_FILLS && (up.status === 'waiting' || up.status === 'filled')) {
         up.fills += 1;
         const [inj] = await chrome.scripting.executeScript({ target: { tabId: up.tabId }, func: fillPriceInPage, args: [map, up.price] });
-        if (stale()) return; // an item started during the fill: this result is not written on the item shown now
+        if (stale() || over()) return; // an item started, or finished, during the fill: this result is not written on the item shown now
         const r = inj && inj.result;
         if (r && r.ok) {
           up.status = 'filled';
