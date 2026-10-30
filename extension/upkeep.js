@@ -437,7 +437,7 @@ async function openNextItem(ctx) {
   } catch (e) {
     req = null; // a failure reads as no next item
   }
-  if (run !== starts || !up.active || up.status !== 'finding') return; // Not now, or another item, meanwhile
+  if (run !== starts || !up.active || up.status !== 'finding') return; // Close, or another item, meanwhile
   if (req) {
     await startUpkeep(req, ctx);
     return;

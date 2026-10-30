@@ -1129,6 +1129,37 @@ test('a read still in flight when Open next To do item is clicked answers after 
   }
 });
 
+// A take-down with no saved link reads the posted list only while its item is open: its listing read answering after the
+// item is done reads nothing from the posted list, and changes nothing on the panel.
+test('a take-down finished while its listing read is in flight reads nothing from the posted list when that read answers', async () => {
+  const r = await raceRig({ origin: 'https://www.example-motors.test', vin: 'aaa', kind: 'takeDown', why: 'gone', name: 'Car A', listingUrl: '', listedPrice: 20000 });
+  try {
+    r.holdRead = true;
+    await r.tick(); // a poll starts and waits on the listing read
+    assert.ok(r.heldRead, 'the listing read is in flight');
+    const done = handleUpkeepClick('upkeepDoneBtn', r.ctx);
+    await r.untilLookups(1);
+    r.lookups[0](null); // no next item
+    assert.equal(await done, true);
+    assert.equal(up.status, 'done');
+    const get = chrome.storage.local.get;
+    const posted = siteKeys('https://www.example-motors.test').posted;
+    const postedReads = []; // the reads of the posted list and the take-down record that the poll's name check makes
+    chrome.storage.local.get = (keys) => {
+      if (Array.isArray(keys) && keys.includes(posted)) postedReads.push(keys);
+      return get(keys);
+    };
+    r.heldRead.answer([{ result: { ...LISTED_PAGE } }]); // the listing as it opened, answering after the item is done
+    await r.flush();
+    chrome.storage.local.get = get;
+    assert.deepEqual(postedReads, [], 'the done item reads nothing from the posted list');
+    assert.equal(up.status, 'done', 'and the late answer changes nothing on the done item');
+    assert.match(upkeepHtml(), /<div class="banner good" id="upkeepDone">Done\. Marked done\.<\/div>/);
+  } finally {
+    await endRaceRig(r);
+  }
+});
+
 // The listing tab closed while the item waits, before Lot Current saw the change: the panel asks whether the person
 // finished, and I updated it or Not now answers. The race tests above reach gone only after the item was recorded.
 test('a listing tab closed while the item waits asks whether the person finished, with I updated it and Not now', async () => {

@@ -742,6 +742,16 @@ test('nextUpkeepItem is exported, and no list, or no item left on it, gives no n
   assert.equal(next({ diff: { takeDown: [takeRow('A')], priceUpdates: [] }, posted: {} }, 'A'), null, 'the car just finished is the only one');
 });
 
+test('a To do list entry that is not an object is skipped, and the next item is the first entry that is', () => {
+  const next = rescan.nextUpkeepItem;
+  // a saved list may hold a null, a number, a string or an undefined where a row should be: the tab skips those and never throws on them
+  const diff = { takenAt: at3(2), takeDown: [null, 7, '', takeRow('TAKE')], priceUpdates: [undefined, priceRow('PRICE')] };
+  assert.deepEqual(pickNext(next({ diff, posted: {} }, '')), ['takeDown', 'TAKE'], 'the first take-down entry that is an object is the next item');
+  assert.deepEqual(pickNext(next({ diff, posted: {} }, 'TAKE')), ['price', 'PRICE'], 'then the first price update entry that is an object');
+  assert.deepEqual(pickNext(next({ diff, posted: {}, flags: [], order: 'oldest' }, '')), ['takeDown', 'TAKE'], 'the oldest-first order reads each entry\'s VIN too, and skips the same entries');
+  assert.equal(pickNext(next({ diff: { takenAt: at3(2), takeDown: [null, false], priceUpdates: [0, ''] }, posted: {} }, '')), null, 'with nothing but such entries, none is left');
+});
+
 test('a take-down is the next item before any price update, whichever list the scan put first', () => {
   const next = rescan.nextUpkeepItem;
   const diff = { takenAt: at3(2), priceUpdates: [priceRow('PRICE')], takeDown: [takeRow('TAKE')] };

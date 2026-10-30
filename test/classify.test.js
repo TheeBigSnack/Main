@@ -90,11 +90,11 @@ test('certified used Wagoneer at Cranberry: pre-owned, but at another store', ()
 
 test('a store name with spaces at either end is the store it names, on either side of the store filter', () => {
   const WAY = 'Route 2 Motors';
-  const CRANBERRY = 'Route 3 Motors';
+  const OTHER = 'Route 3 Motors';
   const atStore = (store) => ({ extra_fields: { meta_location: store, location_rt: store } }); // the record's own store fields, as normalize reads them
   assert.equal(assess('usedNormal', atStore(`${WAY} `), { myStores: [WAY] }).decision, DECISION.READY, 'a car whose store name has a space at its end is at the ticked store');
   assert.equal(assess('usedNormal', atStore(WAY), { myStores: [`${WAY} `] }).decision, DECISION.READY, 'a saved store name with a space at its end still matches the car');
-  assert.deepEqual(assess('usedNormal', atStore(`${CRANBERRY} `), { myStores: [WAY] }).blockers.map((b) => b.code), ['other-store'], 'a padded name at another store is still another store');
+  assert.deepEqual(assess('usedNormal', atStore(`${OTHER} `), { myStores: [WAY] }).blockers.map((b) => b.code), ['other-store'], 'a padded name at another store is still another store');
 });
 
 test('a car whose store name is only spaces is at no ticked store, and a saved store name that is only spaces still filters every named car out, as before', () => {
