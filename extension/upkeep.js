@@ -391,7 +391,6 @@ async function finish(ctx, how) {
   }
   // The record is written. The badge and the sync below are about it, so they go out whichever item the panel shows by
   // now; the panel itself is written only while it still shows this car.
-  if (run === starts) up.error = '';
   chrome.runtime.sendMessage({ type: 'updateBadge' }).catch(() => {});
   // signed in: the worker syncs the change, so the manager view and colleagues see it now (fire and forget; Settings shows how it went)
   if (accountsConfigured() && (await loadSession(chrome.storage.local))) chrome.runtime.sendMessage({ type: 'syncNow', origin }).catch(() => {});
@@ -399,6 +398,9 @@ async function finish(ctx, how) {
   // Open next To do item looks up the next one (finding), when it was clicked during these writes.
   if (run !== starts || !up.active || up.status === 'finding') return;
   stopPolling(); // a poll that started while the writes were under way stops here, with the item done
+  // an error drawn while the account was read (a repeat finish's failed write, or a tab that failed to open) goes with done:
+  // the record was saved before that read, so the done panel shows none
+  up.error = '';
   up.status = 'done';
   up.hasNext = false; // an answer an earlier finish of this item drew is not kept: the question below asks again
   up.note = how === 'detected' ? (price ? `The listing now shows ${money(amount)}.` : 'The listing shows it as sold or removed.') : 'Marked done.';

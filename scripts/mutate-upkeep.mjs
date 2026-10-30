@@ -48,12 +48,19 @@ const mutants = [
   { id: 'B1-no-finding-guard', ...UPKEEP, find: "if (run !== starts || !up.active || up.status === 'finding') return;", replace: 'if (run !== starts || !up.active) return;' },
   { id: 'B2-over-guard', ...UPKEEP, find: "if (run !== starts || !up.active || up.status === 'finding') return;", replace: 'if (run !== starts || !up.active || over()) return;' },
   { id: 'C1-catch-over', ...UPKEEP, find: 'if (run === starts && !over()) {', replace: 'if (run === starts) {' },
+  // an error drawn while the account is read (proof 21): the done panel keeps none, so the clear before done is pinned
+  { id: 'F1-done-keeps-error', ...UPKEEP, find: "  up.error = '';\n  up.status = 'done';", replace: "  up.status = 'done';" },
   // the poll's first read after the listing page (proof 17): a finished item reads nothing from the posted list
   { id: 'P1-poll-first-over', ...UPKEEP, find: 'if (stale() || !seen || over()) return;', replace: 'if (stale() || !seen) return;' },
   // a To do list entry that is not an object (proof 17): skipped, never read
   { id: 'R1-todo-object-filter', ...RESCAN, find: 'const list = Array.isArray(items) ? items.filter((x) => x && typeof x === \'object\') : [];', replace: 'const list = Array.isArray(items) ? items : [];' },
   // the side panel's Open next To do item request (proof 20): with no posted list, a price row that waits for the next scan is offered
   { id: 'SP1-request-posted-empty', ...SIDE, find: 'nextUpkeepItem({ diff: got[k.diff], posted, flags: got[k.pilot]?.flags', replace: 'nextUpkeepItem({ diff: got[k.diff], posted: {}, flags: got[k.pilot]?.flags' },
+  // the Settings sentence for an edited or Claude-written description (proof 21): each mutant adds a contradictory "Save Settings"
+  // sentence on one surface (the status line, the checks line, the stale-read line); the strengthened pins must fail on it
+  { id: 'SP2-status-edited-sentence', ...SIDE, find: "const fix = settingsFix(stops, state.descriptionSource) || 'Fix the description (or use Reset to template) first.';", replace: "const fix = settingsFix(stops, state.descriptionSource) || (['edited', 'claude'].includes(state.descriptionSource) ? 'Save Settings to write the description again. Fix the description (or use Reset to template) first.' : 'Fix the description (or use Reset to template) first.');" },
+  { id: 'SP3-checks-edited-sentence', ...SIDE, find: '  const fix = settingsFix(stops, source);', replace: "  const fix = settingsFix(stops, source) || (['edited', 'claude'].includes(source) ? 'Save Settings to write the description again.' : '');" },
+  { id: 'SP4-stale-edited-sentence', ...SIDE, find: '    : ` The description no longer matches it: ${why}', replace: "    : ` ${['edited', 'claude'].includes(state.descriptionSource) ? 'Save Settings to write the description again. ' : ''}The description no longer matches it: ${why}" },
 ];
 
 function run(dir, test) {

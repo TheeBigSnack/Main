@@ -1530,6 +1530,62 @@ test('a repeat finish whose write fails while Open next To do item looks up the 
   }
 });
 
+// The repeat finish's write fails after the first finish has saved the record, while the first finish reads the account and the
+// item is not done yet. The error is drawn meanwhile, since the item is still open, but the done panel carries none.
+test('a repeat finish whose write fails while the first finish reads the account leaves no error on the done panel', async () => {
+  const origin = 'https://www.example-motors.test';
+  const k = siteKeys(origin);
+  const r = await raceRig({ origin, vin: 'aaa', kind: 'price', price: WANT_PRICE, listingUrl: LISTED_PAGE.url, name: 'Car A', listedPrice: 20000 }, {
+    [k.diff]: { priceUpdates: [{ vin: 'AAA', name: 'Car A', yours: true }] },
+  });
+  // the first finish's account read, which comes after its writes, waits until the test answers it
+  const get = chrome.storage.local.get;
+  let holding = false;
+  let releaseAccount = null;
+  chrome.storage.local.get = (keys) => {
+    if (!holding || ![keys].flat().includes(GLOBAL_KEYS.account)) return get(keys);
+    holding = false;
+    return new Promise((resolve) => { releaseAccount = () => get(keys).then(resolve); });
+  };
+  // the repeat finish's diff write is the second one: it waits until the test fails it, as Chrome does when the storage is full
+  const set = chrome.storage.local.set;
+  let diffWrites = 0;
+  let refuseRepeat = null;
+  chrome.storage.local.set = (obj) => {
+    if (!(k.diff in obj)) return set(obj);
+    diffWrites += 1;
+    if (diffWrites === 1) return set(obj);
+    return new Promise((resolve, reject) => { refuseRepeat = reject; });
+  };
+  try {
+    holding = true;
+    const first = handleUpkeepClick('upkeepDoneBtn', r.ctx); // I updated it
+    await r.flush();
+    assert.equal(typeof releaseAccount, 'function', 'the first finish is reading the account, after its writes');
+    const repeat = handleUpkeepClick('upkeepDoneBtn', r.ctx); // I updated it again while the first one reads the account
+    await r.flush();
+    assert.equal(typeof refuseRepeat, 'function', 'the repeat finish reached its diff write');
+    refuseRepeat(new Error('QUOTA_BYTES quota exceeded'));
+    assert.equal(await repeat, true);
+    assert.notEqual(up.status, 'done', 'the first finish is not done yet');
+    assert.notEqual(up.error, '', 'the repeat\'s error is drawn while the item is still open');
+    releaseAccount();
+    await r.untilLookups(1);
+    assert.equal(up.status, 'done');
+    assert.equal(up.error, '', 'the done panel carries no error: the first finish saved the record');
+    assert.doesNotMatch(upkeepHtml(), /banner bad/);
+    assert.match(upkeepHtml(), /<div class="banner good" id="upkeepDone">Done\. Marked done\.<\/div>/);
+    r.lookups[0](null); // no next item
+    assert.equal(await first, true);
+  } finally {
+    chrome.storage.local.get = get;
+    chrome.storage.local.set = set;
+    if (releaseAccount) releaseAccount(); // a read left held would keep the first finish waiting for the tests after this one
+    if (refuseRepeat) refuseRepeat(new Error('released'));
+    await endRaceRig(r);
+  }
+});
+
 // A second finish whose writes end after the first has drawn Open next To do item is not held back by that done: it asks
 // its own question, and its answer is what the panel keeps.
 test('a second finish whose writes end after the first finish drew Open next To do item draws its own answer on the panel', async () => {
@@ -2145,6 +2201,53 @@ test('a take-down finished while its first write is still under way when the wai
     await settle();
     assert.equal(reads.length, 0, 'no poll reads the listing of a finished item');
   } finally {
+    endUpkeep();
+    mock.timers.reset();
+    delete globalThis.chrome;
+  }
+});
+
+// A To do item finished while its listing tab is still opening, and the tab fails to open while the finish reads the account:
+// startUpkeep's catch still draws that failure, since the item is not done yet, but the finish sets the item done after the read
+// and clears the error with it.
+test('a take-down finished while its listing tab is still opening, and the tab fails to open while the finish reads the account, stays done with no error', async () => {
+  let failOpen = null;
+  globalThis.chrome = {
+    ...fakeChrome({}, TAKE_DOWN_STORE()),
+    tabs: { create: () => new Promise((resolve, reject) => { failOpen = reject; }) },
+    runtime: { sendMessage: async () => ({}) },
+    scripting: { executeScript: async () => [{ result: { ...LISTED_PAGE } }] },
+  };
+  // the finish's account read, which comes after its writes, waits until the test answers it
+  const get = chrome.storage.local.get;
+  let holding = false;
+  let releaseAccount = null;
+  chrome.storage.local.get = (keys) => {
+    if (!holding || ![keys].flat().includes(GLOBAL_KEYS.account)) return get(keys);
+    holding = false;
+    return new Promise((resolve) => { releaseAccount = () => get(keys).then(resolve); });
+  };
+  mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+  const ctx = { render: () => {}, map: () => FORM_MAP, nextItem: async () => null };
+  const started = startUpkeep(TAKE_DOWN, ctx);
+  try {
+    await settle();
+    assert.equal(up.status, 'opening', 'the listing tab is still being opened');
+    holding = true;
+    const done = handleUpkeepClick('upkeepDoneBtn', ctx); // I took the car down
+    await settle();
+    assert.equal(typeof releaseAccount, 'function', 'the finish is reading the account, after its writes');
+    failOpen(new Error('no tab for you')); // the tab fails to open while the finish waits
+    await started;
+    releaseAccount();
+    assert.equal(await done, true);
+    assert.equal(up.status, 'done', 'the finished item is not set to open-failed');
+    assert.equal(up.error, '', 'and no error is written on it');
+    assert.match(upkeepHtml(), /id="upkeepDone"/, 'the done banner stays');
+    assert.doesNotMatch(upkeepHtml(), /upkeepOpenFailed|Couldn&#39;t open/);
+  } finally {
+    chrome.storage.local.get = get;
+    if (releaseAccount) releaseAccount(); // a read left held would keep the finish waiting for the tests after this one
     endUpkeep();
     mock.timers.reset();
     delete globalThis.chrome;

@@ -2822,12 +2822,11 @@ test('a role with a number keeps the form shut, and the status line names the ro
   // and so is a number in the salesperson's own name: the Settings fix
   const numbered = { ...SETTINGS, salesperson: { name: 'Sam 2', title: 'sales consultant' } };
   assert.match(realBlocker({ ...state, settings: numbered })(template.buildTemplateDescription({ vehicle: CAR, dealer: numbered.dealer, salesperson: numbered.salesperson, priceNote: '' })), /\(Your name\), for example to "Sam"\. After you save Settings, the template writes the description again; if you edited it, click Reset to template\.$/);
-  // with a problem of the description's own beside it, the description needs fixing too
-  const both = fillBlocker(text.replace('34,567 miles', '12,000 miles'));
-  assert.match(both, /^The description fails 3 checks that must pass before the form is filled: Your role "2nd shift sales" has a number in it/);
-  assert.match(both, /Fix the description \(or use Reset to template\) first\.$/);
+  // with a problem of the description's own beside it, the description needs fixing too: the whole line is pinned, for each source
+  const both = `The description fails 3 checks that must pass before the form is filled: Your role "2nd shift sales" has a number in it, and every number in a description must match the website's data for the car; change it in Settings (Your role), for example to "Second shift sales"; "12000" isn't in the website's data for this car; Says 12,000 miles, but the website shows 34,567 miles. Fix the description (or use Reset to template) first.`;
+  assert.equal(fillBlocker(text.replace('34,567 miles', '12,000 miles')), both);
   // and so for an edited or a rewritten description: with a stop of its own, the line gives the description's fix, not Reset to template after a Settings save
-  for (const descriptionSource of ['edited', 'claude']) assert.match(realBlocker({ ...state, descriptionSource })(text.replace('34,567 miles', '12,000 miles')), /Fix the description \(or use Reset to template\) first\.$/, descriptionSource);
+  for (const descriptionSource of ['edited', 'claude']) assert.equal(realBlocker({ ...state, descriptionSource })(text.replace('34,567 miles', '12,000 miles')), both, descriptionSource);
   // a missing price note beside it is a stop of the description's own too: both are said, with the description's fix
   assert.match(realBlocker({ ...state, settings: { ...settings, priceNote: 'Tax and tags extra.' } })(text), /^The description fails 2 checks that must pass before the form is filled: Your role "2nd shift sales" [^]+; Doesn't include your dealership's price note: "Tax and tags extra\."\. Fix the description \(or use Reset to template\) first\.$/);
   // the role changed in Settings: the template written again passes
@@ -2953,8 +2952,9 @@ test('the checks line says the fix is in Settings when only a number in Settings
   const mixed = checksHtml(template.runGuardrails(text.replace('34,567 miles', '12,000 miles'), c));
   assert.match(mixed, /Fix before the form can be filled:<ul><li>Your role "2nd shift sales"/);
   assert.doesNotMatch(mixed, /After you save Settings/);
-  // and so for an edited or rewritten description: a stop of its own gets no Settings sentence either
-  for (const source of ['edited', 'claude']) assert.doesNotMatch(checksHtml(template.runGuardrails(text.replace('34,567 miles', '12,000 miles'), c), source), /After you save Settings/, source);
+  // and so for an edited or rewritten description: a stop of its own gets no Settings sentence either, and the line is the stops
+  const ownStops = `<div class="checks bad" id="checks">Fix before the form can be filled:<ul><li>Your role "2nd shift sales" has a number in it, and every number in a description must match the website's data for the car; change it in Settings (Your role), for example to "Second shift sales"</li><li>"12000" isn't in the website's data for this car</li><li>Says 12,000 miles, but the website shows 34,567 miles</li></ul></div>`;
+  for (const source of ['template', 'edited', 'claude']) assert.equal(checksHtml(template.runGuardrails(text.replace('34,567 miles', '12,000 miles'), c), source), ownStops, source);
   // a missing price note beside the same note's refused phrase: the missing note is the description's own stop, so the line ends with the stops, no Settings sentence
   assert.match(checksHtml(template.runGuardrails(CLEAN, { ...c, salesperson: SETTINGS.salesperson, priceNote: 'Priced to sell, plus tax, title and registration.' })), /<li>Doesn't include your dealership's price note: [^<]+<\/li><li>Your dealership's price note says "priced to sell"; change the note in Settings<\/li><\/ul><\/div>$/);
   // a dealership name that is not set is a description's stop too, although its own fix words name Settings: the checks line gives it no Settings sentence
@@ -2962,8 +2962,9 @@ test('the checks line says the fix is in Settings when only a number in Settings
   const unnamed = checksHtml(template.runGuardrails(template.buildTemplateDescription({ ...noName, priceNote: '' }), noName));
   assert.match(unnamed, /<li>No dealership name is set; add it in Settings \(Dealership name\)<\/li>/, unnamed);
   assert.doesNotMatch(unnamed, /After you save Settings/, unnamed);
-  // and so for an edited or Claude-written description: no Reset to template sentence for it either
-  for (const source of ['edited', 'claude']) assert.doesNotMatch(checksHtml(template.runGuardrails(template.buildTemplateDescription({ ...noName, priceNote: '' }), noName), source), /After you save Settings/, source);
+  // and so for an edited or Claude-written description: no Reset to template sentence for it either, and the line is the one stop
+  const unnamedLine = `<div class="checks bad" id="checks">Fix before the form can be filled:<ul><li>No dealership name is set; add it in Settings (Dealership name)</li></ul></div>`;
+  for (const source of ['template', 'edited', 'claude']) assert.equal(checksHtml(template.runGuardrails(template.buildTemplateDescription({ ...noName, priceNote: '' }), noName), source), unnamedLine, source);
   // nor beside a number in Settings: the line ends with the stops
   assert.match(checksHtml(template.runGuardrails(template.buildTemplateDescription({ ...noName, salesperson, priceNote: '' }), { ...noName, salesperson })), /<li>Your role "2nd shift sales" [^<]+<\/li><li>No dealership name is set; add it in Settings \(Dealership name\)<\/li><\/ul><\/div>$/);
   // a dealership name of spaces sets no name either: the same stop, and no Settings sentence
@@ -3131,16 +3132,17 @@ test('a stop only Settings can fix, found by the read before a fill, says to sav
     await own.run();
     assert.match(own.calls.said.at(-1)[0], /"Second shift sales"\. After you save Settings, click Reset to template to write the description again\. Then click Open the Marketplace form again\.$/, descriptionSource);
   }
-  // a stop of the description's own beside it: the description needs fixing too
+  // a stop of the description's own beside it: the description needs fixing too, and the line is pinned whole for each source
+  const staleLine = `The website changed this car since it was read. The description no longer matches it: Your role "2nd shift sales" has a number in it, and every number in a description must match the website's data for the car; change it in Settings (Your role), for example to "Second shift sales"; "12000" isn't in the website's data for this car; Says 12,000 miles, but the website shows 20,986 miles. Fix the description, then click Open the Marketplace form again.`;
   const state = reviewState({ readAt: '', vehicle: car, settings, description: description.replace(/\d{1,3}(,\d{3})+ miles/, '12,000 miles') });
   const r = staleReader(state, () => ({ ok: true, vehicle: { ...FRESH_CAR(), descriptionRaw: 'Comes with two keys.' } }));
   assert.equal(await r.run(), false);
-  assert.match(r.calls.said.at(-1)[0], /^The website changed this car since it was read\. The description no longer matches it: Your role "2nd shift sales" has a number in it, [^]+\. Fix the description, then click Open the Marketplace form again\.$/);
+  assert.equal(r.calls.said.at(-1)[0], staleLine);
   // and so for an edited or Claude-written description: a stop of its own gets no Settings sentence
   for (const descriptionSource of ['edited', 'claude']) {
     const own = staleReader(reviewState({ readAt: '', vehicle: car, settings, description: description.replace(/\d{1,3}(,\d{3})+ miles/, '12,000 miles'), descriptionSource }), () => ({ ok: true, vehicle: { ...FRESH_CAR(), descriptionRaw: 'Comes with two keys.' } }));
     await own.run();
-    assert.match(own.calls.said.at(-1)[0], /\. Fix the description, then click Open the Marketplace form again\.$/, descriptionSource);
+    assert.equal(own.calls.said.at(-1)[0], staleLine, descriptionSource);
   }
   // a warning beside it (length or tone) only warns: the line still gives the Settings fix
   const warned = staleReader(reviewState({ readAt: '', vehicle: car, settings, description: `${description}\nCOME SEE THIS TRUCK TODAY` }), () => ({ ok: true, vehicle: { ...FRESH_CAR(), descriptionRaw: 'Comes with two keys.' } }));
