@@ -18,7 +18,8 @@ import { LISTING_SIGNS } from '../extension/facebook/listingSigns.js';
 import { FORM_MAP } from '../extension/facebook/formMap.js';
 import { onListing, listingIdFrom, startUpkeep, endUpkeep, up, namesakesOf, namesakesNow, offTargetNote, unreadTabNote, upkeepHtml, handleUpkeepClick } from '../extension/upkeep.js';
 import { noteTakenDown, takenDownList } from '../extension/src/takenDown.js';
-import { siteKeys } from '../extension/src/storageKeys.js';
+import { siteKeys, GLOBAL_KEYS } from '../extension/src/storageKeys.js';
+import { sessionFromTokenResponse } from '../extension/src/account.js';
 import { STORAGE_FULL } from '../extension/src/storage.js';
 import { fakeChrome } from './helpers.js';
 
@@ -1003,14 +1004,14 @@ test('finishing an item offers Open next To do item only when another item follo
 // when another To do item starts, or Not now is pressed, writes no status,
 // note or listing for the item then shown.
 async function raceRig(item, store = {}) {
-  const r = { tabGone: false, tabUrl: LISTED_PAGE.url, holdRead: false, heldRead: null, lookups: [] };
+  const r = { tabGone: false, tabUrl: LISTED_PAGE.url, holdRead: false, heldRead: null, lookups: [], drawn: [], messages: [] };
   r.flush = async () => { for (let i = 0; i < 40; i++) await new Promise((resolve) => setImmediate(resolve)); };
   r.tick = async () => { mock.timers.tick(1500); await r.flush(); };
   r.untilLookups = async (n) => { for (let i = 0; i < 200 && r.lookups.length < n; i++) await new Promise((resolve) => setImmediate(resolve)); };
   globalThis.chrome = {
     ...fakeChrome({}, store),
     tabs: { create: async () => ({ id: 9 }), get: async (id) => { if (r.tabGone) throw new Error('No tab with id: 9'); return { id, url: r.tabUrl }; } },
-    runtime: { sendMessage: async () => ({}) },
+    runtime: { sendMessage: async (msg) => { r.messages.push(msg); return {}; } },
     scripting: {
       executeScript: async ({ func }) => {
         if (func !== readListingInPage) throw new Error('an unexpected in-page script');
@@ -1021,7 +1022,7 @@ async function raceRig(item, store = {}) {
     },
   };
   mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
-  r.ctx = { render: () => {}, map: () => FORM_MAP, priceNow: async () => ({ ok: true, price: WANT_PRICE, basis: 'website' }), nextItem: () => new Promise((resolve) => { r.lookups.push(resolve); }) };
+  r.ctx = { render: () => { r.drawn.push(upkeepHtml()); }, map: () => FORM_MAP, priceNow: async () => ({ ok: true, price: WANT_PRICE, basis: 'website' }), nextItem: () => new Promise((resolve) => { r.lookups.push(resolve); }) };
   r.started = startUpkeep(item, r.ctx);
   await r.flush();
   await r.tick(); // the wait before the first poll ends
@@ -1298,6 +1299,215 @@ test('a read of the posted list still in flight when another To do item starts a
     assert.equal(up.vin, 'BBB');
     assert.equal(up.listingId, '', 'car A\'s listing id is not saved for car B');
     assert.equal(up.baseline, null, 'nor is car A\'s page the baseline of car B');
+  } finally {
+    await endRaceRig(r);
+  }
+});
+
+// A second finish of the same item (I updated it again, after the tab has closed and the item reads as gone) asks the
+// next-item question again. The panel keeps the button only on the answer the latest finish gets.
+test('a second finish of an item whose next-item answer is no leaves no Open next To do item on the panel', async () => {
+  const r = await raceRig({ origin: 'https://www.example-motors.test', vin: 'aaa', kind: 'price', price: WANT_PRICE, listingUrl: LISTED_PAGE.url, name: 'Car A', listedPrice: 20000 });
+  try {
+    r.holdRead = true;
+    await r.tick(); // a poll starts and waits on the listing read
+    assert.ok(r.heldRead, 'the read is in flight');
+    const first = handleUpkeepClick('upkeepDoneBtn', r.ctx); // I updated it: another To do item follows
+    await r.untilLookups(1);
+    r.lookups[0](RACE_NEXT);
+    assert.equal(await first, true);
+    await r.flush();
+    assert.equal(up.hasNext, true);
+    assert.match(r.drawn.at(-1), /id="upkeepNext"/, 'the button is drawn with the first answer');
+    r.tabGone = true; // the read in flight answers after the tab has closed: the item reads as gone
+    r.heldRead.fail(new Error('No tab with id: 9'));
+    await r.flush();
+    assert.equal(up.status, 'gone');
+    const second = handleUpkeepClick('upkeepDoneBtn', r.ctx); // I updated it again
+    await r.untilLookups(2);
+    assert.doesNotMatch(r.drawn.at(-1), /id="upkeepNext"/, 'while the question waits, the panel offers no button');
+    r.lookups[1](null); // this time no other item follows
+    assert.equal(await second, true);
+    await r.flush();
+    assert.deepEqual([up.status, up.hasNext], ['done', false]);
+    assert.doesNotMatch(r.drawn.at(-1), /id="upkeepNext"/, 'the panel drawn last offers no button');
+    // the click is not awaited before the check: a click that asks a question nobody answers would hang the test instead of failing it
+    const click = handleUpkeepClick('upkeepNext', r.ctx);
+    await r.flush();
+    assert.deepEqual([up.status, r.lookups.length], ['done', 2], 'and a click on no button asks no next-item question');
+    assert.equal(await click, true);
+  } finally {
+    await endRaceRig(r);
+  }
+});
+
+// Two finishes of one item, each waiting on its own question: the answers come back in the other order, and the
+// earlier finish's answer, which came last, is not written on the panel.
+test('two finishes of one item whose answers come back out of order leave the later finish\'s answer on the panel', async () => {
+  const r = await raceRig({ origin: 'https://www.example-motors.test', vin: 'aaa', kind: 'price', price: WANT_PRICE, listingUrl: LISTED_PAGE.url, name: 'Car A', listedPrice: 20000 });
+  try {
+    r.holdRead = true;
+    await r.tick();
+    assert.ok(r.heldRead, 'the read is in flight');
+    const first = handleUpkeepClick('upkeepDoneBtn', r.ctx); // I updated it: its question waits
+    await r.untilLookups(1);
+    r.tabGone = true;
+    r.heldRead.fail(new Error('No tab with id: 9'));
+    await r.flush();
+    assert.equal(up.status, 'gone');
+    const second = handleUpkeepClick('upkeepDoneBtn', r.ctx); // I updated it again, while the first question still waits
+    await r.untilLookups(2);
+    r.lookups[1](null); // the later question answers first: no other item follows
+    assert.equal(await second, true);
+    r.lookups[0](RACE_NEXT); // the earlier question answers last, with another item
+    assert.equal(await first, true);
+    await r.flush();
+    assert.deepEqual([up.status, up.hasNext], ['done', false], 'the later answer stands');
+    assert.doesNotMatch(r.drawn.at(-1), /id="upkeepNext"/, 'the panel drawn last offers no button');
+  } finally {
+    await endRaceRig(r);
+  }
+});
+
+// Open next To do item clicked while a second finish is still writing: that finish must not put the panel back to done
+// over the lookup the click started, or the click is lost and the button is drawn again.
+test('an Open next To do item clicked while a second finish still writes opens the item it finds, and that finish leaves the panel alone', async () => {
+  const origin = 'https://www.example-motors.test';
+  const diff = siteKeys(origin).diff;
+  const r = await raceRig({ origin, vin: 'aaa', kind: 'price', price: WANT_PRICE, listingUrl: LISTED_PAGE.url, name: 'Car A', listedPrice: 20000 });
+  // the second finish's write waits until the test releases it: the lock on the record runs the first finish's write first,
+  // so the first finish finishes and asks while the second one is still writing
+  const get = chrome.storage.local.get;
+  let reads = 0;
+  let releaseSecond = null;
+  chrome.storage.local.get = (keys) => {
+    if (![keys].flat().includes(diff)) return get(keys);
+    reads += 1;
+    if (reads === 1) return get(keys);
+    return new Promise((resolve) => { releaseSecond = () => get(keys).then(resolve); });
+  };
+  try {
+    const first = handleUpkeepClick('upkeepDoneBtn', r.ctx); // I updated it
+    const second = handleUpkeepClick('upkeepDoneBtn', r.ctx); // I updated it again, before the first has finished
+    await r.untilLookups(1); // the first finish has written and asks whether another To do item follows
+    r.lookups[0](RACE_NEXT);
+    await r.flush();
+    assert.deepEqual([up.status, up.hasNext], ['done', true]);
+    assert.match(r.drawn.at(-1), /id="upkeepNext"/, 'the button is drawn with the first answer');
+    assert.equal(typeof releaseSecond, 'function', 'the second finish is still writing');
+    const opened = handleUpkeepClick('upkeepNext', r.ctx); // Open next To do item: the next item is looked up
+    await r.untilLookups(2);
+    await r.flush();
+    assert.equal(up.status, 'finding', 'the panel shows the lookup while the second finish still writes');
+    releaseSecond(); // the second finish's write ends now, during the lookup
+    await r.flush();
+    assert.equal(up.status, 'finding', 'the second finish does not put the panel back to done over the lookup');
+    assert.equal(r.lookups.length, 2, 'and asks no next-item question of its own');
+    r.lookups[1](RACE_NEXT); // the lookup finds car B, which opens
+    await r.flush();
+    await r.tick(); // car B's tab is open, and its wait ends
+    assert.equal(await opened, true);
+    assert.deepEqual([up.vin, up.status], ['BBB', 'waiting'], 'the click opened the item it found');
+    assert.equal(await first, true);
+    assert.equal(await second, true);
+  } finally {
+    if (releaseSecond) releaseSecond(); // a write left held would keep the record's lock for the tests after this one
+    await endRaceRig(r);
+  }
+});
+
+// A second finish whose writes end after the first has drawn Open next To do item is not held back by that done: it asks
+// its own question, and its answer is what the panel keeps.
+test('a second finish whose writes end after the first finish drew Open next To do item draws its own answer on the panel', async () => {
+  const origin = 'https://www.example-motors.test';
+  const diff = siteKeys(origin).diff;
+  const r = await raceRig({ origin, vin: 'aaa', kind: 'price', price: WANT_PRICE, listingUrl: LISTED_PAGE.url, name: 'Car A', listedPrice: 20000 });
+  // the second finish's last write waits until the test releases it, as in the test above
+  const get = chrome.storage.local.get;
+  let reads = 0;
+  let releaseSecond = null;
+  chrome.storage.local.get = (keys) => {
+    if (![keys].flat().includes(diff)) return get(keys);
+    reads += 1;
+    if (reads === 1) return get(keys);
+    return new Promise((resolve) => { releaseSecond = () => get(keys).then(resolve); });
+  };
+  try {
+    const first = handleUpkeepClick('upkeepDoneBtn', r.ctx); // I updated it
+    const second = handleUpkeepClick('upkeepDoneBtn', r.ctx); // I updated it again, before the first has finished
+    await r.untilLookups(1);
+    assert.equal(typeof releaseSecond, 'function', 'the second finish is still writing');
+    r.lookups[0](RACE_NEXT); // the first finish: another item follows, and its button is drawn
+    assert.equal(await first, true);
+    assert.deepEqual([up.status, up.hasNext], ['done', true]);
+    assert.match(r.drawn.at(-1), /id="upkeepNext"/, 'the button is drawn with the first answer');
+    releaseSecond(); // the second finish's write ends now, after the button is drawn
+    await r.untilLookups(2);
+    assert.equal(r.lookups.length, 2, 'the second finish asks its own question');
+    assert.doesNotMatch(r.drawn.at(-1), /id="upkeepNext"/, 'while it waits, the panel offers no button');
+    r.lookups[1](null); // no other item follows
+    assert.equal(await second, true);
+    await r.flush();
+    assert.deepEqual([up.status, up.hasNext], ['done', false]);
+    assert.doesNotMatch(r.drawn.at(-1), /id="upkeepNext"/, 'the panel drawn last offers no button');
+  } finally {
+    if (releaseSecond) releaseSecond();
+    await endRaceRig(r);
+  }
+});
+
+// A signed-in session, made as test/syncAfterChange.test.js makes one: finish asks the worker for a sync only then.
+const b64url = (s) => Buffer.from(s).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const signedIn = () => sessionFromTokenResponse({
+  access_token: `${b64url('{"alg":"HS256"}')}.${b64url(JSON.stringify({ sub: 'u1', exp: Math.floor(Date.now() / 1000) + 3600 }))}.sig`,
+  token_type: 'bearer', expires_in: 3600, refresh_token: 'refresh-1', user: { id: 'u1', email: 'alex@example.test' },
+}, Date.now());
+
+// finish writes to the website its item was started on. A To do item from another website that starts while car A's posted
+// list is read takes the panel, but car A's pilot flag is closed on car A's website, and car B's flag stays open on its own,
+// and the sync is asked for car A's website.
+test('a take-down finished while a To do item from another website starts closes the flag on its own website and syncs that website', async () => {
+  const origin = 'https://www.example-motors.test';
+  const other = 'https://www.second-motors.test';
+  const k = siteKeys(origin);
+  const kOther = siteKeys(other);
+  const flagged = { kind: 'takeDown', flaggedAt: '2026-10-02T09:00:00.000Z' };
+  const store = {
+    [GLOBAL_KEYS.account]: signedIn(),
+    [k.posted]: { AAA: { price: 20000, postedAt: 1, mine: true, name: 'Car A' } },
+    [k.diff]: { takeDown: [{ vin: 'AAA' }] },
+    [k.pilot]: { flags: [{ vin: 'AAA', name: 'Car A', ...flagged }] },
+    [kOther.pilot]: { flags: [{ vin: 'BBB', name: 'Car B', ...flagged }] },
+  };
+  const r = await raceRig({ origin, vin: 'aaa', kind: 'takeDown', why: 'gone', name: 'Car A', listingUrl: at('111'), listedPrice: 20000 }, store);
+  r.ctx.nextItem = async () => null; // car A's next-item question is not what this test is about
+  // the first read of car A's posted list that finish makes is held until the test answers it
+  const get = chrome.storage.local.get;
+  let holding = true;
+  let answerList = null;
+  chrome.storage.local.get = (keys) => {
+    if (!holding || ![keys].flat().includes(k.posted)) return get(keys);
+    holding = false;
+    return new Promise((resolve) => { answerList = () => get(keys).then(resolve); });
+  };
+  try {
+    const done = handleUpkeepClick('upkeepDoneBtn', r.ctx); // car A: I took it down
+    await r.flush();
+    assert.ok(answerList, 'finish is reading the posted list');
+    // a To do item from the other website starts meanwhile, and takes the panel
+    endUpkeep();
+    const next = startUpkeep({ origin: other, vin: 'bbb', kind: 'takeDown', why: 'gone', name: 'Car B', listingUrl: at('222'), listedPrice: 21000 }, r.ctx);
+    await r.flush();
+    await r.tick();
+    await next;
+    assert.equal(up.origin, other);
+    answerList(); // car A's read answers now, and finish goes on
+    assert.equal(await done, true);
+    await r.flush();
+    const flag = (key, vin) => store[key].flags.find((f) => f.vin === vin);
+    assert.deepEqual([flag(k.pilot, 'AAA').how, typeof flag(k.pilot, 'AAA').doneAt], ['manual', 'string'], 'car A\'s flag, on its own website, is closed by the person');
+    assert.equal(flag(kOther.pilot, 'BBB').doneAt, undefined, 'car B\'s flag, on the other website, stays open');
+    assert.deepEqual(r.messages.filter((m) => m.type === 'syncNow'), [{ type: 'syncNow', origin }], 'the sync is asked for car A\'s website');
   } finally {
     await endRaceRig(r);
   }

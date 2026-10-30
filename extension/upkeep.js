@@ -55,6 +55,7 @@ export const up = {
 };
 let poller = null;
 let starts = 0; // the To do item being opened: a later one (or Not now) wins over a read still under way
+let finishes = 0; // each finish asks the next-item question; an answer to an earlier finish of the same item is not written
 const MAX_FILLS = 4; // a form that is still loading can overwrite the price once or twice
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -393,15 +394,18 @@ async function finish(ctx, how) {
   chrome.runtime.sendMessage({ type: 'updateBadge' }).catch(() => {});
   // signed in: the worker syncs the change, so the manager view and colleagues see it now (fire and forget; Settings shows how it went)
   if (accountsConfigured() && (await loadSession(chrome.storage.local))) chrome.runtime.sendMessage({ type: 'syncNow', origin }).catch(() => {});
-  // closed, or another To do item started, meanwhile: the record is written and the view is left alone
-  if (run !== starts || !up.active) return;
+  // closed, or another To do item started, meanwhile: the record is written and the view is left alone. So is the panel while
+  // Open next To do item looks up the next one (finding), when it was clicked during these writes.
+  if (run !== starts || !up.active || up.status === 'finding') return;
   stopPolling(); // a poll that started while the writes were under way stops here, with the item done
   up.status = 'done';
+  up.hasNext = false; // an answer an earlier finish of this item drew is not kept: the question below asks again
   up.note = how === 'detected' ? (price ? `The listing now shows ${money(amount)}.` : 'The listing shows it as sold or removed.') : 'Marked done.';
   ctx.render();
   // whether another To do item follows: the done banner is drawn already, and the button comes with the answer
+  const ask = ++finishes;
   const more = await hasNextItem(ctx);
-  if (run !== starts || !up.active || up.status !== 'done') return; // closed, or another item started, meanwhile
+  if (ask !== finishes || run !== starts || !up.active || up.status !== 'done') return; // a later finish asked again, or closed, or another item started, meanwhile
   up.hasNext = more;
   if (more) ctx.render();
 }
