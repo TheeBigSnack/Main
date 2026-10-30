@@ -965,7 +965,8 @@ test('Open next To do item on a price update reads the car on the website before
 
 // Finishing an item asks the same question (finish): the done banner gets the
 // button when another item follows, and keeps its plain Close when none does or
-// the question fails.
+// the question fails. I updated it is clicked here, so the click's answer waits
+// for the question (finish awaits it) and the panel is settled when it resolves.
 test('finishing an item offers Open next To do item only when another item follows', async () => {
   const cases = [
     [async () => NEXT, true],
@@ -978,11 +979,12 @@ test('finishing an item offers Open next To do item only when another item follo
       for (let i = 0; i < 5; i++) await rig.tick();
       rig.page.priceBoxValue = String(WANT_PRICE);
       await rig.tick();
-      rig.page = { ...UPDATED_PAGE }; // the listing shows the new price: the item is done
-      await rig.tick();
+      assert.equal(up.status, 'filled');
+      assert.equal(await handleUpkeepClick('upkeepDoneBtn', rig.ctx), true);
       assert.equal(up.status, 'done');
+      assert.equal(up.hasNext, offered, `another item follows: ${offered}`);
       assert.match(upkeepHtml(), /id="upkeepDone"/, 'the done banner shows');
-      assert.match(rig.drawn.at(-1), /<div class="banner good" id="upkeepDone">Done\. The listing now shows \$18,500\.<\/div>/, 'it is the last panel drawn, and says the listing now shows the new price');
+      assert.match(rig.drawn.at(-1), /<div class="banner good" id="upkeepDone">Done\. Marked done\.<\/div>/, 'it is the last panel drawn');
       assert.equal(/id="upkeepNext"/.test(upkeepHtml()), offered, `button drawn: ${offered}`);
       assert.equal(/id="upkeepNext"/.test(rig.drawn.at(-1)), offered, `and in the last panel drawn: ${offered}`);
     } finally {
@@ -1310,6 +1312,7 @@ test('a take-down finished while its posted-list read waits writes only its own 
   const store = {
     [k.posted]: { AAA: { price: 20000, postedAt: 1, mine: true, name: 'Car A' }, BBB: { price: 21000, postedAt: 1, mine: true, name: 'Car B' } },
     [k.diff]: { takeDown: [{ vin: 'AAA' }, { vin: 'BBB' }] },
+    [k.pilot]: { flags: [{ vin: 'AAA', kind: 'takeDown', name: 'Car A', flaggedAt: '2026-10-02T09:00:00.000Z' }, { vin: 'BBB', kind: 'takeDown', name: 'Car B', flaggedAt: '2026-10-02T09:00:00.000Z' }] },
   };
   const r = await raceRig({ origin, vin: 'aaa', kind: 'takeDown', why: 'gone', name: 'Car A', listingUrl: at('111'), listedPrice: 20000 }, store);
   r.ctx.nextItem = async () => null; // car A's next-item question is not what this test is about
@@ -1345,6 +1348,10 @@ test('a take-down finished while its posted-list read waits writes only its own 
     assert.equal(store[k.posted].AAA, undefined, 'car A is off the posted list');
     assert.ok(store[k.posted].BBB, 'car B is still on the posted list');
     assert.deepEqual(takenDownList(store[k.takenDown]).map((t) => t.vin), ['AAA'], 'car A\'s take-down is recorded');
+    // the to-do flags (src/pilot.js resolveFlag): car A's is closed as ticked off by the person, car B's stays open
+    const flag = (vin) => store[k.pilot].flags.find((f) => f.vin === vin);
+    assert.deepEqual([flag('AAA').how, typeof flag('AAA').doneAt], ['manual', 'string'], 'car A\'s flag is closed by the person, with its time');
+    assert.equal(flag('BBB').doneAt, undefined, 'car B\'s flag stays open');
     assert.deepEqual(store[k.diff].takeDown.map((x) => x.vin), ['BBB'], 'car B\'s take-down stays in the diff');
   } finally {
     await endRaceRig(r);
@@ -1362,6 +1369,7 @@ test('a price update that finishes while another To do item starts saves its own
       BBB: { price: 31000, postedAt: 1, mine: true, name: 'Car B' },
     },
     [k.diff]: { priceUpdates: [{ vin: 'AAA' }, { vin: 'BBB' }] },
+    [k.pilot]: { flags: [{ vin: 'AAA', kind: 'price', name: 'Car A', flaggedAt: '2026-10-02T09:00:00.000Z' }, { vin: 'BBB', kind: 'price', name: 'Car B', flaggedAt: '2026-10-02T09:00:00.000Z' }] },
   };
   const r = await raceRig({
     origin, vin: 'aaa', kind: 'price', price: WANT_PRICE, listedPrice: 20000, name: 'Car A',
@@ -1397,6 +1405,9 @@ test('a price update that finishes while another To do item starts saves its own
     assert.deepEqual([aaa.price, aaa.basis], [WANT_PRICE, 'website'], 'the price and basis car A was updated at');
     assert.equal(store[k.posted].BBB.price, 31000, 'car B is untouched');
     assert.deepEqual(store[k.diff].priceUpdates.map((x) => x.vin), ['BBB'], 'car B\'s price update stays in the diff');
+    const flag = (vin) => store[k.pilot].flags.find((f) => f.vin === vin);
+    assert.deepEqual([flag('AAA').how, typeof flag('AAA').doneAt], ['manual', 'string'], 'car A\'s price flag is closed by the person, with its time');
+    assert.equal(flag('BBB').doneAt, undefined, 'car B\'s price flag stays open');
   } finally {
     await endRaceRig(r);
   }
@@ -1672,6 +1683,214 @@ test('a listing read that fails after I updated it, with the tab moved off Marke
   } finally {
     endRig();
     await rig.started;
+  }
+});
+
+// A read that fails while the next To do item is looked for is about the item that is done: it writes nothing on it (over()
+// covers finding as well as done), so the lookup's answer brings the done banner back as it was.
+test('a listing read that fails while the next To do item is looked for, with the tab moved off Marketplace, leaves the done banner as it was', async () => {
+  let lookups = 0;
+  let answerLookup = null;
+  // finish's question answers at once; the Open next To do item lookup after it is held until the test answers it
+  const rig = await priceRig({ ...LISTED_PAGE, hasPriceBox: false }, {
+    nextItem: () => {
+      lookups += 1;
+      return lookups === 1 ? Promise.resolve(NEXT) : new Promise((resolve) => { answerLookup = resolve; });
+    },
+  });
+  const executeScript = chrome.scripting.executeScript;
+  let failRead = null;
+  chrome.scripting.executeScript = (args) => (args.func === readListingInPage ? new Promise((resolve, reject) => { failRead = reject; }) : executeScript(args));
+  rig.page = { ...rig.page, url: 'https://www.facebook.com/home' }; // the tab is still open, on a Facebook page that is not Marketplace
+  try {
+    await rig.tick(); // the poll's read goes out and is held in flight
+    assert.ok(failRead, 'the read is in flight');
+    assert.equal(await handleUpkeepClick('upkeepDoneBtn', rig.ctx), true);
+    assert.equal(up.hasNext, true, 'another item follows');
+    const lookup = handleUpkeepClick('upkeepNext', rig.ctx); // the next item is looked for, and the lookup is held
+    assert.equal(up.status, 'finding');
+    failRead(new Error('the tab cannot be read')); // the read fails while the lookup runs
+    await rig.flush();
+    assert.deepEqual([up.status, up.note, up.offTarget], ['finding', 'Marked done.', false], 'the failed read writes nothing on the item while the lookup runs');
+    answerLookup(null); // no next item after all
+    assert.equal(await lookup, true);
+    assert.deepEqual([up.status, up.hasNext, up.note, up.offTarget], ['done', false, 'Marked done.', false], 'the finished item keeps its note and is not marked off its listing');
+    assert.match(rig.drawn.at(-1), /<div class="banner good" id="upkeepDone">Done\. Marked done\.<\/div>/, 'the done banner is drawn as it was');
+  } finally {
+    endRig();
+    await rig.started;
+  }
+});
+
+// A To do item taken down while its listing tab is still opening, or while the wait after the tab opened runs, is done for
+// good: the tab's answer does not set it back to waiting, no poll starts on it, and a tab closed later does not replace
+// its done banner. The take-down's own writes are held where a test needs them to be under way when the wait ends.
+const TAKE_DOWN = { origin: 'https://www.example-motors.test', vin: 'aaa', kind: 'takeDown', why: 'gone', listingUrl: at('111'), name: 'Car A', listedPrice: 20000 };
+const TAKE_DOWN_STORE = () => ({ [siteKeys(TAKE_DOWN.origin).posted]: { AAA: { name: 'Car A', price: 20000, postedAt: '2026-10-02T09:00:00.000Z', listingUrl: at('111') } } });
+const settle = async () => { for (let i = 0; i < 40; i++) await new Promise((resolve) => setImmediate(resolve)); };
+
+test('a take-down finished while its listing tab is still opening stays done when the tab answers, and no poll starts on it', async () => {
+  let answerTab = null;
+  const reads = [];
+  globalThis.chrome = {
+    ...fakeChrome({}, TAKE_DOWN_STORE()),
+    tabs: { create: () => new Promise((resolve) => { answerTab = resolve; }), get: async (id) => ({ id, url: LISTED_PAGE.url }) },
+    runtime: { sendMessage: async () => ({}) },
+    scripting: { executeScript: async () => { reads.push(1); return [{ result: { ...LISTED_PAGE } }]; } },
+  };
+  mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+  const ctx = { render: () => {}, map: () => FORM_MAP, nextItem: async () => null };
+  const started = startUpkeep(TAKE_DOWN, ctx);
+  try {
+    await settle();
+    assert.equal(up.status, 'opening', 'the listing tab is still being opened');
+    assert.equal(await handleUpkeepClick('upkeepDoneBtn', ctx), true);
+    assert.equal(up.status, 'done');
+    answerTab({ id: 9 }); // the tab answers after I took the car down
+    await settle();
+    mock.timers.tick(1500);
+    await started;
+    assert.equal(up.status, 'done', 'the finished item is not set back to waiting');
+    mock.timers.tick(1500);
+    await settle();
+    assert.equal(reads.length, 0, 'no poll reads the listing of a finished item');
+  } finally {
+    endUpkeep();
+    mock.timers.reset();
+    delete globalThis.chrome;
+  }
+});
+
+test('a take-down finished during the wait after its listing tab opened stays done: no poll starts on it, so a tab closed later does not replace the banner', async () => {
+  let tabGone = false;
+  const reads = [];
+  globalThis.chrome = {
+    ...fakeChrome({}, TAKE_DOWN_STORE()),
+    tabs: { create: async () => ({ id: 9 }), get: async (id) => { if (tabGone) throw new Error('No tab with id: 9'); return { id, url: LISTED_PAGE.url }; } },
+    runtime: { sendMessage: async () => ({}) },
+    scripting: { executeScript: async () => { reads.push(1); if (tabGone) throw new Error('No tab with id: 9'); return [{ result: { ...LISTED_PAGE } }]; } },
+  };
+  mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+  const ctx = { render: () => {}, map: () => FORM_MAP, nextItem: async () => null };
+  const started = startUpkeep(TAKE_DOWN, ctx);
+  try {
+    await settle();
+    assert.equal(up.status, 'waiting', 'the listing is open, and the wait before its first read runs');
+    assert.equal(await handleUpkeepClick('upkeepDoneBtn', ctx), true);
+    assert.equal(up.status, 'done');
+    mock.timers.tick(1500); // the wait ends after I took the car down
+    await started;
+    tabGone = true; // then the person closes the listing tab
+    mock.timers.tick(1500);
+    await settle();
+    assert.equal(reads.length, 0, 'no poll reads the listing of a finished item');
+    assert.equal(up.status, 'done', 'the done banner is not replaced by the tab-closed answer');
+  } finally {
+    endUpkeep();
+    mock.timers.reset();
+    delete globalThis.chrome;
+  }
+});
+
+test('a take-down finished while its first write is still under way when the wait ends leaves no poll on the item', async () => {
+  const reads = [];
+  const fake = fakeChrome({}, TAKE_DOWN_STORE());
+  const set = fake.storage.local.set;
+  let release = null;
+  fake.storage.local.set = (obj) => (release ? set(obj) : new Promise((resolve) => { release = () => set(obj).then(resolve); }));
+  globalThis.chrome = {
+    ...fake,
+    tabs: { create: async () => ({ id: 9 }), get: async (id) => ({ id, url: LISTED_PAGE.url }) },
+    runtime: { sendMessage: async () => ({}) },
+    scripting: { executeScript: async () => { reads.push(1); return [{ result: { ...LISTED_PAGE } }]; } },
+  };
+  mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+  const ctx = { render: () => {}, map: () => FORM_MAP, nextItem: async () => null };
+  const started = startUpkeep(TAKE_DOWN, ctx);
+  try {
+    await settle();
+    assert.equal(up.status, 'waiting', 'the listing is open, and the wait before its first read runs');
+    const clicked = handleUpkeepClick('upkeepDoneBtn', ctx); // the first write is held
+    await settle();
+    mock.timers.tick(1500); // the wait ends while the writes are still held
+    await started;
+    release(); // the writes finish now
+    assert.equal(await clicked, true);
+    assert.equal(up.status, 'done');
+    mock.timers.tick(1500);
+    await settle();
+    assert.equal(reads.length, 0, 'no poll reads the listing of a finished item');
+  } finally {
+    endUpkeep();
+    mock.timers.reset();
+    delete globalThis.chrome;
+  }
+});
+
+// A To do item finished while its listing tab is still opening, and the tab then fails to open: the failure is about the
+// finished item, so it sets no open-failed status and no error on it (startUpkeep's catch checks over()).
+test('a take-down finished while its listing tab is still opening, and the tab then fails to open, stays done with no error', async () => {
+  let failOpen = null;
+  globalThis.chrome = {
+    ...fakeChrome({}, TAKE_DOWN_STORE()),
+    tabs: { create: () => new Promise((resolve, reject) => { failOpen = reject; }) },
+    runtime: { sendMessage: async () => ({}) },
+    scripting: { executeScript: async () => [{ result: { ...LISTED_PAGE } }] },
+  };
+  mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+  const ctx = { render: () => {}, map: () => FORM_MAP, nextItem: async () => null };
+  const started = startUpkeep(TAKE_DOWN, ctx);
+  try {
+    await settle();
+    assert.equal(up.status, 'opening', 'the listing tab is still being opened');
+    assert.equal(await handleUpkeepClick('upkeepDoneBtn', ctx), true);
+    assert.equal(up.status, 'done');
+    failOpen(new Error('no tab for you')); // the tab fails to open after I took the car down
+    await started;
+    assert.equal(up.status, 'done', 'the finished item is not set to open-failed');
+    assert.equal(up.error, '', 'and no error is written on it');
+    assert.match(upkeepHtml(), /id="upkeepDone"/, 'the done banner stays');
+    assert.doesNotMatch(upkeepHtml(), /upkeepOpenFailed|Couldn&#39;t open/);
+  } finally {
+    endUpkeep();
+    mock.timers.reset();
+    delete globalThis.chrome;
+  }
+});
+
+// A tab that fails to open after another To do item started is about the item it was opened for: the new item keeps its
+// status, error and note, and its own tab opens as it would have.
+test('a tab that fails to open after another To do item started leaves the new item\'s status, error and note alone', async () => {
+  const opens = []; // the tab each item asks for, in order: the test answers each one
+  globalThis.chrome = {
+    ...fakeChrome({}, {}),
+    tabs: { create: () => new Promise((resolve, reject) => { opens.push({ resolve, reject }); }) },
+    runtime: { sendMessage: async () => ({}) },
+    scripting: { executeScript: async () => [{ result: null }] },
+  };
+  mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+  const ctx = { render: () => {}, map: () => FORM_MAP, nextItem: async () => null };
+  const CAR_B = { origin: 'https://www.example-motors.test', vin: 'bbb', kind: 'takeDown', why: 'gone', name: 'Car B', listingUrl: at('222'), listedPrice: 21000 };
+  const first = startUpkeep(TAKE_DOWN, ctx);
+  try {
+    await settle();
+    assert.equal(up.status, 'opening', 'car A\'s listing tab is being opened');
+    endUpkeep(); // Not now on car A
+    const second = startUpkeep(CAR_B, ctx);
+    await settle();
+    assert.deepEqual([up.vin, up.status], ['BBB', 'opening'], 'car B starts while car A\'s tab is still being opened');
+    opens[0].reject(new Error('no tab for car A')); // car A's tab fails to open now
+    await first;
+    assert.deepEqual([up.vin, up.status, up.error, up.note], ['BBB', 'opening', '', ''], 'car A\'s failure writes no status, error or note on car B');
+    opens[1].resolve({ id: 10 });
+    await settle();
+    mock.timers.tick(1500);
+    await second;
+    assert.deepEqual([up.vin, up.status, up.tabId], ['BBB', 'waiting', 10], 'car B\'s own tab opens as it would have');
+  } finally {
+    endUpkeep();
+    mock.timers.reset();
+    delete globalThis.chrome;
   }
 });
 

@@ -60,6 +60,9 @@ const MAX_FILLS = 4; // a form that is still loading can overwrite the price onc
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const money = (n) => (typeof n === 'number' && Number.isFinite(n) ? '$' + Math.round(n).toLocaleString('en-US') : '—');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// the item is done, or the next To do item is being looked for: a listing read or an opening answered now sets nothing on
+// the panel, and a wait that ends starts no poll
+const over = () => up.status === 'done' || up.status === 'finding';
 
 // The listing id from a saved listing link, using the map's pattern.
 export function listingIdFrom(url, pattern) {
@@ -110,9 +113,10 @@ export async function startUpkeep(req, ctx) {
   const url = up.listingUrl || map.yourListingsUrl;
   try {
     const tab = await chrome.tabs.create({ url, active: true });
-    if (run !== starts || !up.active) return; // another item, or Not now, meanwhile: the tab stays as it is
+    if (run !== starts || !up.active || over()) return; // another item, Not now, or the item finished, meanwhile: the tab stays as it is
     up.tabId = tab.id;
   } catch (e) {
+    if (run !== starts || !up.active || over()) return; // the failure is about an item that is no longer shown
     up.error = "Couldn't open the listing: " + ((e && e.message) || e);
     up.status = 'open-failed'; // no tab, so nothing to wait for: the person opens the listing by hand
     ctx.render();
@@ -122,7 +126,7 @@ export async function startUpkeep(req, ctx) {
   up.note = up.listingUrl ? '' : `No link to this car's own listing was saved, so this is Marketplace's Your listings page: open the listing for ${up.name} there.`;
   ctx.render();
   await sleep(1500);
-  if (run !== starts || !up.active) return; // closed meanwhile
+  if (run !== starts || !up.active || over()) return; // closed, or finished, meanwhile: no poll starts on it
   poller = setInterval(() => poll(ctx).catch(() => {}), 1500);
 }
 
@@ -245,8 +249,6 @@ async function poll(ctx) {
   // an item started, or Not now pressed, while this read is in flight: what it answers is not the current item's
   const run = starts;
   const stale = () => run !== starts || !up.active;
-  // the item is done, or the next To do item is being looked for: a read answered now sets nothing on the panel
-  const over = () => up.status === 'done' || up.status === 'finding';
   try {
     const map = ctx.map();
     let seen;
@@ -393,6 +395,7 @@ async function finish(ctx, how) {
   if (accountsConfigured() && (await loadSession(chrome.storage.local))) chrome.runtime.sendMessage({ type: 'syncNow', origin }).catch(() => {});
   // closed, or another To do item started, meanwhile: the record is written and the view is left alone
   if (run !== starts || !up.active) return;
+  stopPolling(); // a poll that started while the writes were under way stops here, with the item done
   up.status = 'done';
   up.note = how === 'detected' ? (price ? `The listing now shows ${money(amount)}.` : 'The listing shows it as sold or removed.') : 'Marked done.';
   ctx.render();
