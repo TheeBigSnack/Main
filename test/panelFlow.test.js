@@ -2781,7 +2781,7 @@ test('the form is not filled with a description that fails a fact or identity ch
   const lacksRefused = realBlocker(refusedNote)(CLEAN);
   assert.match(lacksRefused, /^The description fails 2 checks that must pass before the form is filled: Doesn't include your dealership's price note: "Priced to sell, plus tax, title and registration\."; Your dealership's price note says "priced to sell"; change the note in Settings\. Fix the description \(or use Reset to template\) first\.$/, lacksRefused);
   // and so for an edited or Claude-written description: the missing note keeps the description's fix, not Reset to template after a Settings save
-  for (const descriptionSource of ['edited', 'claude']) assert.match(realBlocker({ ...refusedNote, descriptionSource })(CLEAN), /; change the note in Settings\. Fix the description \(or use Reset to template\) first\.$/, descriptionSource);
+  for (const descriptionSource of ['edited', 'claude']) assert.equal(realBlocker({ ...refusedNote, descriptionSource })(CLEAN), `The description fails 2 checks that must pass before the form is filled: Doesn't include your dealership's price note: "Priced to sell, plus tax, title and registration."; Your dealership's price note says "priced to sell"; change the note in Settings. Fix the description (or use Reset to template) first.`, descriptionSource);
   // and beside a note refused for its other words (the steer reason): the missing note still stops it, with the description's fix
   assert.match(realBlocker({ ...state, settings: { ...SETTINGS, priceNote: 'Tax, title and fees go to the state, not the dealer. Text me.' } })(CLEAN), /^The description fails 2 checks that must pass before the form is filled: Doesn't include your dealership's price note: "Tax, title and fees go to the state, not the dealer\. Text me\."; Your price note says "not the dealer"[^]+ Change the note in Settings\. Fix the description \(or use Reset to template\) first\.$/);
   // the refused phrase said again in the description's own words is the description's stop, not the note's: the description's fix
@@ -2869,6 +2869,24 @@ test('a number in the role and a price note refused in Settings: the status line
   assert.match(checksHtml(template.runGuardrails(template.buildTemplateDescription(steerCtx), steerCtx)), /Change the note in Settings\.<\/li><\/ul><p>After you save Settings, the template writes the description again; if you edited it, click Reset to template\.<\/p><\/div>$/);
   // and for an edited or Claude-written description, the checks line says to click Reset to template after it
   for (const source of ['edited', 'claude']) assert.equal(checksHtml(template.runGuardrails(template.buildTemplateDescription(steerCtx), steerCtx), source), `<div class="checks bad" id="checks">Fix before the form can be filled:<ul><li>Your price note says &quot;not the dealer&quot;, so it may only say where the fees go and what the price includes; take out &quot;Text&quot; and &quot;me&quot;, or take out &quot;not the dealer&quot;. Change the note in Settings.</li></ul><p>After you save Settings, click Reset to template to write the description again.</p></div>`, source);
+});
+
+// The mixed stops of a refused price note (a note the description lacks, beside the note's own phrase; proof 24) read the same on
+// the checks line and the stale-read line for each description source. The checks line names both stops, with no Settings
+// sentence; the stale-read line gives the description's fix, not a Settings one, and not Reset to template after a Settings save.
+test('the checks line and the stale-read line name the mixed stops of a refused price note, for each description source', async () => {
+  const settings = { ...SETTINGS, priceNote: 'Priced to sell, plus tax, title and registration.' };
+  const description = template.buildTemplateDescription({ vehicle: FRESH_CAR(), dealer: settings.dealer, salesperson: settings.salesperson, priceNote: '' });
+  const ctx = { vehicle: FRESH_CAR(), dealer: settings.dealer, salesperson: settings.salesperson, priceNote: settings.priceNote, price: 27163 };
+  const checksHtml = new Function('ruleProblems', 'noteFor', `${constText('esc')}\n${constText('settingsFix')}\n${fnText('checksHtml')}\nreturn checksHtml;`)(template.ruleProblems, () => '');
+  for (const source of ['template', 'edited', 'claude']) {
+    assert.equal(checksHtml(template.runGuardrails(description, ctx), source), '<div class="checks bad" id="checks">Fix before the form can be filled:<ul><li>Doesn&#39;t include your dealership&#39;s price note: &quot;Priced to sell, plus tax, title and registration.&quot;</li><li>Your dealership&#39;s price note says &quot;priced to sell&quot;; change the note in Settings</li></ul></div>', source);
+  }
+  for (const descriptionSource of ['template', 'edited', 'claude']) {
+    const r = staleReader(reviewState({ readAt: '', vehicle: FRESH_CAR(), settings, description, descriptionSource }), () => ({ ok: true, vehicle: FRESH_CAR() }));
+    await r.run();
+    assert.equal(r.calls.said.at(-1)[0], 'The website changed this car since it was read. The description no longer matches it: Doesn\'t include your dealership\'s price note: "Priced to sell, plus tax, title and registration."; Your dealership\'s price note says "priced to sell"; change the note in Settings. Fix the description, then click Open the Marketplace form again.', descriptionSource);
+  }
 });
 
 // A price note quoting a fee that is not the gap between this car's two prices
@@ -4078,7 +4096,8 @@ test('the checking view has a Back button for a single post, and none for a queu
 // Open next To do item (sidepanel.js nextUpkeepRequest): the request for the next item is built from the
 // lists as they are stored. It carries what that item needs to open its listing and fill a price: the kind;
 // a take-down's reason, and an empty one for a price item; a price item's new price; the price its listing
-// has now (the posted entry's price); the listing's link; and its name, the posted entry's first. nextUpkeepItem
+// has now (the posted entry's price); the listing's link, from the posted entry and not from the To do row, whose url is the car's
+// page on the dealer's website; and its name, the posted entry's first. nextUpkeepItem
 // (rescan.js, pinned in rescan.test.js) picks the item. Compiled as written, with the real nextUpkeepItem and
 // storage keys, and a stub for the one storage read.
 test('the Open next To do item request carries the fields of the item it opens, and none when storage cannot be read', async () => {
@@ -4087,8 +4106,8 @@ test('the Open next To do item request carries the fields of the item it opens, 
   const stored = {
     [k.diff]: {
       takenAt: '2026-10-28T09:00:00.000Z',
-      takeDown: [{ vin: 'TKD', name: 'Car T from the scan', yours: true, why: 'not-pre-owned' }],
-      priceUpdates: [{ vin: 'PRC', name: 'Car P from the scan', yours: true, from: 21000, to: 19500, change: -1500 }],
+      takeDown: [{ vin: 'TKD', name: 'Car T from the scan', yours: true, why: 'not-pre-owned', url: 'https://www.example-motors.test/used/car-t/' }],
+      priceUpdates: [{ vin: 'PRC', name: 'Car P from the scan', yours: true, from: 21000, to: 19500, change: -1500, url: 'https://www.example-motors.test/used/car-p/' }],
     },
     [k.posted]: {
       TKD: { price: 18000, postedAt: '2026-10-20T10:00:00.000Z', name: 'Car T', listingUrl: 'https://www.facebook.com/marketplace/item/111/' },

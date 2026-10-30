@@ -69,6 +69,8 @@ const mutants = [
   { id: 'SP2-status-edited-sentence', ...SIDE, find: "const fix = settingsFix(stops, state.descriptionSource) || 'Fix the description (or use Reset to template) first.';", replace: "const fix = settingsFix(stops, state.descriptionSource) || (['edited', 'claude'].includes(state.descriptionSource) ? 'Save Settings to write the description again. Fix the description (or use Reset to template) first.' : 'Fix the description (or use Reset to template) first.');" },
   { id: 'SP3-checks-edited-sentence', ...SIDE, find: '  const fix = settingsFix(stops, source);', replace: "  const fix = settingsFix(stops, source) || (['edited', 'claude'].includes(source) ? 'Save Settings to write the description again.' : '');" },
   { id: 'SP4-stale-edited-sentence', ...SIDE, find: '    : ` The description no longer matches it: ${why}', replace: "    : ` ${['edited', 'claude'].includes(state.descriptionSource) ? 'Save Settings to write the description again. ' : ''}The description no longer matches it: ${why}" },
+  // the next To do item request's listing link is the posted entry's, not the To do row's url (the car's page on the dealer's website; proof 24)
+  { id: 'SP5-request-row-link', ...SIDE, find: "listingUrl: p.listingUrl || '',", replace: "listingUrl: item.url || p.listingUrl || ''," },
   // the status line's joined-sentence stop and the checks line's Settings stop are pinned as whole lines (proof 22): a change in the middle of either is caught
   { id: 'TP1-joined-status-middle', ...TEMPLATE, find: 'start the one after it with a capital letter', replace: 'start the one after it with a small letter' },
   { id: 'TP2-role-stop-wording', ...TEMPLATE, find: '; change it in Settings (${w.field})${how}', replace: '; change it in the Settings page (${w.field})${how}' },
@@ -76,6 +78,11 @@ const mutants = [
   { id: 'W1-status-settings-sentence', ...SIDE, find: 'that must pass before the form is filled: ${why}', replace: "that must pass before the form is filled: ${(settingsFix(stops, state.descriptionSource) && ['edited', 'claude'].includes(state.descriptionSource)) ? 'Save Settings to write the description again. ' : ''}${why}" },
   { id: 'W2-checks-settings-sentence', ...SIDE, find: 'Fix before the form can be filled:${list(stops)}', replace: "Fix before the form can be filled:${(fix && ['edited', 'claude'].includes(source)) ? '<p>Save Settings to write the description again.</p>' : ''}${list(stops)}" },
   { id: 'W3-stale-settings-sentence', ...SIDE, find: '    : ` The description no longer matches it: ${why}', replace: "    : ` ${fix && ['edited', 'claude'].includes(state.descriptionSource) ? 'Save Settings to write the description again. ' : ''}The description no longer matches it: ${why}" },
+  // the mixed stops of a refused price note (a missing note beside the note's own phrase, so Settings alone gives no fix) for an edited or
+  // Claude-written description (proof 24): a sentence "After you save Settings" is caught on the status line, the checks line and the stale-read line
+  { id: 'W4-status-mixed-sentence', ...SIDE, find: 'that must pass before the form is filled: ${why}', replace: "that must pass before the form is filled: ${(stops.length > 1 && ['edited', 'claude'].includes(state.descriptionSource)) ? 'After you save Settings, click Reset to template to write the description again. ' : ''}${why}" },
+  { id: 'W5-checks-mixed-sentence', ...SIDE, find: 'Fix before the form can be filled:${list(stops)}', replace: "Fix before the form can be filled:${list(stops)}${(stops.length > 1 && ['edited', 'claude'].includes(source)) ? '<p>After you save Settings, click Reset to template to write the description again.</p>' : ''}" },
+  { id: 'W6-stale-mixed-sentence', ...SIDE, find: '    : ` The description no longer matches it: ${why}', replace: "    : ` ${(stops.length > 1 && ['edited', 'claude'].includes(state.descriptionSource)) ? 'After you save Settings, click Reset to template to write the description again. ' : ''}The description no longer matches it: ${why}" },
 ];
 
 function run(dir, test) {
