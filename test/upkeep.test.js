@@ -491,7 +491,8 @@ test("when the price goes down, the filled price says Facebook can let people wh
     await rig.tick();
     assert.equal(up.status, 'filled');
     const html = upkeepHtml();
-    assert.match(html, /id="priceFilled">New price \$18,500 is in the Price box \(it shows "18500"\)\. Now click <b>Update<\/b> on Facebook\. Lot Current will notice when the listing shows the new price\./, 'it names the price filled, the box as it shows it, and that Lot Current will notice the new price');
+    const banner = /<div class="banner good" id="priceFilled">[^]*?<\/div>/.exec(html);
+    assert.equal(banner && banner[0], `<div class="banner good" id="priceFilled">New price $18,500 is in the Price box (it shows "18500"). Now click <b>Update</b> on Facebook. Lot Current will notice when the listing shows the new price. Facebook can let people who saved this car know about the new price; Lot Current doesn't.</div>`, 'the filled price banner, as one element: the price filled, the box as it shows it, that Lot Current will notice the new price, and the saved-car sentence');
     assert.match(html, /Facebook can let people who saved this car know about the new price; Lot Current doesn't\./);
     assert.doesNotMatch(html, /Lot Current (tells|notifies|will tell|will notify) (anyone|people|them)/);
   } finally {
@@ -2278,6 +2279,80 @@ test('a take-down finished while its listing tab is still opening, and the tab t
     assert.equal(up.error, '', 'and no error is written on it');
     assert.match(upkeepHtml(), /id="upkeepDone"/, 'the done banner stays');
     assert.doesNotMatch(upkeepHtml(), /upkeepOpenFailed|Couldn&#39;t open/);
+  } finally {
+    endUpkeep();
+    mock.timers.reset();
+    delete globalThis.chrome;
+  }
+});
+
+test('a take-down whose listing tab answers after another To do item started sets no tab or status on that item', async () => {
+  const opens = []; // the tab each item asks for, in order: the test answers each one
+  globalThis.chrome = {
+    ...fakeChrome({}, {}),
+    tabs: { create: () => new Promise((resolve) => { opens.push(resolve); }) },
+    runtime: { sendMessage: async () => ({}) },
+    scripting: { executeScript: async () => [{ result: null }] },
+  };
+  mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+  const ctx = { render: () => {}, map: () => FORM_MAP, nextItem: async () => null };
+  const CAR_B = { origin: 'https://www.example-motors.test', vin: 'bbb', kind: 'takeDown', why: 'gone', name: 'Car B', listingUrl: at('222'), listedPrice: 21000 };
+  const first = startUpkeep(TAKE_DOWN, ctx);
+  try {
+    await settle();
+    assert.equal(up.status, 'opening', 'car A\'s listing tab is being opened');
+    endUpkeep(); // Not now on car A
+    const second = startUpkeep(CAR_B, ctx);
+    await settle();
+    assert.deepEqual([up.vin, up.status, up.tabId], ['BBB', 'opening', null], 'car B starts while car A\'s tab is still being opened');
+    opens[0]({ id: 9 }); // car A's tab opens now
+    await settle();
+    assert.deepEqual([up.vin, up.status, up.tabId], ['BBB', 'opening', null], 'car A\'s tab writes no tab or status on car B');
+    await first;
+    opens[1]({ id: 10 });
+    await settle();
+    mock.timers.tick(1500);
+    await second;
+    assert.deepEqual([up.vin, up.status, up.tabId], ['BBB', 'waiting', 10], 'car B\'s own tab opens as it would have');
+  } finally {
+    endUpkeep();
+    mock.timers.reset();
+    delete globalThis.chrome;
+  }
+});
+
+test('a take-down whose wait ends after another To do item started starts no poll: car B is first read when its own wait ends', async () => {
+  const reads = [];
+  globalThis.chrome = {
+    ...fakeChrome({}, {}),
+    tabs: { create: async () => ({ id: 9 }), get: async (id) => ({ id, url: LISTED_PAGE.url }) },
+    runtime: { sendMessage: async () => ({}) },
+    scripting: { executeScript: async () => { reads.push(1); return [{ result: { ...LISTED_PAGE, url: at('222') } }]; } },
+  };
+  mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+  const ctx = { render: () => {}, map: () => FORM_MAP, nextItem: async () => null };
+  const CAR_B = { origin: 'https://www.example-motors.test', vin: 'bbb', kind: 'takeDown', why: 'gone', name: 'Car B', listingUrl: at('222'), listedPrice: 21000 };
+  const first = startUpkeep(TAKE_DOWN, ctx);
+  try {
+    await settle();
+    assert.equal(up.status, 'waiting', 'car A\'s listing is open, and its wait runs');
+    mock.timers.tick(1000); // car A's wait has 500 ms to go
+    endUpkeep(); // Not now on car A
+    const second = startUpkeep(CAR_B, ctx);
+    await settle();
+    assert.deepEqual([up.vin, up.status], ['BBB', 'waiting'], 'car B\'s listing is open, and its wait runs');
+    mock.timers.tick(500); // car A's wait ends
+    await settle();
+    await first;
+    mock.timers.tick(1000); // car B's wait ends
+    await settle();
+    await second;
+    mock.timers.tick(500); // 1.5 s after car A's wait ended, a poll that car A started would read car B
+    await settle();
+    assert.equal(reads.length, 0, 'no poll reads car B before 1.5 s after its own wait ended');
+    mock.timers.tick(1000); // car B's first read, 1.5 s after its wait ended
+    await settle();
+    assert.equal(reads.length, 1, 'car B is read once, 1.5 s after its own wait ended');
   } finally {
     endUpkeep();
     mock.timers.reset();

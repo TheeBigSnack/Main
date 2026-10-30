@@ -127,7 +127,7 @@ Only cars marked as posted are watched: cars posted through the panel or marked 
 3. Click **Update** yourself. The panel notices the new price on the listing and ticks the item off. If not, click **I updated it**.
 4. Updated it some other way? **Updated** in the popup ticks it off by hand.
 
-When you finish an item you opened from the side panel, and another To do item has a button to open it (**Open listing** or **Open & update price**), the panel offers it: **Open next To do item** opens its listing, and you take the same steps there.
+When you finish an item you opened from To do, and another To do item has a button to open it (**Open listing** or **Open & update price**), the panel offers it: **Open next To do item** opens its listing, and you take the same steps there.
 
 Notes:
 - If no link to the car's own listing was saved (none at all, or one an older version kept for another page, such as Your listings), the panel opens Marketplace's Your listings page instead and asks you to open the listing there. It never fills or ticks off anything on Your listings itself.

@@ -2768,16 +2768,13 @@ test('the form is not filled with a description that fails a fact or identity ch
   const joinedNote = { ...state, settings: { ...SETTINGS, priceNote: 'Tax, title and fees go to the state, not the dealer.' } };
   const joined = template.buildTemplateDescription({ vehicle: CAR, dealer: SETTINGS.dealer, salesperson: SETTINGS.salesperson, priceNote: joinedNote.settings.priceNote }).replace('Tax, title and fees go to the state, not the dealer.', 'Buy from me and tax, title and fees go to the state, not the dealer.');
   const joinedStatus = realBlocker(joinedNote)(joined);
-  assert.match(joinedStatus, /Says "not the dealer" with words joined to your price note's sentence/, joinedStatus);
-  assert.match(joinedStatus, /Fix the description \(or use Reset to template\) first\.$/, joinedStatus);
-  assert.doesNotMatch(joinedStatus, /\bSettings\b/, joinedStatus);
+  assert.equal(joinedStatus, `The description fails a check that must pass before the form is filled: Says "not the dealer" with words joined to your price note's sentence; keep the note as a sentence of its own: end the sentence before it, and start the one after it with a capital letter. Fix the description (or use Reset to template) first.`, joinedStatus);
   // a banned phrase across the note's edge (the note doesn't say it) is the description's: its own reason, and the description's fix
   assert.match(realBlocker({ ...state, settings: { ...SETTINGS, priceNote: 'Dealer fees extra.' } })(template.buildTemplateDescription({ vehicle: CAR, dealer: SETTINGS.dealer, salesperson: SETTINGS.salesperson, priceNote: 'Dealer fees extra.' }).replace('Dealer fees extra.', 'Ask for me, not the Dealer fees extra.')), /: Says "not the dealer"\. Fix the description \(or use Reset to template\) first\.$/);
   // an edited or a rewritten description with the same missing note keeps the description's fix too: a Settings save does not write it again
   for (const descriptionSource of ['edited', 'claude']) {
     const ownStatus = realBlocker({ ...noted, descriptionSource })(CLEAN);
-    assert.match(ownStatus, /Fix the description \(or use Reset to template\) first\.$/, ownStatus);
-    assert.doesNotMatch(ownStatus, /\bSettings\b/, ownStatus);
+    assert.equal(ownStatus, `The description fails a check that must pass before the form is filled: Doesn't include your dealership's price note: "Tax and tags extra.". Fix the description (or use Reset to template) first.`, descriptionSource);
   }
   // a missing note beside the same note's banned phrase: the missing note is the description's own stop, so the whole status line keeps the description's fix
   const refusedNote = { ...state, settings: { ...SETTINGS, priceNote: 'Priced to sell, plus tax, title and registration.' } };
@@ -2947,7 +2944,7 @@ test('the checks line says the fix is in Settings when only a number in Settings
   compile('descriptionStopped', { state: { ...review }, $: (id) => els[id] || null, runGuardrails: template.runGuardrails, ctx: () => c, checksHtml, setFormButtons: () => {}, fillBlocker: () => 'stopped', setStatus: () => {} })();
   assert.match(els.checks.outerHTML, RESET, 'a click on Open the Marketplace form');
   // a warning beside it (length or tone) only warns: the line still gives the Settings fix, then the warning
-  assert.match(checksHtml(template.runGuardrails(`${text}\nCOME SEE THIS SEDAN TODAY`, c)), /<p>After you save Settings, the template writes the description again; if you edited it, click Reset to template\.<\/p>Worth fixing \(the form can still be filled\):<ul><li>Has ALL CAPS shouting<\/li><\/ul><\/div>$/);
+  assert.equal(checksHtml(template.runGuardrails(`${text}\nCOME SEE THIS SEDAN TODAY`, c)), `<div class="checks bad" id="checks">Fix before the form can be filled:<ul><li>Your role "2nd shift sales" has a number in it, and every number in a description must match the website's data for the car; change it in Settings (Your role), for example to "Second shift sales"</li></ul><p>After you save Settings, the template writes the description again; if you edited it, click Reset to template.</p>Worth fixing (the form can still be filled):<ul><li>Has ALL CAPS shouting</li></ul></div>`, 'the Settings stop and the warning, as one element');
   // a stop of the description's own beside it: no such line, the description needs fixing too
   const mixed = checksHtml(template.runGuardrails(text.replace('34,567 miles', '12,000 miles'), c));
   assert.match(mixed, /Fix before the form can be filled:<ul><li>Your role "2nd shift sales"/);

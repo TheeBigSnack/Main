@@ -20,6 +20,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const UPKEEP = { file: 'extension/upkeep.js', test: 'test/upkeep.test.js' };
 const RESCAN = { file: 'extension/src/rescan.js', test: 'test/rescan.test.js' };
 const SIDE = { file: 'extension/sidepanel.js', test: 'test/panelFlow.test.js' };
+const TEMPLATE = { file: 'extension/src/rewriteTemplate.js', test: 'test/panelFlow.test.js' };
 
 const mutants = [
   { id: 'base', ...UPKEEP, find: null },
@@ -52,6 +53,11 @@ const mutants = [
   { id: 'F1-done-keeps-error', ...UPKEEP, find: "  up.error = '';\n  up.status = 'done';", replace: "  up.status = 'done';" },
   // the poll's first read after the listing page (proof 17): a finished item reads nothing from the posted list
   { id: 'P1-poll-first-over', ...UPKEEP, find: 'if (stale() || !seen || over()) return;', replace: 'if (stale() || !seen) return;' },
+  // the filled-price banner is pinned as one element (proof 22): a sentence added after its last sentence is caught
+  { id: 'D1-banner-end', ...UPKEEP, find: '${saversLine}</div>`', replace: '${saversLine} Check it.</div>`' },
+  // the run half of the guards after the tab opens and after the wait (proof 22): another item's start leaves the tab and the poll alone
+  { id: 'X8-tab-run-guard', ...UPKEEP, find: 'if (run !== starts || !up.active || over()) return; // another item, Not now, or the item finished, meanwhile: the tab stays as it is', replace: 'if (!up.active || over()) return; // another item, Not now, or the item finished, meanwhile: the tab stays as it is' },
+  { id: 'X9-wait-run-guard', ...UPKEEP, find: 'if (run !== starts || !up.active || over()) return; // closed, or finished, meanwhile: no poll starts on it', replace: 'if (!up.active || over()) return; // closed, or finished, meanwhile: no poll starts on it' },
   // a To do list entry that is not an object (proof 17): skipped, never read
   { id: 'R1-todo-object-filter', ...RESCAN, find: 'const list = Array.isArray(items) ? items.filter((x) => x && typeof x === \'object\') : [];', replace: 'const list = Array.isArray(items) ? items : [];' },
   // the side panel's Open next To do item request (proof 20): with no posted list, a price row that waits for the next scan is offered
@@ -61,6 +67,9 @@ const mutants = [
   { id: 'SP2-status-edited-sentence', ...SIDE, find: "const fix = settingsFix(stops, state.descriptionSource) || 'Fix the description (or use Reset to template) first.';", replace: "const fix = settingsFix(stops, state.descriptionSource) || (['edited', 'claude'].includes(state.descriptionSource) ? 'Save Settings to write the description again. Fix the description (or use Reset to template) first.' : 'Fix the description (or use Reset to template) first.');" },
   { id: 'SP3-checks-edited-sentence', ...SIDE, find: '  const fix = settingsFix(stops, source);', replace: "  const fix = settingsFix(stops, source) || (['edited', 'claude'].includes(source) ? 'Save Settings to write the description again.' : '');" },
   { id: 'SP4-stale-edited-sentence', ...SIDE, find: '    : ` The description no longer matches it: ${why}', replace: "    : ` ${['edited', 'claude'].includes(state.descriptionSource) ? 'Save Settings to write the description again. ' : ''}The description no longer matches it: ${why}" },
+  // the status line's joined-sentence stop and the checks line's Settings stop are pinned as whole lines (proof 22): a change in the middle of either is caught
+  { id: 'TP1-joined-status-middle', ...TEMPLATE, find: 'start the one after it with a capital letter', replace: 'start the one after it with a small letter' },
+  { id: 'TP2-role-stop-wording', ...TEMPLATE, find: '; change it in Settings (${w.field})${how}', replace: '; change it in the Settings page (${w.field})${how}' },
 ];
 
 function run(dir, test) {
