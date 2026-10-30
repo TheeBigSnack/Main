@@ -1,5 +1,7 @@
 // Mutation probe for the To do upkeep guards (extension/upkeep.js), the To do list reader (extension/src/rescan.js) and the
-// side panel's request for the next To do item (extension/sidepanel.js, nextUpkeepRequest).
+// side panel's request for the next To do item (extension/sidepanel.js, nextUpkeepRequest), its Settings sentences for an edited
+// or Claude-written description (extension/sidepanel.js), the description's stop wording (extension/src/rewriteTemplate.js) and the
+// filled-price banner (extension/upkeep.js).
 //
 // Each mutant is one exact FIND/REPLACE in a fresh copy of the repo, and the test file that pins it runs in that copy. A
 // mutant is killed when that run exits non-zero and its summary reports no cancelled test. Any other result is a survivor:
@@ -70,6 +72,10 @@ const mutants = [
   // the status line's joined-sentence stop and the checks line's Settings stop are pinned as whole lines (proof 22): a change in the middle of either is caught
   { id: 'TP1-joined-status-middle', ...TEMPLATE, find: 'start the one after it with a capital letter', replace: 'start the one after it with a small letter' },
   { id: 'TP2-role-stop-wording', ...TEMPLATE, find: '; change it in Settings (${w.field})${how}', replace: '; change it in the Settings page (${w.field})${how}' },
+  // a contradictory "Save Settings" sentence ahead of the reasons, when the only stops are Settings stops and the description was edited or written by Claude (proof 23): the end-anchored pins pass it
+  { id: 'W1-status-settings-sentence', ...SIDE, find: 'that must pass before the form is filled: ${why}', replace: "that must pass before the form is filled: ${(settingsFix(stops, state.descriptionSource) && ['edited', 'claude'].includes(state.descriptionSource)) ? 'Save Settings to write the description again. ' : ''}${why}" },
+  { id: 'W2-checks-settings-sentence', ...SIDE, find: 'Fix before the form can be filled:${list(stops)}', replace: "Fix before the form can be filled:${(fix && ['edited', 'claude'].includes(source)) ? '<p>Save Settings to write the description again.</p>' : ''}${list(stops)}" },
+  { id: 'W3-stale-settings-sentence', ...SIDE, find: '    : ` The description no longer matches it: ${why}', replace: "    : ` ${fix && ['edited', 'claude'].includes(state.descriptionSource) ? 'Save Settings to write the description again. ' : ''}The description no longer matches it: ${why}" },
 ];
 
 function run(dir, test) {
