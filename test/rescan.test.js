@@ -744,7 +744,7 @@ test('nextUpkeepItem is exported, and no list, or no item left on it, gives no n
 
 test('a To do list entry that is not an object is skipped, and the next item is the first entry that is', () => {
   const next = rescan.nextUpkeepItem;
-  // a saved list may hold a null, a number, a string or an undefined where a row should be: the tab skips those and never throws on them
+  // a saved list may hold a null, a number, a string or an undefined where a row should be: nextUpkeepItem skips those and never throws on them
   const diff = { takenAt: at3(2), takeDown: [null, 7, '', takeRow('TAKE')], priceUpdates: [undefined, priceRow('PRICE')] };
   assert.deepEqual(pickNext(next({ diff, posted: {} }, '')), ['takeDown', 'TAKE'], 'the first take-down entry that is an object is the next item');
   assert.deepEqual(pickNext(next({ diff, posted: {} }, 'TAKE')), ['price', 'PRICE'], 'then the first price update entry that is an object');
