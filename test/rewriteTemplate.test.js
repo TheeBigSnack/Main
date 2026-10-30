@@ -718,7 +718,7 @@ test('a banned phrase in the dealership\'s own price note is named as the note\'
   const noteReasons = runGuardrails(`${text}\nText me, not the dealer.`, c).problems.map((p) => p.text).filter((t) => t.includes('price note'));
   assert.equal(noteReasons.length, 1);
   for (const t of noteReasons) assert.match(t, /the note in Settings\.?$/, t);
-  // a note quoting a fee that is not the gap between this car's two prices (usedNormal: $490)
+  // a note quoting a fee that is not the gap between this car's two prices (the usedNormal fixture's gap is another amount)
   const gapNote = { ...c, priceNote: 'Price includes the $500 doc fee; tax and tags extra.' };
   const amountReasons = runGuardrails(buildTemplateDescription(gapNote), gapNote).problems.filter((p) => p.code === 'price-note-amount').map((p) => p.text);
   assert.equal(amountReasons.length, 1);

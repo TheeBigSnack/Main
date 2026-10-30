@@ -359,7 +359,7 @@ test('the scan step says when the website gave no used car, and counts the cars 
     tone: 'good',
     text: '6 used cars read from Ron Lewis. 2 stores found.',
   });
-  assert.deepEqual(scanLine({ cars: 1, siteName: 'Ron Lewis', stores: ['Route 2 Motors'] }), { tone: 'good', text: '1 used car read from Ron Lewis. 1 store found.' }, 'one car is said in the singular');
+  assert.deepEqual(scanLine({ cars: 1, siteName: 'Example Motors', stores: ['Route 2 Motors'] }), { tone: 'good', text: '1 used car read from Example Motors. 1 store found.' }, 'one car is said in the singular');
   const none = scanLine({ cars: 0, siteName: 'Ron Lewis', stores: [] });
   assert.equal(none.tone, 'warn');
   assert.match(none.text, /^No used cars were read from Ron Lewis\./);
@@ -367,7 +367,7 @@ test('the scan step says when the website gave no used car, and counts the cars 
   assert.doesNotMatch(none.text, /0 used cars/, 'not a count of zero as a good result');
   assert.equal(scanLine({}).tone, 'warn', 'a read with no count at all is no car');
   assert.match(scanLine({ cars: 0 }).text, /No used cars were read from the website\./, 'a site with no name is named as the website');
-  assert.deepEqual(scanLine({ cars: 3, siteName: 'Ron Lewis', stores: ['Route 2 Motors'], keptCars: 12 }), { tone: 'warn', text: '3 used cars read from Ron Lewis this time, but held back, so the last scan\'s 12 used cars are kept. 1 store found among them.' }, 'a held-back read says the last scan\'s cars are kept, with their count');
-  assert.equal(scanLine({ cars: 0, siteName: 'Ron Lewis', stores: [], keptCars: 1 }).text, 'No used cars were read from Ron Lewis this time. The read was held back, so the last scan\'s 1 used car is kept. 0 stores found among them.', 'no car read, one car kept: the verb agrees');
-  assert.equal(scanLine({ cars: 0, siteName: 'Ron Lewis', stores: ['Route 2 Motors'], keptCars: 12 }).text, 'No used cars were read from Ron Lewis this time. The read was held back, so the last scan\'s 12 used cars are kept. 1 store found among them.', 'no car read, twelve kept: the plural is kept');
+  assert.deepEqual(scanLine({ cars: 3, siteName: 'Example Motors', stores: ['Route 2 Motors'], keptCars: 12 }), { tone: 'warn', text: '3 used cars read from Example Motors this time, but held back, so the last scan\'s 12 used cars are kept. 1 store found among them.' }, 'a held-back read says the last scan\'s cars are kept, with their count');
+  assert.equal(scanLine({ cars: 0, siteName: 'Example Motors', stores: [], keptCars: 1 }).text, 'No used cars were read from Example Motors this time. The read was held back, so the last scan\'s 1 used car is kept. 0 stores found among them.', 'no car read, one car kept: the verb agrees');
+  assert.equal(scanLine({ cars: 0, siteName: 'Example Motors', stores: ['Route 2 Motors'], keptCars: 12 }).text, 'No used cars were read from Example Motors this time. The read was held back, so the last scan\'s 12 used cars are kept. 1 store found among them.', 'no car read, twelve kept: the plural is kept');
 });
