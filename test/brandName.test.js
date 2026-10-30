@@ -601,7 +601,7 @@ test('the scan catches the old name in every spelling, in any file that is not e
   // escaped plus (a plus, not a space), an escaped mark that is no separator, or a broken UTF-8
   // escape (read as Latin-1, its letters are no separator either)
   for (const text of ['Lot Current', 'the lot is in sync with the website', 'a parking lot; sync later', 'lots synced', 'the **lot** is in `sync`', '<b>lot</b> and <i>sync</i>', 'the pilot sync runs nightly', 'ballotSync()', 'a slot-sync job', 'PILOTSYNC', 'allot_sync', 'PilotSync',
-    'autopilotsync', 'copilot-sync', 'timeslotsync', 'a subplot syncs', 'inkblot_sync', 'bloodclotSync', 'zealotsync', 'harlot sync', 'shallotsync', 'ocelotsync', 'Camelotsync', 'matelotsync', 'cachalotsync', 'polyglotSync', 'AUTOPILOTSYNC', 'TIMESLOTSYNC', 'BALLOT_SYNC',
+    'autopilotsync', 'copilot-sync', 'timeslotsync', 'a subplot syncs', 'inkblot_sync', 'bloodclotSync', 'zealotsync', 'harlot sync', 'shallotsync', '\\ballotsync', '\\shallotsync', 'ocelotsync', 'Camelotsync', 'matelotsync', 'cachalotsync', 'polyglotSync', 'AUTOPILOTSYNC', 'TIMESLOTSYNC', 'BALLOT_SYNC',
     'SlotSync', 'PlotSync', 'AUTOPIlotSync', 'TIMESlotsync', 'COPIlot-sync',
     'const n = lot+sync;', '?tags=lot+%26+sync', 'x &=lot+sync;', 'a ??=lot+sync', '?q=lot%2Bsync', 'a lot%E2%80sync']) {
     assert.deepEqual(hitsIn('docs/help.md', text), [], text);
