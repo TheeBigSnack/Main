@@ -905,6 +905,14 @@ test('HANDOFF.md section 0 repeats each rule of section A word for word, so a se
   for (const rule of rules) assert.ok(latest.includes(rule), `section 0 does not repeat this rule of section A word for word: ${rule.slice(0, 80)}`);
 });
 
+test('HANDOFF.md START HERE and section A name no pilot dealer or town, so the first rules a session reads name the kind of value and not the value (proof 32)', () => {
+  const handoff = read('../HANDOFF.md');
+  const start = handoff.indexOf('## START HERE');
+  const b = handoff.indexOf('### B. Where things stand');
+  assert.ok(start !== -1 && start < b, 'HANDOFF.md has START HERE, then section A, then section B');
+  assert.doesNotMatch(handoff.slice(start, b), /Waynesburg|Ron Lewis|Cranberry|Pleasant Hills/, 'START HERE or section A names a pilot dealer or town; CLAUDE.md allows those names only in test fixtures, the pilot record and the product summary');
+});
+
 test('HANDOFF.md START HERE gives the unit-test count that README gives (proof 30)', () => {
   const readme = read('../README.md').match(/^npm test\s+# (\d+) unit tests/m);
   assert.ok(readme, 'README.md gives the unit-test count on its npm test line');
