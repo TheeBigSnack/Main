@@ -2917,6 +2917,8 @@ test('the checks line says which problems stop the form and which only warn', ()
   assert.equal(both, '<div class="checks bad" id="checks">Fix before the form can be filled:<ul><li>"12000" isn\'t in the website\'s data for this car</li></ul>Worth fixing (the form can still be filled):<ul><li>50 words; needs at least 60</li></ul></div>', 'the stops first, then the warnings');
   const warnOnly = checksHtml({ ok: false, problems: [warn], words: 50 });
   assert.equal(warnOnly, '<div class="checks warn" id="checks">Worth fixing (the form can still be filled):<ul><li>50 words; needs at least 60</li></ul></div>', 'a warning alone gives no Fix before the form line');
+  // a warning alone for an edited or Claude-written description too: no Settings sentence, since no stop needs Settings (proof 28)
+  for (const source of ['edited', 'claude']) assert.equal(checksHtml({ ok: false, problems: [warn], words: 50 }, source), '<div class="checks warn" id="checks">Worth fixing (the form can still be filled):<ul><li>50 words; needs at least 60</li></ul></div>', source);
   assert.equal(checksHtml({ ok: false, problems: [warn, { code: 'all-caps', text: 'Has ALL CAPS shouting' }], words: 50 }), '<div class="checks warn" id="checks">Worth fixing (the form can still be filled):<ul><li>50 words; needs at least 60</li><li>Has ALL CAPS shouting</li></ul></div>', 'the warnings in the order the checks give them');
   assert.match(checksHtml({ ok: true, problems: [], words: 80 }), /^<div class="checks ok" id="checks">All checks passed: 80 words/);
   // passing says what was checked, no more: the claim checks go by set words

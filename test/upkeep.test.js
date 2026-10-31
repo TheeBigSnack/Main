@@ -637,6 +637,21 @@ test('the Open next To do item button is drawn only when the item is done and an
     assert.doesNotMatch(upkeepHtml(), /upkeepNext/, 'an item not done yet offers none');
     Object.assign(up, { hasNext: true, status: 'stopped', note: 'The website shows no price for this car right now, so there is no price to fill. Nothing was filled.' });
     assert.doesNotMatch(upkeepHtml(), /upkeepNext/, 'a stopped item offers none');
+    // a price update finished by hand ("Marked done.") has the same whole panel, with and without another item after it (proof 28)
+    Object.assign(up, { ...DONE_CAR, kind: 'price', why: '', price: 19000, listedPrice: 20000, hasNext: true });
+    assert.equal(below(upkeepHtml()), [
+      '</section>',
+      '    <div class="banner good" id="upkeepDone">Done. Marked done.</div><p class="hint" id="upkeepNote">Marked done.</p>',
+      '    <div class="actions"><button type="button" class="primary" id="upkeepNext">Open next To do item</button><button type="button" class="plain" id="upkeepClose">Close</button></div>',
+      '    <p class="hint">Lot Current fills in the price and reads the page; you click Edit, Update, Mark as sold or Delete. It never clicks those for you.</p>',
+    ].join('\n'), 'a price update marked done by hand with another To do item after it: the done panel has no line of its own');
+    up.hasNext = false;
+    assert.equal(below(upkeepHtml()), [
+      '</section>',
+      '    <div class="banner good" id="upkeepDone">Done. Marked done.</div><p class="hint" id="upkeepNote">Marked done.</p>',
+      '    <div class="actions"><button type="button" class="primary" id="upkeepClose">Close</button></div>',
+      '    <p class="hint">Lot Current fills in the price and reads the page; you click Edit, Update, Mark as sold or Delete. It never clicks those for you.</p>',
+    ].join('\n'), 'a price update marked done by hand with no item after it: the done panel has no line of its own');
   } finally {
     endUpkeep();
   }
@@ -678,6 +693,13 @@ test('a second Open next To do item click while the next item is being found sta
     assert.match(lookupDrawn, /id="upkeepClose">Close<\/button>/, 'Close is drawn in that render');
     assert.doesNotMatch(lookupDrawn, /id="upkeepNext"/, 'the Open next To do item button is not drawn in that render');
     assert.match(drawn.at(-1), /<p class="hint" id="upkeepFinding">Finding the next To do item…<\/p>/, 'the last render while the lookup is held is still the lookup line');
+    // the whole panel under the car's name while the lookup is held: the Finding line and Close alone, with no step of its own (proof 28)
+    assert.equal(below(drawn.at(-1)), [
+      '</section>',
+      '    <p class="hint" id="upkeepFinding">Finding the next To do item…</p>',
+      '    <div class="actions"><button type="button" class="primary" id="upkeepClose">Close</button></div>',
+      '    <p class="hint">Lot Current fills in the price and reads the page; you click Edit, Update, Mark as sold or Delete. It never clicks those for you.</p>',
+    ].join('\n'), 'the take-down lookup: the Finding line and Close alone under the car');
     const second = handleUpkeepClick('upkeepNext', ctx);
     assert.equal(asked, 1, 'the second click asks for nothing');
     assert.equal(drawn.includes('the To do list'), false, 'nor does it, or the lookup, take the panel back to the To do list: the Finding line and Close stay drawn');

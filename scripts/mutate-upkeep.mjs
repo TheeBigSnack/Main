@@ -2,7 +2,8 @@
 // side panel's request for the next To do item (extension/sidepanel.js, nextUpkeepRequest), its checks line and Settings
 // sentences for each description source, an edited or Claude-written one included (extension/sidepanel.js), the description's
 // stop wording (extension/src/rewriteTemplate.js), and the done panel of a finished To do item (extension/upkeep.js): its
-// filled-price banner and the lines drawn around the banner after a take-down or a price update.
+// filled-price banner and the lines drawn around the banner after a take-down or a price update, and the Finding line drawn
+// while the next To do item is looked for.
 //
 // Each mutant is one exact FIND/REPLACE in a fresh copy of the repo, and the test file that pins it runs in that copy. A
 // mutant is killed when that run exits non-zero and its summary reports no cancelled test. Any other result is a survivor:
@@ -103,8 +104,14 @@ const mutants = [
   // the same for a price update's done panel alone, and for a car marked done by hand alone, when another To do item follows (proof 27)
   { id: 'Mu6-done-panel-price-next-step', ...UPKEEP, find: 'else if (up.status === \'done\') body = `<div class="banner good" id="upkeepDone">Done. ${esc(up.note)}</div>`;', replace: "else if (up.status === 'done') body = `${up.hasNext && up.kind === 'price' ? '<p class=\"hint\">Now click <b>Update</b> on Facebook.</p>' : ''}<div class=\"banner good\" id=\"upkeepDone\">Done. ${esc(up.note)}</div>`;" },
   { id: 'Mu7-done-panel-marked-next-step', ...UPKEEP, find: 'else if (up.status === \'done\') body = `<div class="banner good" id="upkeepDone">Done. ${esc(up.note)}</div>`;', replace: "else if (up.status === 'done') body = `${up.hasNext && up.note === 'Marked done.' ? '<p class=\"hint\">Now click <b>Mark as sold</b> on Facebook.</p>' : ''}<div class=\"banner good\" id=\"upkeepDone\">Done. ${esc(up.note)}</div>`;" },
+  // a hint ahead of the banner of a price update finished by hand (its Marked done. note), with or without another item (proof 28)
+  { id: 'Mu8-done-panel-price-marked-step', ...UPKEEP, find: 'else if (up.status === \'done\') body = `<div class="banner good" id="upkeepDone">Done. ${esc(up.note)}</div>`;', replace: "else if (up.status === 'done') body = `${up.kind === 'price' && up.note === 'Marked done.' ? '<p class=\"hint\">Now click <b>Update</b> on Facebook.</p>' : ''}<div class=\"banner good\" id=\"upkeepDone\">Done. ${esc(up.note)}</div>`;" },
+  // a step ahead of the Finding line drawn while the next To do item is looked for (proof 28)
+  { id: 'Mu9-finding-panel-step', ...UPKEEP, find: "else if (up.status === 'finding') body = '<p class=\"hint\" id=\"upkeepFinding\">Finding the next To do item…</p>';", replace: "else if (up.status === 'finding') body = '<p class=\"hint\">Now click <b>Mark as sold</b> on Facebook.</p><p class=\"hint\" id=\"upkeepFinding\">Finding the next To do item…</p>';" },
   // an extra Settings sentence ahead of the warnings, for an edited or Claude-written description only (proof 27)
   { id: 'Mw3-checks-warn-edited-sentence', ...SIDE, find: "${warns.length ? `Worth fixing (the form can still be filled):${list(warns)}` : ''}", replace: "${warns.length ? `${fix && source !== 'template' ? '<p>Change it in Settings.</p>' : ''}Worth fixing (the form can still be filled):${list(warns)}` : ''}" },
+  // the same for a warning alone, which has no Settings stop to name: no Settings sentence either (proof 28)
+  { id: 'Mw4-checks-warn-only-edited-sentence', ...SIDE, find: "${warns.length ? `Worth fixing (the form can still be filled):${list(warns)}` : ''}", replace: "${warns.length ? `${!fix && source !== 'template' ? '<p>After you save Settings, click Reset to template.</p>' : ''}Worth fixing (the form can still be filled):${list(warns)}` : ''}" },
 ];
 
 function run(dir, test) {
