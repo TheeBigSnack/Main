@@ -685,8 +685,8 @@ test('a finished To do item draws its done panel and its lookup panel whole, for
   const saved = { ...up }; // the table leaves the state as it found it
   try {
     for (const [kind, note] of NOTES) {
-      // a take-down has a reason, gone or not-pre-owned; a price update has none
-      for (const why of kind === 'takeDown' ? ['gone', 'not-pre-owned'] : ['']) {
+      // a take-down has a reason: gone, sale-pending (the website marks it sale-pending) or not-pre-owned; a price update has none
+      for (const why of kind === 'takeDown' ? ['gone', 'sale-pending', 'not-pre-owned'] : ['']) {
         for (const [price, listedPrice] of PRICES[kind]) {
           for (const listingUrl of ['', NEXT.listingUrl]) {
             for (const tabId of [null, 4242]) {

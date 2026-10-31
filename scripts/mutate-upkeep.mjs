@@ -172,6 +172,9 @@ const mutants = [
   doneHint('Mu48-done-panel-price-unlisted-step', "up.kind === 'price' && !up.listedPrice"),
   findingHint('Mu49-finding-panel-price-rise-step', "up.kind === 'price' && up.price > up.listedPrice"),
   findingHint('Mu50-finding-panel-price-unlisted-step', "up.kind === 'price' && !up.listedPrice"),
+  // a take-down the website marks sale-pending: the To do table varied only gone and not-pre-owned, so a step keyed on this reason passed (proof 34)
+  doneHint('Mu51-done-panel-sale-pending-step', "up.kind === 'takeDown' && up.why === 'sale-pending'"),
+  findingHint('Mu52-finding-panel-sale-pending-step', "up.kind === 'takeDown' && up.why === 'sale-pending'"),
   // set-up's ready count and Price step on a held-back read come from the lot Settings holds (the kept snapshot), not from this read's own
   // snapshot: a read that found one car at another store keeps the last scan's twelve cars in both (proof 33)
   { id: 'K21-held-ready-this-read', ...WIZARD, find: "ready: lot.filter((v) => v.decision === 'ready').length", replace: "ready: r.snapshot ? Object.values(r.snapshot.vehicles).filter((v) => v.decision === 'ready').length : 0" },
