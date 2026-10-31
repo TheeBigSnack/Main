@@ -906,6 +906,13 @@ test('when no To do item is left, the done banner stays and no Next button is dr
     Object.assign(up, { ...DONE_CAR, note: 'The listing shows it as sold or removed.', hasNext: true });
     assert.equal(await handleUpkeepClick('upkeepNext', ctx), true);
     assert.match(drawn.at(-1), /<div class="banner good" id="upkeepDone">Done\. The listing shows it as sold or removed\.<\/div>/, 'the done banner keeps the note Lot Current saw');
+    // the whole panel of that car: a take-down the listing shows as sold or removed has its banner, its note, Close and the footer, and no step of its own (proof 27)
+    assert.equal(below(drawn.at(-1)), [
+      '</section>',
+      '    <div class="banner good" id="upkeepDone">Done. The listing shows it as sold or removed.</div><p class="hint" id="upkeepNote">The listing shows it as sold or removed.</p>',
+      '    <div class="actions"><button type="button" class="primary" id="upkeepClose">Close</button></div>',
+      '    <p class="hint">Lot Current fills in the price and reads the page; you click Edit, Update, Mark as sold or Delete. It never clicks those for you.</p>',
+    ].join('\n'), 'a take-down the listing shows as sold or removed: the done panel has no line of its own');
   } finally {
     endUpkeep();
   }
