@@ -3,7 +3,8 @@
 // sentences for each description source, an edited or Claude-written one included (extension/sidepanel.js), the description's
 // stop wording (extension/src/rewriteTemplate.js), and the done panel of a finished To do item (extension/upkeep.js): its
 // filled-price banner and the lines drawn around the banner after a take-down or a price update, and the Finding line drawn
-// while the next To do item is looked for.
+// while the next To do item is looked for, and the set-up wizard's ready count and Price step on a held-back read
+// (extension/wizard.js).
 //
 // Each mutant is one exact FIND/REPLACE in a fresh copy of the repo, and the test file that pins it runs in that copy. A
 // mutant is killed when that run exits non-zero and its summary reports no cancelled test. Any other result is a survivor:
@@ -25,6 +26,7 @@ const UPKEEP = { file: 'extension/upkeep.js', test: 'test/upkeep.test.js' };
 const RESCAN = { file: 'extension/src/rescan.js', test: 'test/rescan.test.js' };
 const SIDE = { file: 'extension/sidepanel.js', test: 'test/panelFlow.test.js' };
 const TEMPLATE = { file: 'extension/src/rewriteTemplate.js', test: 'test/panelFlow.test.js' };
+const WIZARD = { file: 'extension/wizard.js', test: 'test/wizardSeed.test.js' };
 
 // A hint ahead of a finished To do item's done banner, or ahead of its Finding line, drawn while one condition on the upkeep
 // state holds. Each condition reads one field of `up` that no whole-panel pin varied before proof 30, for a real price update
@@ -36,6 +38,7 @@ const mutants = [
   { id: 'base', ...UPKEEP, find: null },
   { id: 'base-rescan', ...RESCAN, find: null },
   { id: 'base-side', ...SIDE, find: null },
+  { id: 'base-wizard', ...WIZARD, find: null },
   // the second finish of an item: the stale answer is reset, and an answer to an earlier finish is not written
   { id: 'S1-no-reset', ...UPKEEP, find: '  up.hasNext = false; // an answer an earlier finish of this item drew is not kept: the question below asks again\n', replace: '' },
   { id: 'S2-no-token', ...UPKEEP, find: 'if (ask !== finishes || run !== starts', replace: 'if (run !== starts' },
@@ -169,6 +172,10 @@ const mutants = [
   doneHint('Mu48-done-panel-price-unlisted-step', "up.kind === 'price' && !up.listedPrice"),
   findingHint('Mu49-finding-panel-price-rise-step', "up.kind === 'price' && up.price > up.listedPrice"),
   findingHint('Mu50-finding-panel-price-unlisted-step', "up.kind === 'price' && !up.listedPrice"),
+  // set-up's ready count and Price step on a held-back read come from the lot Settings holds (the kept snapshot), not from this read's own
+  // snapshot: a read that found one car at another store keeps the last scan's twelve cars in both (proof 33)
+  { id: 'K21-held-ready-this-read', ...WIZARD, find: "ready: lot.filter((v) => v.decision === 'ready').length", replace: "ready: r.snapshot ? Object.values(r.snapshot.vehicles).filter((v) => v.decision === 'ready').length : 0" },
+  { id: 'K47-held-price-this-read', ...WIZARD, find: 'price: priceStepModel(lot)', replace: 'price: priceStepModel(r.snapshot ? Object.values(r.snapshot.vehicles) : [])' },
 ];
 
 function run(dir, test) {

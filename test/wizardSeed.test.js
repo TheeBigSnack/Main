@@ -16,7 +16,7 @@ import { fixtures, fakeDealerPage, fakeChrome, vehicle, snapshot, MY_STORE } fro
 import { wiz, wizardHtml, startWizard, handleWizardClick, handleWizardChange, TAB_GONE } from '../extension/wizard.js';
 import { STORAGE_FULL } from '../extension/src/storage.js';
 import { settingNumberWarning } from '../extension/src/rewriteTemplate.js';
-import { withDefaults, PROFILE_KEY } from '../extension/src/settings.js';
+import { withDefaults, PROFILE_KEY, suggestedPriceNote } from '../extension/src/settings.js';
 import { siteKeys, SITES_KEY } from '../extension/src/storageKeys.js';
 
 const ORIGIN = 'https://example-dealer.test';
@@ -434,4 +434,17 @@ test('a held-back read\'s scan line gives this read\'s count and the kept lot\'s
   await handleWizardClick('wizScan', ctx); // Read the website again (Next ran the first read): wiz.step stays on the scan step
   assert.equal(wiz.step, 'scan');
   assert.match(unesc(html), /1 used car read from Example Motors this time, but held back, so the last scan's 12 used cars are kept\. 1 store found among them\./);
+});
+
+test('a held-back read\'s ready count and Price step are the kept lot\'s, as Settings judges it: set-up counts the cars Settings holds, and its Price step suggests the doc fee that lot shows', async () => {
+  const settings = { ...structuredClone(STORED), myStores: ['Route 2 Motors'] };
+  const lot = Array.from({ length: 12 }, (_, i) => ['usedNormal', { vin: `LOT${i}`, extra_fields: { meta_location: 'Route 2 Motors', location_rt: 'Route 2 Motors' } }]);
+  const one = RECORDS.slice(0, 1).map((r) => ({ ...structuredClone(r), extra_fields: { ...r.extra_fields, meta_location: 'Other Store', location_rt: 'Other Store' } }));
+  browser({ local: { [k.settings]: settings, [k.snapshot]: snapshot(lot, settings) }, records: one });
+  await start();
+  await nextUntil('price');
+  assert.equal(wiz.scan.ready, lot.length, 'the ready count is the last scan\'s cars, which Settings holds, not the one car this read found at another store');
+  const ram = vehicle('usedNormal');
+  assert.ok(ram.priceBeforeFees < ram.price, 'the fixture shows a lower second price');
+  assert.ok(unesc(html).includes(`Suggested: "${suggestedPriceNote(ram.price - ram.priceBeforeFees, 'beforeFees')}"`), 'the Price step suggests the doc-fee note the kept lot shows, not none for the one car this read found');
 });
