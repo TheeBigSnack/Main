@@ -624,6 +624,13 @@ test('the Open next To do item button is drawn only when the item is done and an
     assert.match(upkeepHtml(), /<button type="button" class="primary" id="upkeepNext">Open next To do item<\/button>/);
     assert.match(upkeepHtml(), /<button type="button" class="plain" id="upkeepClose">Close<\/button>/, 'Close is kept beside it');
     assert.match(upkeepHtml(), /<div class="actions"><button type="button" class="primary" id="upkeepNext">Open next To do item<\/button><button type="button" class="plain" id="upkeepClose">Close<\/button><\/div>/, 'Open next To do item leads the row, and Close follows it');
+    // the whole panel under the car's name: a car marked done by hand with another To do item after it has no step of its own (proof 27)
+    assert.equal(below(upkeepHtml()), [
+      '</section>',
+      '    <div class="banner good" id="upkeepDone">Done. Marked done.</div><p class="hint" id="upkeepNote">Marked done.</p>',
+      '    <div class="actions"><button type="button" class="primary" id="upkeepNext">Open next To do item</button><button type="button" class="plain" id="upkeepClose">Close</button></div>',
+      '    <p class="hint">Lot Current fills in the price and reads the page; you click Edit, Update, Mark as sold or Delete. It never clicks those for you.</p>',
+    ].join('\n'), 'a car marked done by hand with another To do item after it: the done panel has no line of its own');
     up.hasNext = false;
     assert.doesNotMatch(upkeepHtml(), /upkeepNext/, 'no next item, no button');
     Object.assign(up, { hasNext: true, status: 'waiting' });
@@ -690,6 +697,13 @@ test('a second Open next To do item click while the next item is being found sta
     assert.equal(await priceLookup, true);
     // and so does one Lot Current saw saved: the note its done banner gave is not drawn under the Finding line either
     Object.assign(up, { ...DONE_CAR, kind: 'price', why: '', price: 19000, listedPrice: 20000, note: 'The listing now shows $19,000.', hasNext: true });
+    // a done price update with another To do item after it: the same whole panel, with Open next To do item leading the row (proof 27)
+    assert.equal(below(upkeepHtml()), [
+      '</section>',
+      '    <div class="banner good" id="upkeepDone">Done. The listing now shows $19,000.</div><p class="hint" id="upkeepNote">The listing now shows $19,000.</p>',
+      '    <div class="actions"><button type="button" class="primary" id="upkeepNext">Open next To do item</button><button type="button" class="plain" id="upkeepClose">Close</button></div>',
+      '    <p class="hint">Lot Current fills in the price and reads the page; you click Edit, Update, Mark as sold or Delete. It never clicks those for you.</p>',
+    ].join('\n'), 'a done price update with another To do item after it: the done panel has no line of its own');
     const seenLookup = handleUpkeepClick('upkeepNext', ctx);
     assert.match(drawn.at(-1), /<p class="hint" id="upkeepFinding">Finding the next To do item…<\/p>\s*<div class="actions"><button type="button" class="\w+" id="upkeepClose">Close<\/button><\/div>/, 'a price update Lot Current saw saved draws the Finding line and Close alone');
     assert.equal(below(drawn.at(-1)), below(lookupDrawn), 'the same panel as the take-down\'s lookup: no done banner over the Finding line, and the same Close');
@@ -1232,6 +1246,13 @@ test('a take-down whose listing then shows it sold, with another To do item afte
     await r.flush();
     assert.equal(up.status, 'done');
     assert.match(drawn.at(-1), /<div class="banner good" id="upkeepDone">Done\. The listing shows it as sold or removed\.<\/div>[\s\S]*id="upkeepNext"/, 'and the last panel drawn offers Open next To do item');
+    // the whole panel under the car's name: the banner and its note, Open next To do item with Close plain beside it, and the footer, and no line between the banner and the button (proof 27)
+    assert.equal(below(drawn.at(-1)), [
+      '</section>',
+      '    <div class="banner good" id="upkeepDone">Done. The listing shows it as sold or removed.</div><p class="hint" id="upkeepNote">The listing shows it as sold or removed.</p>',
+      '    <div class="actions"><button type="button" class="primary" id="upkeepNext">Open next To do item</button><button type="button" class="plain" id="upkeepClose">Close</button></div>',
+      '    <p class="hint">Lot Current fills in the price and reads the page; you click Edit, Update, Mark as sold or Delete. It never clicks those for you.</p>',
+    ].join('\n'), 'a take-down with another To do item after it: the done panel has no line between its banner and Open next To do item');
   } finally {
     await endRaceRig(r);
   }
