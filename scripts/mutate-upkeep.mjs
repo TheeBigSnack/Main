@@ -83,6 +83,10 @@ const mutants = [
   { id: 'W4-status-mixed-sentence', ...SIDE, find: 'that must pass before the form is filled: ${why}', replace: "that must pass before the form is filled: ${(stops.length > 1 && ['edited', 'claude'].includes(state.descriptionSource)) ? 'After you save Settings, click Reset to template to write the description again. ' : ''}${why}" },
   { id: 'W5-checks-mixed-sentence', ...SIDE, find: 'Fix before the form can be filled:${list(stops)}', replace: "Fix before the form can be filled:${list(stops)}${(stops.length > 1 && ['edited', 'claude'].includes(source)) ? '<p>After you save Settings, click Reset to template to write the description again.</p>' : ''}" },
   { id: 'W6-stale-mixed-sentence', ...SIDE, find: '    : ` The description no longer matches it: ${why}', replace: "    : ` ${(stops.length > 1 && ['edited', 'claude'].includes(state.descriptionSource)) ? 'After you save Settings, click Reset to template to write the description again. ' : ''}The description no longer matches it: ${why}" },
+  // a sentence ahead of the reasons when a stop says "Says" (proof 25): the end-anchored wording pins passed it, the whole-line pins catch it
+  { id: 'W7-says-front-sentence', ...SIDE, find: 'that must pass before the form is filled: ${why}', replace: "that must pass before the form is filled: ${stops.some((p) => /^Says/.test(p.text)) ? 'After you save Settings, click Reset to template. ' : ''}${why}" },
+  // a paragraph after the checks line's list when a stop says "Doesn't" (proof 25): the end-anchored checks pins passed it
+  { id: 'W8-checks-doesnt-paragraph', ...SIDE, find: 'Fix before the form can be filled:${list(stops)}', replace: "Fix before the form can be filled:${list(stops)}${stops.some((p) => /^Doesn/.test(p.text)) ? '<p>Change the dealership name in Settings.</p>' : ''}" },
 ];
 
 function run(dir, test) {
