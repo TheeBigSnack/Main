@@ -671,7 +671,7 @@ test('the Open next To do item button is drawn only when the item is done and an
   }
 });
 
-test('a finished To do item draws its done panel and its lookup panel whole, for every kind, note, reason, saved link, listing tab and next item, and with each other field of the upkeep state set (proof 29, 30)', () => {
+test('a finished To do item draws its done panel and its lookup panel whole, for every kind, note, reason, price, saved link, listing tab and next item, and with each other field of the upkeep state set (proof 29, 30, 31)', () => {
   // a take-down, or a price update with the note its done banner gave; a price update's note can also say the listing now shows its price
   const NOTES = [
     ['takeDown', 'Marked done.'],
@@ -680,27 +680,32 @@ test('a finished To do item draws its done panel and its lookup panel whole, for
     ['price', 'The listing shows it as sold or removed.'],
     ['price', 'The listing now shows $19,000.'],
   ];
+  // a price update's price and the price on its listing: a drop, a rise, and no listed price; a take-down has neither (proof 31)
+  const PRICES = { takeDown: [[null, null]], price: [[19000, 20000], [21000, 20000], [19000, null]] };
   const saved = { ...up }; // the table leaves the state as it found it
   try {
     for (const [kind, note] of NOTES) {
       // a take-down has a reason, gone or not-pre-owned; a price update has none
       for (const why of kind === 'takeDown' ? ['gone', 'not-pre-owned'] : ['']) {
-        for (const listingUrl of ['', NEXT.listingUrl]) {
-          for (const tabId of [null, 4242]) {
-            for (const hasNext of [false, true]) {
-              const what = `${kind} "${note}"${why ? `, reason ${why}` : ''}, ${listingUrl ? 'with' : 'without'} a saved link, ${tabId ? 'with' : 'without'} its listing tab, ${hasNext ? 'with' : 'without'} another To do item after it`;
-              const start = { ...UP_START, kind, why, note, listingUrl, tabId, hasNext, price: kind === 'price' ? 19000 : null, listedPrice: kind === 'price' ? 20000 : null };
-              Object.assign(up, start, { status: 'done' });
-              assert.equal(below(upkeepHtml()), donePanel({ note, hasNext, error: '' }), `the done panel of ${what}`);
-              Object.assign(up, { status: 'finding' });
-              assert.equal(below(upkeepHtml()), lookupPanel(''), `the lookup panel of ${what}`);
-              // each other field of the state, set alone from this start: both panels stay as they are, but for the error banner
-              for (const field of OTHER_FIELDS) {
-                const error = field === 'error' ? UP_OTHER.error : '';
-                Object.assign(up, start, { status: 'done', [field]: UP_OTHER[field] });
-                assert.equal(below(upkeepHtml()), donePanel({ note, hasNext, error }), `the done panel of ${what}, with ${field} set`);
+        for (const [price, listedPrice] of PRICES[kind]) {
+          for (const listingUrl of ['', NEXT.listingUrl]) {
+            for (const tabId of [null, 4242]) {
+              for (const hasNext of [false, true]) {
+                const priced = kind === 'price' ? `, price ${price} with listed price ${listedPrice}` : '';
+                const what = `${kind} "${note}"${why ? `, reason ${why}` : ''}${priced}, ${listingUrl ? 'with' : 'without'} a saved link, ${tabId ? 'with' : 'without'} its listing tab, ${hasNext ? 'with' : 'without'} another To do item after it`;
+                const start = { ...UP_START, kind, why, note, listingUrl, tabId, hasNext, price, listedPrice };
+                Object.assign(up, start, { status: 'done' });
+                assert.equal(below(upkeepHtml()), donePanel({ note, hasNext, error: '' }), `the done panel of ${what}`);
                 Object.assign(up, { status: 'finding' });
-                assert.equal(below(upkeepHtml()), lookupPanel(error), `the lookup panel of ${what}, with ${field} set`);
+                assert.equal(below(upkeepHtml()), lookupPanel(''), `the lookup panel of ${what}`);
+                // each other field of the state, set alone from this start: both panels stay as they are, but for the error banner
+                for (const field of OTHER_FIELDS) {
+                  const error = field === 'error' ? UP_OTHER.error : '';
+                  Object.assign(up, start, { status: 'done', [field]: UP_OTHER[field] });
+                  assert.equal(below(upkeepHtml()), donePanel({ note, hasNext, error }), `the done panel of ${what}, with ${field} set`);
+                  Object.assign(up, { status: 'finding' });
+                  assert.equal(below(upkeepHtml()), lookupPanel(error), `the lookup panel of ${what}, with ${field} set`);
+                }
               }
             }
           }

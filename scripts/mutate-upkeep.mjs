@@ -162,6 +162,13 @@ const mutants = [
   findingHint('Mu42-finding-panel-error-step', 'up.error'),
   findingHint('Mu43-finding-panel-listing-id-step', 'up.listingId'),
   findingHint('Mu44-finding-panel-names-step', 'up.names'),
+  // a price rise, and a price update with no listed price: the Next button and both panels (proof 31)
+  { id: 'Mu45-next-hidden-price-rise-step', ...UPKEEP, find: "const next = up.status === 'done' && up.hasNext ? ", replace: "const next = up.status === 'done' && up.hasNext && !(up.kind === 'price' && up.price > up.listedPrice) ? " },
+  { id: 'Mu46-next-hidden-price-unlisted-step', ...UPKEEP, find: "const next = up.status === 'done' && up.hasNext ? ", replace: "const next = up.status === 'done' && up.hasNext && !(up.kind === 'price' && !up.listedPrice) ? " },
+  doneHint('Mu47-done-panel-price-rise-step', "up.kind === 'price' && up.price > up.listedPrice"),
+  doneHint('Mu48-done-panel-price-unlisted-step', "up.kind === 'price' && !up.listedPrice"),
+  findingHint('Mu49-finding-panel-price-rise-step', "up.kind === 'price' && up.price > up.listedPrice"),
+  findingHint('Mu50-finding-panel-price-unlisted-step', "up.kind === 'price' && !up.listedPrice"),
 ];
 
 function run(dir, test) {
