@@ -893,6 +893,28 @@ test('HANDOFF.md 5.1 names every settings key and the profile rule, and 5.7 list
   assert.deepEqual(heading[1].split(',').map((s) => s.trim()), steps, 'HANDOFF.md 5.7 step list differs from src/wizardSteps.js wizardSteps(true)');
 });
 
+test('HANDOFF.md section 0 repeats each rule of section A word for word, so a session that reads section 0 first sees every rule (proof 30)', () => {
+  const handoff = read('../HANDOFF.md');
+  const zero = handoff.indexOf('### 0. Latest state');
+  const a = handoff.indexOf('### A. The rules that never change');
+  const b = handoff.indexOf('### B. Where things stand');
+  assert.ok(zero !== -1 && zero < a && a < b, 'HANDOFF.md START HERE has section 0, then section A, then section B');
+  const rules = handoff.slice(a, b).split('\n').filter((line) => line.startsWith('- ')).map((line) => line.slice(2));
+  assert.ok(rules.length > 0, 'HANDOFF.md section A lists its rules as bullets');
+  const latest = handoff.slice(zero, a);
+  for (const rule of rules) assert.ok(latest.includes(rule), `section 0 does not repeat this rule of section A word for word: ${rule.slice(0, 80)}`);
+});
+
+test('HANDOFF.md START HERE gives the unit-test count that README gives (proof 30)', () => {
+  const readme = read('../README.md').match(/^npm test\s+# (\d+) unit tests/m);
+  assert.ok(readme, 'README.md gives the unit-test count on its npm test line');
+  const handoff = read('../HANDOFF.md');
+  const startHere = handoff.slice(handoff.indexOf('## START HERE'), handoff.indexOf('## 0. Where things stand in five lines'));
+  const line = startHere.match(/^- `npm test`:.*?(\d+) pass on round 13/m);
+  assert.ok(line, 'HANDOFF.md START HERE gives the npm test count for round 13');
+  assert.equal(Number(line[1]), Number(readme[1]), 'HANDOFF.md START HERE and README.md give different unit-test counts');
+});
+
 // Round J's photo permission: Chrome keeps a grant, and the side panel keeps a
 // refusal only in memory, so a "no" is asked again once the panel reopens.
 // The CHANGELOG entry sits under "## Unreleased" until a release renames that
