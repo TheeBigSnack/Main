@@ -617,6 +617,20 @@ const NEXT = { origin: 'https://www.example-motors.test', vin: 'BBB', kind: 'tak
 const DONE_CAR = { active: true, origin: 'https://www.example-motors.test', vin: 'AAA', kind: 'takeDown', why: 'gone', status: 'done', note: 'Marked done.', name: 'Car A', listingUrl: '', listedPrice: null, hasNext: false, error: '' };
 // the panel under the car's name and VIN: the part a whole-panel pin compares
 const below = (html) => html.slice(html.indexOf('</section>'));
+// the whole part under a finished item's name and VIN, as upkeepHtml draws it: the optional error banner, the done banner and
+// its note, Open next To do item when another item follows, Close, and the footer; and a lookup for the next item (proof 29, 30)
+const FOOTER = '    <p class="hint">Lot Current fills in the price and reads the page; you click Edit, Update, Mark as sold or Delete. It never clicks those for you.</p>';
+const NEXT_ACTIONS = '    <div class="actions"><button type="button" class="primary" id="upkeepNext">Open next To do item</button><button type="button" class="plain" id="upkeepClose">Close</button></div>';
+const CLOSE_ACTIONS = '    <div class="actions"><button type="button" class="primary" id="upkeepClose">Close</button></div>';
+const errorBanner = (error) => (error ? `<div class="banner bad">${error}</div>` : '');
+const donePanel = ({ note, hasNext, error }) => ['</section>', `    ${errorBanner(error)}<div class="banner good" id="upkeepDone">Done. ${note}</div><p class="hint" id="upkeepNote">${note}</p>`, hasNext ? NEXT_ACTIONS : CLOSE_ACTIONS, FOOTER].join('\n');
+const lookupPanel = (error) => ['</section>', `    ${errorBanner(error)}<p class="hint" id="upkeepFinding">Finding the next To do item…</p>`, CLOSE_ACTIONS, FOOTER].join('\n');
+// every field of the upkeep state (upkeep.js `up`): where the table starts, and a value of its own for each field the table
+// does not loop over. Each such value is set alone and must leave both panels as they are, but for the error banner.
+const UP_START = { active: true, origin: 'https://www.example-motors.test', vin: 'AAA', kind: 'takeDown', price: null, listingUrl: '', name: 'Car A', listedPrice: null, why: 'gone', listingId: '', tabId: null, status: 'done', scanPrice: null, basis: null, note: 'Marked done.', filledShown: '', seen: null, error: '', fills: 0, stuck: false, boxShows: '', names: null, baseline: null, offTarget: false, hasNext: false };
+const UP_OTHER = { active: false, origin: 'https://other.example.test', vin: 'CCC', price: 18500, name: 'Car C', listedPrice: 21000, listingId: '333', scanPrice: 17000, basis: 'Website price with dealer fees', filledShown: '18,500', seen: { url: 'https://www.facebook.com/marketplace/item/333/', sold: false, unavailable: false }, error: 'The listing could not be read.', fills: 2, stuck: true, boxShows: '$21,000', names: { CCC: 'Car C' }, baseline: { url: 'https://www.facebook.com/marketplace/item/333/', sold: false, unavailable: false }, offTarget: true };
+const LOOPED = ['kind', 'why', 'note', 'listingUrl', 'tabId', 'hasNext', 'status'];
+const OTHER_FIELDS = Object.keys(UP_START).filter((key) => !LOOPED.includes(key));
 
 test('the Open next To do item button is drawn only when the item is done and another one follows', () => {
   Object.assign(up, { ...DONE_CAR, hasNext: true });
@@ -657,7 +671,7 @@ test('the Open next To do item button is drawn only when the item is done and an
   }
 });
 
-test('a finished To do item draws its done panel and its lookup panel whole, for every kind, note, reason, saved link, listing tab and next item (proof 29)', () => {
+test('a finished To do item draws its done panel and its lookup panel whole, for every kind, note, reason, saved link, listing tab and next item, and with each other field of the upkeep state set (proof 29, 30)', () => {
   // a take-down, or a price update with the note its done banner gave; a price update's note can also say the listing now shows its price
   const NOTES = [
     ['takeDown', 'Marked done.'],
@@ -666,8 +680,7 @@ test('a finished To do item draws its done panel and its lookup panel whole, for
     ['price', 'The listing shows it as sold or removed.'],
     ['price', 'The listing now shows $19,000.'],
   ];
-  const FOOTER = '    <p class="hint">Lot Current fills in the price and reads the page; you click Edit, Update, Mark as sold or Delete. It never clicks those for you.</p>';
-  const LOOKUP = ['</section>', '    <p class="hint" id="upkeepFinding">Finding the next To do item…</p>', '    <div class="actions"><button type="button" class="primary" id="upkeepClose">Close</button></div>', FOOTER].join('\n');
+  const saved = { ...up }; // the table leaves the state as it found it
   try {
     for (const [kind, note] of NOTES) {
       // a take-down has a reason, gone or not-pre-owned; a price update has none
@@ -676,17 +689,19 @@ test('a finished To do item draws its done panel and its lookup panel whole, for
           for (const tabId of [null, 4242]) {
             for (const hasNext of [false, true]) {
               const what = `${kind} "${note}"${why ? `, reason ${why}` : ''}, ${listingUrl ? 'with' : 'without'} a saved link, ${tabId ? 'with' : 'without'} its listing tab, ${hasNext ? 'with' : 'without'} another To do item after it`;
-              Object.assign(up, { ...DONE_CAR, kind, why, price: kind === 'price' ? 19000 : null, listedPrice: kind === 'price' ? 20000 : null, note, listingUrl, tabId, hasNext });
-              assert.equal(below(upkeepHtml()), [
-                '</section>',
-                `    <div class="banner good" id="upkeepDone">Done. ${note}</div><p class="hint" id="upkeepNote">${note}</p>`,
-                hasNext
-                  ? '    <div class="actions"><button type="button" class="primary" id="upkeepNext">Open next To do item</button><button type="button" class="plain" id="upkeepClose">Close</button></div>'
-                  : '    <div class="actions"><button type="button" class="primary" id="upkeepClose">Close</button></div>',
-                FOOTER,
-              ].join('\n'), `the done panel of ${what}`);
+              const start = { ...UP_START, kind, why, note, listingUrl, tabId, hasNext, price: kind === 'price' ? 19000 : null, listedPrice: kind === 'price' ? 20000 : null };
+              Object.assign(up, start, { status: 'done' });
+              assert.equal(below(upkeepHtml()), donePanel({ note, hasNext, error: '' }), `the done panel of ${what}`);
               Object.assign(up, { status: 'finding' });
-              assert.equal(below(upkeepHtml()), LOOKUP, `the lookup panel of ${what}`);
+              assert.equal(below(upkeepHtml()), lookupPanel(''), `the lookup panel of ${what}`);
+              // each other field of the state, set alone from this start: both panels stay as they are, but for the error banner
+              for (const field of OTHER_FIELDS) {
+                const error = field === 'error' ? UP_OTHER.error : '';
+                Object.assign(up, start, { status: 'done', [field]: UP_OTHER[field] });
+                assert.equal(below(upkeepHtml()), donePanel({ note, hasNext, error }), `the done panel of ${what}, with ${field} set`);
+                Object.assign(up, { status: 'finding' });
+                assert.equal(below(upkeepHtml()), lookupPanel(error), `the lookup panel of ${what}, with ${field} set`);
+              }
             }
           }
         }
@@ -694,7 +709,14 @@ test('a finished To do item draws its done panel and its lookup panel whole, for
     }
   } finally {
     endUpkeep();
+    Object.assign(up, saved);
   }
+});
+
+test('the table starts every field of the upkeep state, and gives each field it does not loop over a value of its own (proof 30)', () => {
+  assert.deepEqual(Object.keys(up).sort(), Object.keys(UP_START).sort(), 'UP_START names every field of the upkeep state');
+  assert.deepEqual(Object.keys(UP_OTHER).sort(), [...OTHER_FIELDS].sort(), 'UP_OTHER gives a value to each field the table does not loop over');
+  for (const field of OTHER_FIELDS) assert.notDeepEqual(UP_OTHER[field], UP_START[field], `${field} is set to a value other than its start value`);
 });
 
 test('Open next To do item asks for the next item once, and starts it: its listing opens, and nothing is clicked', async () => {
@@ -839,7 +861,7 @@ test('a price read still in flight when I updated it does not reopen the done it
     assert.equal(await handleUpkeepClick('upkeepDoneBtn', rig.ctx), true);
     answerList();
     await rig.flush();
-    assert.match(rig.drawn.at(-1), /<div class="banner good" id="upkeepDone">Done\. Marked done\.<\/div>/, 'the posted list answering after I updated it leaves the done banner and its note');
+    assert.equal(below(rig.drawn.at(-1)), donePanel({ note: 'Marked done.', hasNext: false, error: '' }), 'the posted list answering after I updated it leaves the done panel whole, with its note');
   } finally {
     endRig();
   }
@@ -888,7 +910,7 @@ test('a price read still in flight while the next To do item is looked for does 
     await rig.flush();
     answer(null);
     assert.equal(await lookup, true);
-    assert.match(rig.drawn.at(-1), /<div class="banner good" id="upkeepDone">Done\. Marked done\.<\/div>/, 'the posted list answering during the lookup leaves the done banner its note');
+    assert.equal(below(rig.drawn.at(-1)), donePanel({ note: 'Marked done.', hasNext: false, error: '' }), 'the posted list answering during the lookup leaves the done panel whole, with its note');
   } finally {
     endRig();
   }
@@ -1084,7 +1106,7 @@ test('finishing an item offers Open next To do item only when another item follo
       assert.equal(up.status, 'done');
       assert.equal(up.hasNext, offered, `another item follows: ${offered}`);
       assert.match(upkeepHtml(), /id="upkeepDone"/, 'the done banner shows');
-      assert.match(rig.drawn.at(-1), /<div class="banner good" id="upkeepDone">Done\. Marked done\.<\/div>/, 'it is the last panel drawn');
+      assert.equal(below(rig.drawn.at(-1)), donePanel({ note: 'Marked done.', hasNext: offered, error: '' }), 'it is the last panel drawn, whole');
       assert.equal(/id="upkeepNext"/.test(upkeepHtml()), offered, `button drawn: ${offered}`);
       assert.equal(/id="upkeepNext"/.test(rig.drawn.at(-1)), offered, `and in the last panel drawn: ${offered}`);
     } finally {
@@ -2201,7 +2223,7 @@ test('a listing read that fails while the next To do item is looked for, with th
     answerLookup(null); // no next item after all
     assert.equal(await lookup, true);
     assert.deepEqual([up.status, up.hasNext, up.note, up.offTarget], ['done', false, 'Marked done.', false], 'the finished item keeps its note and is not marked off its listing');
-    assert.match(rig.drawn.at(-1), /<div class="banner good" id="upkeepDone">Done\. Marked done\.<\/div>/, 'the done banner is drawn as it was');
+    assert.equal(below(rig.drawn.at(-1)), donePanel({ note: 'Marked done.', hasNext: false, error: '' }), 'the done panel is drawn as it was, whole');
   } finally {
     endRig();
     await rig.started;

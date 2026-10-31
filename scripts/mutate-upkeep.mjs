@@ -26,6 +26,12 @@ const RESCAN = { file: 'extension/src/rescan.js', test: 'test/rescan.test.js' };
 const SIDE = { file: 'extension/sidepanel.js', test: 'test/panelFlow.test.js' };
 const TEMPLATE = { file: 'extension/src/rewriteTemplate.js', test: 'test/panelFlow.test.js' };
 
+// A hint ahead of a finished To do item's done banner, or ahead of its Finding line, drawn while one condition on the upkeep
+// state holds. Each condition reads one field of `up` that no whole-panel pin varied before proof 30, for a real price update
+// or otherwise; the pins now vary every field one at a time (test/upkeep.test.js).
+const doneHint = (id, cond) => ({ id, ...UPKEEP, find: "else if (up.status === 'done') body = `<div class=\"banner good\" id=\"upkeepDone\">Done. ${esc(up.note)}</div>`;", replace: `else if (up.status === 'done') body = \`\${${cond} ? '<p class="hint">Now click <b>Update</b> on Facebook.</p>' : ''}<div class="banner good" id="upkeepDone">Done. \${esc(up.note)}</div>\`;` });
+const findingHint = (id, cond) => ({ id, ...UPKEEP, find: "else if (up.status === 'finding') body = '<p class=\"hint\" id=\"upkeepFinding\">Finding the next To do item…</p>';", replace: `else if (up.status === 'finding') body = \`\${${cond} ? '<p class="hint">Now click <b>Update</b> on Facebook.</p>' : ''}<p class="hint" id="upkeepFinding">Finding the next To do item…</p>\`;` });
+
 const mutants = [
   { id: 'base', ...UPKEEP, find: null },
   { id: 'base-rescan', ...RESCAN, find: null },
@@ -129,6 +135,33 @@ const mutants = [
   { id: 'Mu18-finding-tab-step', ...UPKEEP, find: "else if (up.status === 'finding') body = '<p class=\"hint\" id=\"upkeepFinding\">Finding the next To do item…</p>';", replace: "else if (up.status === 'finding') body = `${up.tabId ? '<p class=\"hint\">Now click <b>Mark as sold</b> on Facebook.</p>' : ''}<p class=\"hint\" id=\"upkeepFinding\">Finding the next To do item…</p>`;" },
   // a Mark as sold step ahead of the banner of a car marked done by hand that has a saved listing link (proof 29)
   { id: 'Mu19-done-panel-link-marked-step', ...UPKEEP, find: 'else if (up.status === \'done\') body = `<div class="banner good" id="upkeepDone">Done. ${esc(up.note)}</div>`;', replace: "else if (up.status === 'done') body = `${up.listingUrl && up.note === 'Marked done.' ? '<p class=\"hint\">Now click <b>Mark as sold</b> on Facebook.</p>' : ''}<div class=\"banner good\" id=\"upkeepDone\">Done. ${esc(up.note)}</div>`;" },
+  // a hint ahead of a finished item's done banner, on one field of the upkeep state at a time (proof 30)
+  doneHint('Mu20-done-panel-basis-step', "up.kind === 'price' && up.basis"),
+  doneHint('Mu21-done-panel-scan-price-step', 'up.scanPrice'),
+  doneHint('Mu22-done-panel-filled-shown-step', 'up.filledShown'),
+  doneHint('Mu23-done-panel-fills-step', 'up.fills > 0'),
+  doneHint('Mu24-done-panel-stuck-step', 'up.stuck'),
+  doneHint('Mu25-done-panel-off-target-step', 'up.offTarget'),
+  doneHint('Mu26-done-panel-seen-step', 'up.seen'),
+  doneHint('Mu27-done-panel-baseline-step', 'up.baseline'),
+  doneHint('Mu28-done-panel-box-shows-step', 'up.boxShows'),
+  doneHint('Mu29-done-panel-error-step', 'up.error'),
+  doneHint('Mu30-done-panel-listing-id-step', 'up.listingId'),
+  doneHint('Mu31-done-panel-names-step', 'up.names'),
+  doneHint('Mu32-done-panel-inactive-step', '!up.active'),
+  // the same, ahead of the Finding line while the next To do item is looked for (proof 30)
+  findingHint('Mu33-finding-panel-basis-step', "up.kind === 'price' && up.basis"),
+  findingHint('Mu34-finding-panel-scan-price-step', 'up.scanPrice'),
+  findingHint('Mu35-finding-panel-filled-shown-step', 'up.filledShown'),
+  findingHint('Mu36-finding-panel-fills-step', 'up.fills > 0'),
+  findingHint('Mu37-finding-panel-stuck-step', 'up.stuck'),
+  findingHint('Mu38-finding-panel-off-target-step', 'up.offTarget'),
+  findingHint('Mu39-finding-panel-seen-step', 'up.seen'),
+  findingHint('Mu40-finding-panel-baseline-step', 'up.baseline'),
+  findingHint('Mu41-finding-panel-box-shows-step', 'up.boxShows'),
+  findingHint('Mu42-finding-panel-error-step', 'up.error'),
+  findingHint('Mu43-finding-panel-listing-id-step', 'up.listingId'),
+  findingHint('Mu44-finding-panel-names-step', 'up.names'),
 ];
 
 function run(dir, test) {
