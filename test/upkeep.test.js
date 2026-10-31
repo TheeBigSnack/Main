@@ -615,6 +615,8 @@ test('an open-failed listing with no saved link says to open it from Your listin
 const noop = () => {};
 const NEXT = { origin: 'https://www.example-motors.test', vin: 'BBB', kind: 'takeDown', why: 'gone', price: null, listingUrl: 'https://www.facebook.com/marketplace/item/222/', name: 'Car B', listedPrice: 21000, dealerTabId: null, windowId: null, at: 1 };
 const DONE_CAR = { active: true, origin: 'https://www.example-motors.test', vin: 'AAA', kind: 'takeDown', why: 'gone', status: 'done', note: 'Marked done.', name: 'Car A', listingUrl: '', listedPrice: null, hasNext: false, error: '' };
+// the panel under the car's name and VIN: the part a whole-panel pin compares
+const below = (html) => html.slice(html.indexOf('</section>'));
 
 test('the Open next To do item button is drawn only when the item is done and another one follows', () => {
   Object.assign(up, { ...DONE_CAR, hasNext: true });
@@ -669,7 +671,6 @@ test('a second Open next To do item click while the next item is being found sta
     assert.match(lookupDrawn, /id="upkeepClose">Close<\/button>/, 'Close is drawn in that render');
     assert.doesNotMatch(lookupDrawn, /id="upkeepNext"/, 'the Open next To do item button is not drawn in that render');
     assert.match(drawn.at(-1), /<p class="hint" id="upkeepFinding">Finding the next To do item…<\/p>/, 'the last render while the lookup is held is still the lookup line');
-    const below = (html) => html.slice(html.indexOf('</section>')); // the panel under the car's name and VIN
     const second = handleUpkeepClick('upkeepNext', ctx);
     assert.equal(asked, 1, 'the second click asks for nothing');
     assert.equal(drawn.includes('the To do list'), false, 'nor does it, or the lookup, take the panel back to the To do list: the Finding line and Close stay drawn');
@@ -893,6 +894,13 @@ test('when no To do item is left, the done banner stays and no Next button is dr
     assert.match(html, /id="upkeepClose"/);
     assert.match(drawn.at(-1), /<div class="banner good" id="upkeepDone">Done\. Marked done\.<\/div>/, 'the panel is drawn again with the done banner, its note kept');
     assert.doesNotMatch(drawn.at(-1), /id="upkeepNext"/, 'and that last panel offers no Open next To do item');
+    // the whole panel under the car's name: a take-down marked done by hand has its banner, its note, Close and the footer, and no step of its own
+    assert.equal(below(drawn.at(-1)), [
+      '</section>',
+      '    <div class="banner good" id="upkeepDone">Done. Marked done.</div><p class="hint" id="upkeepNote">Marked done.</p>',
+      '    <div class="actions"><button type="button" class="primary" id="upkeepClose">Close</button></div>',
+      '    <p class="hint">Lot Current fills in the price and reads the page; you click Edit, Update, Mark as sold or Delete. It never clicks those for you.</p>',
+    ].join('\n'), 'a take-down marked done by hand: the done panel has no line of its own');
     assert.equal(drawn.includes('the To do list'), false, 'and the panel never went back to the To do list on the way');
     // a note Lot Current saw on the listing is kept the same way, not put back as Marked done.
     Object.assign(up, { ...DONE_CAR, note: 'The listing shows it as sold or removed.', hasNext: true });

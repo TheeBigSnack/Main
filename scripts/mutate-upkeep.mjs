@@ -1,7 +1,8 @@
 // Mutation probe for the To do upkeep guards (extension/upkeep.js), the To do list reader (extension/src/rescan.js) and the
-// side panel's request for the next To do item (extension/sidepanel.js, nextUpkeepRequest), its Settings sentences for an edited
-// or Claude-written description (extension/sidepanel.js), the description's stop wording (extension/src/rewriteTemplate.js) and the
-// filled-price banner (extension/upkeep.js).
+// side panel's request for the next To do item (extension/sidepanel.js, nextUpkeepRequest), its checks line and Settings
+// sentences for each description source, an edited or Claude-written one included (extension/sidepanel.js), the description's
+// stop wording (extension/src/rewriteTemplate.js), and the done panel of a finished To do item (extension/upkeep.js): its
+// filled-price banner and the lines drawn around the banner after a take-down or a price update.
 //
 // Each mutant is one exact FIND/REPLACE in a fresh copy of the repo, and the test file that pins it runs in that copy. A
 // mutant is killed when that run exits non-zero and its summary reports no cancelled test. Any other result is a survivor:
@@ -83,14 +84,20 @@ const mutants = [
   { id: 'W4-status-mixed-sentence', ...SIDE, find: 'that must pass before the form is filled: ${why}', replace: "that must pass before the form is filled: ${(stops.length > 1 && ['edited', 'claude'].includes(state.descriptionSource)) ? 'After you save Settings, click Reset to template to write the description again. ' : ''}${why}" },
   { id: 'W5-checks-mixed-sentence', ...SIDE, find: 'Fix before the form can be filled:${list(stops)}', replace: "Fix before the form can be filled:${list(stops)}${(stops.length > 1 && ['edited', 'claude'].includes(source)) ? '<p>After you save Settings, click Reset to template to write the description again.</p>' : ''}" },
   { id: 'W6-stale-mixed-sentence', ...SIDE, find: '    : ` The description no longer matches it: ${why}', replace: "    : ` ${(stops.length > 1 && ['edited', 'claude'].includes(state.descriptionSource)) ? 'After you save Settings, click Reset to template to write the description again. ' : ''}The description no longer matches it: ${why}" },
-  // a sentence ahead of the reasons when a stop says "Says" (proof 25): the end-anchored wording pins passed it, the whole-line pins catch it
+  // a sentence ahead of the reasons when a stop says "Says" (proof 25): the pins as they stand kill it, so it checks the sentence, not how a pin is anchored
   { id: 'W7-says-front-sentence', ...SIDE, find: 'that must pass before the form is filled: ${why}', replace: "that must pass before the form is filled: ${stops.some((p) => /^Says/.test(p.text)) ? 'After you save Settings, click Reset to template. ' : ''}${why}" },
-  // a paragraph after the checks line's list when a stop says "Doesn't" (proof 25): the end-anchored checks pins passed it
+  // a paragraph after the checks line's list when a stop says "Doesn't" (proof 25): the pins as they stand kill it, so it checks the sentence, not how a pin is anchored
   { id: 'W8-checks-doesnt-paragraph', ...SIDE, find: 'Fix before the form can be filled:${list(stops)}', replace: "Fix before the form can be filled:${list(stops)}${stops.some((p) => /^Doesn/.test(p.text)) ? '<p>Change the dealership name in Settings.</p>' : ''}" },
   { id: 'Mw1-checks-warn-prefix', ...SIDE, find: "${warns.length ? `Worth fixing (the form can still be filled):${list(warns)}` : ''}", replace: "${warns.length ? `${stops.length ? '' : '<p>After you save Settings, click Reset to template.</p>'}Worth fixing (the form can still be filled):${list(warns)}` : ''}" },
   { id: 'Mw2-checks-stop-after-warns', ...SIDE, find: "${warns.length ? `Worth fixing (the form can still be filled):${list(warns)}` : ''}", replace: "${warns.length ? `Worth fixing (the form can still be filled):${list(warns)}${stops.length && !fix ? '<p>After you save Settings, click Reset to template.</p>' : ''}` : ''}" },
   { id: 'Mu1-done-panel-step', ...UPKEEP, find: 'else if (up.status === \'done\') body = `<div class="banner good" id="upkeepDone">Done. ${esc(up.note)}</div>`;', replace: 'else if (up.status === \'done\') body = `<p class="hint">Now click <b>Delete</b> on Facebook to finish.</p><div class="banner good" id="upkeepDone">Done. ${esc(up.note)}</div>`;' },
   { id: 'SP6-request-listed-from', ...SIDE, find: 'listedPrice: p.price || null,', replace: "listedPrice: (kind === 'price' && item.from) || p.price || null," },
+  // a take-down's done panel draws a step the price update's panel does not (proof 27): only the price update's panel is pinned whole
+  { id: 'Mu2-done-panel-takedown-step', ...UPKEEP, find: 'else if (up.status === \'done\') body = `<div class="banner good" id="upkeepDone">Done. ${esc(up.note)}</div>`;', replace: "else if (up.status === 'done') body = `${up.kind === 'takeDown' ? '<p class=\"hint\">Now click <b>Delete</b> on Facebook to finish.</p>' : ''}<div class=\"banner good\" id=\"upkeepDone\">Done. ${esc(up.note)}</div>`;" },
+  // a Mark as sold step after the done banner of a car marked done by hand (proof 27)
+  { id: 'Mu3-done-panel-marked-step', ...UPKEEP, find: 'else if (up.status === \'done\') body = `<div class="banner good" id="upkeepDone">Done. ${esc(up.note)}</div>`;', replace: "else if (up.status === 'done') body = `<div class=\"banner good\" id=\"upkeepDone\">Done. ${esc(up.note)}</div>${up.note === 'Marked done.' ? '<p class=\"hint\">Now click <b>Mark as sold</b> on Facebook.</p>' : ''}`;" },
+  // an extra Settings sentence ahead of the warnings, for an edited or Claude-written description only (proof 27)
+  { id: 'Mw3-checks-warn-edited-sentence', ...SIDE, find: "${warns.length ? `Worth fixing (the form can still be filled):${list(warns)}` : ''}", replace: "${warns.length ? `${fix && source !== 'template' ? '<p>Change it in Settings.</p>' : ''}Worth fixing (the form can still be filled):${list(warns)}` : ''}" },
 ];
 
 function run(dir, test) {
