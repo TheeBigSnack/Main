@@ -657,6 +657,41 @@ test('the Open next To do item button is drawn only when the item is done and an
   }
 });
 
+test('a finished To do item draws its done panel and its lookup panel whole, for every kind, note, saved link and next item (proof 29)', () => {
+  // a take-down, or a price update with the note its done banner gave; a price update's note can also say the listing now shows its price
+  const NOTES = [
+    ['takeDown', 'Marked done.'],
+    ['takeDown', 'The listing shows it as sold or removed.'],
+    ['price', 'Marked done.'],
+    ['price', 'The listing shows it as sold or removed.'],
+    ['price', 'The listing now shows $19,000.'],
+  ];
+  const FOOTER = '    <p class="hint">Lot Current fills in the price and reads the page; you click Edit, Update, Mark as sold or Delete. It never clicks those for you.</p>';
+  const LOOKUP = ['</section>', '    <p class="hint" id="upkeepFinding">Finding the next To do item…</p>', '    <div class="actions"><button type="button" class="primary" id="upkeepClose">Close</button></div>', FOOTER].join('\n');
+  try {
+    for (const [kind, note] of NOTES) {
+      for (const listingUrl of ['', NEXT.listingUrl]) {
+        for (const hasNext of [false, true]) {
+          const what = `${kind} "${note}", ${listingUrl ? 'with' : 'without'} a saved link, ${hasNext ? 'with' : 'without'} another To do item after it`;
+          Object.assign(up, { ...DONE_CAR, kind, why: kind === 'price' ? '' : 'gone', price: kind === 'price' ? 19000 : null, listedPrice: kind === 'price' ? 20000 : null, note, listingUrl, hasNext });
+          assert.equal(below(upkeepHtml()), [
+            '</section>',
+            `    <div class="banner good" id="upkeepDone">Done. ${note}</div><p class="hint" id="upkeepNote">${note}</p>`,
+            hasNext
+              ? '    <div class="actions"><button type="button" class="primary" id="upkeepNext">Open next To do item</button><button type="button" class="plain" id="upkeepClose">Close</button></div>'
+              : '    <div class="actions"><button type="button" class="primary" id="upkeepClose">Close</button></div>',
+            FOOTER,
+          ].join('\n'), `the done panel of ${what}`);
+          Object.assign(up, { status: 'finding' });
+          assert.equal(below(upkeepHtml()), LOOKUP, `the lookup panel of ${what}`);
+        }
+      }
+    }
+  } finally {
+    endUpkeep();
+  }
+});
+
 test('Open next To do item asks for the next item once, and starts it: its listing opens, and nothing is clicked', async () => {
   const opened = [];
   let asked = 0;
