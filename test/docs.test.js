@@ -912,7 +912,7 @@ test('HANDOFF.md START HERE names no pilot value in any case, so the first rules
   const start = handoff.indexOf('## START HERE');
   const end = handoff.indexOf('## 0. Where things stand in five lines');
   assert.ok(start !== -1 && start < end, 'HANDOFF.md has START HERE before its section 0');
-  assert.doesNotMatch(handoff.slice(start, end), PILOT, 'START HERE names a pilot value; CLAUDE.md allows those only in test fixtures, the pilot record and the product summary');
+  assert.doesNotMatch(handoff.slice(start, end), PILOT, 'START HERE names a pilot value; CLAUDE.md allows those only in test fixtures, worked examples marked as such, the pilot record and the product summary');
 });
 
 test('HANDOFF.md START HERE gives the unit-test count that README gives (proof 30)', () => {
