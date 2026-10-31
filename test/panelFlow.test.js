@@ -2914,14 +2914,10 @@ test('the checks line says which problems stop the form and which only warn', ()
   const stop = { code: 'unknown-number', text: '"12000" isn\'t in the website\'s data for this car' };
   const warn = { code: 'too-short', text: '50 words; needs at least 60' };
   const both = checksHtml({ ok: false, problems: [stop, warn], words: 50 });
-  assert.match(both, /class="checks bad"/);
-  assert.match(both, /Fix before the form can be filled:<ul><li>"12000" isn't in the website's data for this car<\/li><\/ul>/);
-  assert.match(both, /Worth fixing \(the form can still be filled\):<ul><li>50 words; needs at least 60<\/li><\/ul>/);
-  assert.match(both, /^<div class="checks bad" id="checks">Fix before the form can be filled:<ul><li>[^<]+<\/li><\/ul>Worth fixing/, 'the stops first, then the warnings');
+  assert.equal(both, '<div class="checks bad" id="checks">Fix before the form can be filled:<ul><li>"12000" isn\'t in the website\'s data for this car</li></ul>Worth fixing (the form can still be filled):<ul><li>50 words; needs at least 60</li></ul></div>', 'the stops first, then the warnings');
   const warnOnly = checksHtml({ ok: false, problems: [warn], words: 50 });
-  assert.match(warnOnly, /class="checks warn"/);
-  assert.doesNotMatch(warnOnly, /Fix before/);
-  assert.match(checksHtml({ ok: false, problems: [warn, { code: 'all-caps', text: 'Has ALL CAPS shouting' }], words: 50 }), /<ul><li>50 words; needs at least 60<\/li><li>Has ALL CAPS shouting<\/li><\/ul><\/div>$/, 'the warnings in the order the checks give them');
+  assert.equal(warnOnly, '<div class="checks warn" id="checks">Worth fixing (the form can still be filled):<ul><li>50 words; needs at least 60</li></ul></div>', 'a warning alone gives no Fix before the form line');
+  assert.equal(checksHtml({ ok: false, problems: [warn, { code: 'all-caps', text: 'Has ALL CAPS shouting' }], words: 50 }), '<div class="checks warn" id="checks">Worth fixing (the form can still be filled):<ul><li>50 words; needs at least 60</li><li>Has ALL CAPS shouting</li></ul></div>', 'the warnings in the order the checks give them');
   assert.match(checksHtml({ ok: true, problems: [], words: 80 }), /^<div class="checks ok" id="checks">All checks passed: 80 words/);
   // passing says what was checked, no more: the claim checks go by set words
   const passed = checksHtml({ ok: true, problems: [], words: 80 });
@@ -4107,7 +4103,7 @@ test('the Open next To do item request carries the fields of the item it opens, 
     [k.diff]: {
       takenAt: '2026-10-28T09:00:00.000Z',
       takeDown: [{ vin: 'TKD', name: 'Car T from the scan', yours: true, why: 'not-pre-owned', url: 'https://www.example-motors.test/used/car-t/' }],
-      priceUpdates: [{ vin: 'PRC', name: 'Car P from the scan', yours: true, from: 21000, to: 19500, change: -1500, url: 'https://www.example-motors.test/used/car-p/' }],
+      priceUpdates: [{ vin: 'PRC', name: 'Car P from the scan', yours: true, from: 22500, to: 19500, change: -3000, url: 'https://www.example-motors.test/used/car-p/' }], // from is not its posted price (21000): the listed price comes from the posted entry
     },
     [k.posted]: {
       TKD: { price: 18000, postedAt: '2026-10-20T10:00:00.000Z', name: 'Car T', listingUrl: 'https://www.facebook.com/marketplace/item/111/' },

@@ -694,7 +694,14 @@ test('a second Open next To do item click while the next item is being found sta
     assert.equal(below(drawn.at(-1)), below(lookupDrawn), 'the same panel as the take-down\'s lookup: no done banner over the Finding line, and the same Close');
     answer(null);
     assert.equal(await seenLookup, true);
-    assert.match(drawn.at(-1), /<div class="banner good" id="upkeepDone">Done\. The listing now shows \$19,000\.<\/div>/, 'no item came back: the done banner keeps the note Lot Current saw');
+    // the whole panel under the car's name, so a line added between the banner and the buttons is caught too; it locks in the
+    // done note drawn twice (HANDOFF 34.4), so a fix to that changes this pin too
+    assert.equal(below(drawn.at(-1)), [
+      '</section>',
+      '    <div class="banner good" id="upkeepDone">Done. The listing now shows $19,000.</div><p class="hint" id="upkeepNote">The listing now shows $19,000.</p>',
+      '    <div class="actions"><button type="button" class="primary" id="upkeepClose">Close</button></div>',
+      '    <p class="hint">Lot Current fills in the price and reads the page; you click Edit, Update, Mark as sold or Delete. It never clicks those for you.</p>',
+    ].join('\n'), 'no item came back: the done banner keeps the note Lot Current saw');
     // and so does one finished by hand after the Price box kept another price, with its tab moved off the listing: neither
     // the stuck banner nor the done note is drawn over the lookup
     Object.assign(up, { ...DONE_CAR, kind: 'price', why: '', price: 19000, listedPrice: 20000, stuck: true, boxShows: '$20,000', offTarget: true, hasNext: true });

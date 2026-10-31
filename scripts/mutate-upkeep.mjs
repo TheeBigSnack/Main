@@ -87,6 +87,10 @@ const mutants = [
   { id: 'W7-says-front-sentence', ...SIDE, find: 'that must pass before the form is filled: ${why}', replace: "that must pass before the form is filled: ${stops.some((p) => /^Says/.test(p.text)) ? 'After you save Settings, click Reset to template. ' : ''}${why}" },
   // a paragraph after the checks line's list when a stop says "Doesn't" (proof 25): the end-anchored checks pins passed it
   { id: 'W8-checks-doesnt-paragraph', ...SIDE, find: 'Fix before the form can be filled:${list(stops)}', replace: "Fix before the form can be filled:${list(stops)}${stops.some((p) => /^Doesn/.test(p.text)) ? '<p>Change the dealership name in Settings.</p>' : ''}" },
+  { id: 'Mw1-checks-warn-prefix', ...SIDE, find: "${warns.length ? `Worth fixing (the form can still be filled):${list(warns)}` : ''}", replace: "${warns.length ? `${stops.length ? '' : '<p>After you save Settings, click Reset to template.</p>'}Worth fixing (the form can still be filled):${list(warns)}` : ''}" },
+  { id: 'Mw2-checks-stop-after-warns', ...SIDE, find: "${warns.length ? `Worth fixing (the form can still be filled):${list(warns)}` : ''}", replace: "${warns.length ? `Worth fixing (the form can still be filled):${list(warns)}${stops.length && !fix ? '<p>After you save Settings, click Reset to template.</p>' : ''}` : ''}" },
+  { id: 'Mu1-done-panel-step', ...UPKEEP, find: 'else if (up.status === \'done\') body = `<div class="banner good" id="upkeepDone">Done. ${esc(up.note)}</div>`;', replace: 'else if (up.status === \'done\') body = `<p class="hint">Now click <b>Delete</b> on Facebook to finish.</p><div class="banner good" id="upkeepDone">Done. ${esc(up.note)}</div>`;' },
+  { id: 'SP6-request-listed-from', ...SIDE, find: 'listedPrice: p.price || null,', replace: "listedPrice: (kind === 'price' && item.from) || p.price || null," },
 ];
 
 function run(dir, test) {
