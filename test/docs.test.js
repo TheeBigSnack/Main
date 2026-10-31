@@ -37,6 +37,9 @@ import { scanInventory } from '../extension/adapters/inventoryJson.js';
 // A checkout with CRLF line ends (git's autocrlf on Windows) reads the same as
 // an LF one: every line-anchored pattern below is written for \n.
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8').replace(/\r\n?/g, '\n');
+// the pilot dealer's name, its towns, its ZIP and doc fee, and a person's name, in any case: the pilot is a fixture, not a default
+// (test/anyDealer.test.js). The docs and HANDOFF's START HERE are held to it.
+const PILOT = /Waynesburg|Ron Lewis|Cranberry|Pleasant Hills|15370|\$\s?490\b|\bRoger\b|ronlewis/i;
 const DOCS = ['help.md', 'support.md', 'launch-checklist.md', 'next-platform.md'];
 const doc = (name) => read('../docs/' + name);
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -387,7 +390,6 @@ test('help.md says Lot Current never clicks Publish and is not affiliated with M
 
 test('no docs/ file carries a pilot-dealer value or Meta-affiliation wording', () => {
   // the pilot dealer is a fixture, not a default (test/anyDealer.test.js)
-  const PILOT = /Waynesburg|Ron Lewis|Cranberry|Pleasant Hills|15370|\$\s?490\b|\bRoger\b|ronlewis/i;
   for (const name of DOCS) {
     const text = doc(name);
     const hit = text.match(PILOT);
@@ -905,12 +907,12 @@ test('HANDOFF.md section 0 repeats each rule of section A word for word, so a se
   for (const rule of rules) assert.ok(latest.includes(rule), `section 0 does not repeat this rule of section A word for word: ${rule.slice(0, 80)}`);
 });
 
-test('HANDOFF.md START HERE and section A name no pilot dealer or town, so the first rules a session reads name the kind of value and not the value (proof 32)', () => {
+test('HANDOFF.md START HERE names no pilot value in any case, so the first rules a session reads name the kind of value and not the value (proof 32, widened by proof 33)', () => {
   const handoff = read('../HANDOFF.md');
   const start = handoff.indexOf('## START HERE');
-  const b = handoff.indexOf('### B. Where things stand');
-  assert.ok(start !== -1 && start < b, 'HANDOFF.md has START HERE, then section A, then section B');
-  assert.doesNotMatch(handoff.slice(start, b), /Waynesburg|Ron Lewis|Cranberry|Pleasant Hills/, 'START HERE or section A names a pilot dealer or town; CLAUDE.md allows those names only in test fixtures, the pilot record and the product summary');
+  const end = handoff.indexOf('## 0. Where things stand in five lines');
+  assert.ok(start !== -1 && start < end, 'HANDOFF.md has START HERE before its section 0');
+  assert.doesNotMatch(handoff.slice(start, end), PILOT, 'START HERE names a pilot value; CLAUDE.md allows those only in test fixtures, the pilot record and the product summary');
 });
 
 test('HANDOFF.md START HERE gives the unit-test count that README gives (proof 30)', () => {
